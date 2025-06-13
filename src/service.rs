@@ -107,7 +107,9 @@ pub struct GetItemSourceParams {
     pub version: String,
     #[schemars(description = "The numeric ID of the item")]
     pub item_id: u32,
-    #[schemars(description = "Number of context lines to include before and after the item (default: 3)")]
+    #[schemars(
+        description = "Number of context lines to include before and after the item (default: 3)"
+    )]
     pub context_lines: Option<usize>,
 }
 
@@ -164,7 +166,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items.")]
+    #[tool(
+        description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items."
+    )]
     pub async fn search_items(&self, #[tool(aggr)] params: SearchItemsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
@@ -319,7 +323,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Get detailed information about a specific item by ID. Use after search_items_preview to fetch full details including documentation, signatures, fields, methods, etc. The item_id comes from search results. This is the recommended way to get complete information about a specific item.")]
+    #[tool(
+        description = "Get detailed information about a specific item by ID. Use after search_items_preview to fetch full details including documentation, signatures, fields, methods, etc. The item_id comes from search results. This is the recommended way to get complete information about a specific item."
+    )]
     pub async fn get_item_details(&self, #[tool(aggr)] params: GetItemDetailsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
@@ -341,7 +347,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists.")]
+    #[tool(
+        description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists."
+    )]
     pub async fn get_item_docs(&self, #[tool(aggr)] params: GetItemDocsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
@@ -369,7 +377,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "List all locally cached versions of a crate. Use to check what versions are available offline without downloading. Useful before calling other tools to verify if a version needs to be cached first.")]
+    #[tool(
+        description = "List all locally cached versions of a crate. Use to check what versions are available offline without downloading. Useful before calling other tools to verify if a version needs to be cached first."
+    )]
     pub async fn list_crate_versions(
         &self,
         #[tool(param)]
@@ -389,7 +399,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Download and cache a specific crate version for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching.")]
+    #[tool(
+        description = "Download and cache a specific crate version for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
+    )]
     pub async fn cache_crate(&self, #[tool(aggr)] params: CacheCrateParams) -> String {
         let cache = self.cache.lock().await;
         match cache
@@ -409,7 +421,9 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed.")]
+    #[tool(
+        description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
+    )]
     pub async fn remove_crate(
         &self,
         #[tool(param)]
@@ -434,11 +448,13 @@ impl RustDocsService {
         }
     }
 
-    #[tool(description = "Get the source code for a specific item. Returns the actual source code with optional context lines. Use after finding items of interest to view their implementation. The source location is also included in get_item_details responses.")]
+    #[tool(
+        description = "Get the source code for a specific item. Returns the actual source code with optional context lines. Use after finding items of interest to view their implementation. The source location is also included in get_item_details responses."
+    )]
     pub async fn get_item_source(&self, #[tool(aggr)] params: GetItemSourceParams) -> String {
         let cache = self.cache.lock().await;
         let source_base_path = cache.get_source_path(&params.crate_name, &params.version);
-        
+
         match cache
             .ensure_crate_docs(&params.crate_name, &params.version)
             .await
@@ -446,12 +462,13 @@ impl RustDocsService {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
                 let context_lines = params.context_lines.unwrap_or(3);
-                
+
                 match query.get_item_source(params.item_id, &source_base_path, context_lines) {
-                    Ok(source_info) => serde_json::to_string_pretty(&source_info)
-                        .unwrap_or_else(|e| {
+                    Ok(source_info) => {
+                        serde_json::to_string_pretty(&source_info).unwrap_or_else(|e| {
                             format!(r#"{{"error": "Failed to serialize source info: {}"}}"#, e)
-                        }),
+                        })
+                    }
                     Err(e) => format!(r#"{{"error": "Failed to get source: {}"}}"#, e),
                 }
             }

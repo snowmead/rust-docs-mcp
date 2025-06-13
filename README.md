@@ -1,5 +1,7 @@
 # rust-docs-mcp
 
+*Rust is the language of AI*
+
 An MCP (Model Context Protocol) server for querying Rust crate documentation. This server provides tools to search, browse, and retrieve documentation and source code from Rust crates.
 
 ## Features
@@ -12,23 +14,17 @@ An MCP (Model Context Protocol) server for querying Rust crate documentation. Th
 
 ## Data Storage
 
-- Crates are cached in `~/.mcp-rust-docs/cache/`
+- Crates are cached in `~/.rust-docs-mcp/cache/`
 - Each crate version stores:
   - Source code in `source/` directory
   - Rustdoc JSON in `docs.json`
 
-## Source Code Retrieval
-
-The server leverages rustdoc's JSON output which includes source span information:
-- Each documented item includes file path and line/column positions
-- Source code is extracted from the cached crate source files
-- Context lines can be specified to include surrounding code
-
 ## Requirements
 
 - Rust nightly toolchain (for rustdoc JSON generation)
-- Network access to download crates from crates.io
 
-## License
+  ```bash
+  rustup toolchain install nightly
+  ```
 
-MIT
+- Network access to download crates from [crates.io](https://crates.io)

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rustdoc_types::{Crate, Id, Item, ItemEnum};
-use serde::{Deserialize, Serialize};
 use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 /// Query interface for rustdoc JSON data
 #[derive(Debug)]
@@ -122,7 +122,7 @@ impl DocQuery {
         let mut details = DetailedItem {
             info,
             signature: self.get_item_signature(item),
-            generics: None, // Will be populated based on item type
+            generics: None,
             fields: None,
             variants: None,
             methods: None,
@@ -180,7 +180,6 @@ impl DocQuery {
             visibility,
         })
     }
-
 
     /// Get the kind of an item as a string
     fn get_item_kind_string(&self, inner: &ItemEnum) -> String {
@@ -275,8 +274,10 @@ impl DocQuery {
         use rustdoc_types::StructKind;
         match &s.kind {
             StructKind::Unit => vec![],
-            StructKind::Tuple(fields) => {
-                fields.iter().enumerate().filter_map(|(i, field_id)| {
+            StructKind::Tuple(fields) => fields
+                .iter()
+                .enumerate()
+                .filter_map(|(i, field_id)| {
                     if let Some(field_id) = field_id {
                         let item = self.crate_data.index.get(field_id)?;
                         let mut info = self.item_to_info(field_id, item)?;
@@ -294,16 +295,20 @@ impl DocQuery {
                             visibility: "private".to_string(),
                         })
                     }
-                }).collect()
-            }
-            StructKind::Plain { fields, has_stripped_fields } => {
-                let mut field_infos: Vec<ItemInfo> = fields.iter()
+                })
+                .collect(),
+            StructKind::Plain {
+                fields,
+                has_stripped_fields,
+            } => {
+                let mut field_infos: Vec<ItemInfo> = fields
+                    .iter()
                     .filter_map(|field_id| {
                         let item = self.crate_data.index.get(field_id)?;
                         self.item_to_info(field_id, item)
                     })
                     .collect();
-                
+
                 if *has_stripped_fields {
                     field_infos.push(ItemInfo {
                         id: String::new(),
@@ -314,7 +319,7 @@ impl DocQuery {
                         visibility: "private".to_string(),
                     });
                 }
-                
+
                 field_infos
             }
         }
@@ -322,14 +327,15 @@ impl DocQuery {
 
     /// Get enum variants as ItemInfo
     fn get_enum_variants(&self, e: &rustdoc_types::Enum) -> Vec<ItemInfo> {
-        let mut variant_infos: Vec<ItemInfo> = e.variants
+        let mut variant_infos: Vec<ItemInfo> = e
+            .variants
             .iter()
             .filter_map(|variant_id| {
                 let item = self.crate_data.index.get(variant_id)?;
                 self.item_to_info(variant_id, item)
             })
             .collect();
-        
+
         if e.has_stripped_variants {
             variant_infos.push(ItemInfo {
                 id: String::new(),
@@ -340,7 +346,7 @@ impl DocQuery {
                 visibility: "private".to_string(),
             });
         }
-        
+
         variant_infos
     }
 
@@ -379,32 +385,37 @@ impl DocQuery {
     }
 
     /// Get source code for a specific item by ID
-    pub fn get_item_source(&self, item_id: u32, base_path: &std::path::Path, context_lines: usize) -> Result<SourceInfo> {
+    pub fn get_item_source(
+        &self,
+        item_id: u32,
+        base_path: &std::path::Path,
+        context_lines: usize,
+    ) -> Result<SourceInfo> {
         let id = Id(item_id);
         let item = self.crate_data.index.get(&id).context("Item not found")?;
-        
+
         let span = item.span.as_ref().context("Item has no source span")?;
         let source_path = base_path.join(&span.filename);
-        
+
         if !source_path.exists() {
             anyhow::bail!("Source file not found: {}", source_path.display());
         }
-        
+
         let content = std::fs::read_to_string(&source_path)
             .with_context(|| format!("Failed to read source file: {}", source_path.display()))?;
-        
+
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Calculate line range with context
         let start_line = span.begin.0.saturating_sub(1).saturating_sub(context_lines);
         let end_line = std::cmp::min(span.end.0 + context_lines, lines.len());
-        
+
         // Extract the relevant lines
         let code_lines: Vec<String> = lines[start_line..end_line]
             .iter()
             .map(|line| line.to_string())
             .collect();
-        
+
         Ok(SourceInfo {
             location: SourceLocation {
                 filename: span.filename.to_string_lossy().to_string(),

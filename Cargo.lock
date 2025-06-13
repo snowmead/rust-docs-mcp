@@ -759,29 +759,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mcp-rust-docs"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "dirs",
- "flate2",
- "futures",
- "reqwest",
- "rmcp",
- "rmcp-macros",
- "rustdoc-types",
- "schemars",
- "semver",
- "serde",
- "serde_json",
- "tar",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1133,6 +1110,29 @@ dependencies = [
  "quote",
  "serde_json",
  "syn",
+]
+
+[[package]]
+name = "rust-docs-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "dirs",
+ "flate2",
+ "futures",
+ "reqwest",
+ "rmcp",
+ "rmcp-macros",
+ "rustdoc-types",
+ "schemars",
+ "semver",
+ "serde",
+ "serde_json",
+ "tar",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
