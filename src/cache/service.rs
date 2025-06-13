@@ -173,6 +173,9 @@ impl CrateCache {
         // Copy the JSON file to our cache location
         std::fs::copy(&json_file, &docs_path).context("Failed to copy documentation to cache")?;
 
+        // Generate and save dependency information
+        self.generate_dependencies(name, version).await?;
+
         // Update metadata to reflect that docs are now generated
         self.storage.save_metadata(name, version)?;
 
@@ -236,6 +239,13 @@ impl CrateCache {
         Ok(versions)
     }
 
+    /// Get all cached crates with their metadata
+    pub async fn list_all_cached_crates(
+        &self,
+    ) -> Result<Vec<crate::cache::storage::CrateMetadata>> {
+        self.storage.list_cached_crates()
+    }
+
     /// Remove a cached crate version
     pub async fn remove_crate(&self, name: &str, version: &str) -> Result<()> {
         self.storage.remove_crate(name, version)
@@ -244,5 +254,50 @@ impl CrateCache {
     /// Get the source path for a crate
     pub fn get_source_path(&self, name: &str, version: &str) -> PathBuf {
         self.storage.source_path(name, version)
+    }
+
+    /// Generate and save dependency information for a crate
+    async fn generate_dependencies(&self, name: &str, version: &str) -> Result<()> {
+        let source_path = self.storage.source_path(name, version);
+        let deps_path = self.storage.dependencies_path(name, version);
+
+        tracing::info!("Generating dependency information for {}-{}", name, version);
+
+        // Run cargo metadata to get dependency information
+        let output = Command::new("cargo")
+            .args(&["metadata", "--format-version", "1"])
+            .current_dir(&source_path)
+            .output()
+            .context("Failed to run cargo metadata")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("Failed to generate dependency metadata: {}", stderr);
+        }
+
+        // Save the raw metadata output
+        tokio::fs::write(&deps_path, &output.stdout)
+            .await
+            .context("Failed to write dependencies to cache")?;
+
+        Ok(())
+    }
+
+    /// Load dependency information from cache
+    pub async fn load_dependencies(&self, name: &str, version: &str) -> Result<serde_json::Value> {
+        let deps_path = self.storage.dependencies_path(name, version);
+
+        if !deps_path.exists() {
+            bail!("Dependencies not found for {}-{}", name, version);
+        }
+
+        let json_string = tokio::fs::read_to_string(&deps_path)
+            .await
+            .context("Failed to read dependencies file")?;
+
+        let deps: serde_json::Value =
+            serde_json::from_str(&json_string).context("Failed to parse dependencies JSON")?;
+
+        Ok(deps)
     }
 }

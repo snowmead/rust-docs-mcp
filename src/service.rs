@@ -11,10 +11,32 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
+use crate::deps::process_cargo_metadata;
 use crate::docs::DocQuery;
 
 /// Maximum size for response in bytes (roughly 25k tokens * 4 bytes/token)
 const MAX_RESPONSE_SIZE: usize = 100_000;
+
+/// Format bytes into human-readable string
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    if bytes == 0 {
+        return "0 B".to_string();
+    }
+
+    let base = 1024_f64;
+    let exponent = (bytes as f64).ln() / base.ln();
+    let exponent = exponent.floor() as usize;
+
+    let unit = UNITS.get(exponent).unwrap_or(&"TB");
+    let size = bytes as f64 / base.powi(exponent as i32);
+
+    if size.fract() == 0.0 {
+        format!("{:.0} {}", size, unit)
+    } else {
+        format!("{:.2} {}", size, unit)
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
@@ -97,6 +119,20 @@ pub struct CacheCrateParams {
     pub crate_name: String,
     #[schemars(description = "The version of the crate to cache")]
     pub version: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetDependenciesParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+    #[schemars(
+        description = "Include the full dependency tree (default: false, only shows direct dependencies)"
+    )]
+    pub include_tree: Option<bool>,
+    #[schemars(description = "Filter dependencies by name (partial match)")]
+    pub filter: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -477,6 +513,110 @@ impl RustDocsService {
             }
         }
     }
+
+    #[tool(
+        description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
+    )]
+    pub async fn list_cached_crates(&self) -> String {
+        let cache = self.cache.lock().await;
+        match cache.list_all_cached_crates().await {
+            Ok(mut crates) => {
+                // Sort by name and version for consistent output
+                crates.sort_by(|a, b| {
+                    a.name.cmp(&b.name).then_with(|| b.version.cmp(&a.version)) // Newer versions first
+                });
+
+                // Calculate total size
+                let total_size_bytes: u64 = crates.iter().map(|c| c.size_bytes).sum();
+
+                // Group by crate name for better organization
+                let mut grouped: std::collections::HashMap<String, Vec<_>> =
+                    std::collections::HashMap::new();
+                for crate_meta in crates {
+                    grouped
+                        .entry(crate_meta.name.clone())
+                        .or_insert_with(Vec::new)
+                        .push(serde_json::json!({
+                            "version": crate_meta.version,
+                            "cached_at": crate_meta.cached_at,
+                            "doc_generated": crate_meta.doc_generated,
+                            "size_bytes": crate_meta.size_bytes,
+                            "size_human": format_bytes(crate_meta.size_bytes)
+                        }));
+                }
+
+                let response = serde_json::json!({
+                    "cached_crates": grouped,
+                    "total_crates": grouped.len(),
+                    "total_versions": grouped.values().map(|v| v.len()).sum::<usize>(),
+                    "total_size_bytes": total_size_bytes,
+                    "total_size_human": format_bytes(total_size_bytes)
+                });
+                serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
+                    format!(r#"{{"error": "Failed to serialize cached crates: {}"}}"#, e)
+                })
+            }
+            Err(e) => {
+                format!(r#"{{"error": "Failed to list cached crates: {}"}}"#, e)
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get dependency information for a crate. Returns direct dependencies by default, with option to include full dependency tree. Use this to understand what a crate depends on, check for version conflicts, or explore the dependency graph."
+    )]
+    pub async fn get_dependencies(&self, #[tool(aggr)] params: GetDependenciesParams) -> String {
+        let cache = self.cache.lock().await;
+
+        // First ensure the crate is cached
+        match cache
+            .ensure_crate_docs(&params.crate_name, &params.version)
+            .await
+        {
+            Ok(_) => {
+                // Load the dependency metadata
+                match cache
+                    .load_dependencies(&params.crate_name, &params.version)
+                    .await
+                {
+                    Ok(metadata) => {
+                        // Process the metadata to extract dependency information
+                        match process_cargo_metadata(
+                            &metadata,
+                            &params.crate_name,
+                            &params.version,
+                            params.include_tree.unwrap_or(false),
+                            params.filter.as_deref(),
+                        ) {
+                            Ok(dep_info) => {
+                                serde_json::to_string_pretty(&dep_info).unwrap_or_else(|e| {
+                                    format!(
+                                        r#"{{"error": "Failed to serialize dependency info: {}"}}"#,
+                                        e
+                                    )
+                                })
+                            }
+                            Err(e) => {
+                                format!(
+                                    r#"{{"error": "Failed to process dependency metadata: {}"}}"#,
+                                    e
+                                )
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        format!(
+                            r#"{{"error": "Dependencies not available for {}-{}. Error: {}"}}"#,
+                            params.crate_name, params.version, e
+                        )
+                    }
+                }
+            }
+            Err(e) => {
+                format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+            }
+        }
+    }
 }
 
 #[tool(tool_box)]
@@ -495,6 +635,7 @@ impl ServerHandler for RustDocsService {
                 "MCP server for querying Rust crate documentation. \
                 IMPORTANT: Always use search_items_preview first to avoid token limits. \
                 Workflow: search_items_preview → get_item_details for specific items → get_item_source for source code. \
+                Use get_dependencies to explore crate dependencies and resolve version conflicts. \
                 All tools auto-cache crates. Default limit is 100 items per request. \
                 Source locations are included in get_item_details responses."
                     .to_string(),

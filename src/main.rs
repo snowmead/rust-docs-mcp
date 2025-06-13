@@ -3,6 +3,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use tracing_subscriber::EnvFilter;
 
 mod cache;
+mod deps;
 mod docs;
 mod service;
 use service::RustDocsService;

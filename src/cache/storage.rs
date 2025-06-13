@@ -16,6 +16,7 @@ pub struct CrateMetadata {
     pub version: String,
     pub cached_at: chrono::DateTime<chrono::Utc>,
     pub doc_generated: bool,
+    pub size_bytes: u64,
 }
 
 impl CacheStorage {
@@ -51,6 +52,11 @@ impl CacheStorage {
         self.crate_path(name, version).join("metadata.json")
     }
 
+    /// Get the dependencies path for a crate
+    pub fn dependencies_path(&self, name: &str, version: &str) -> PathBuf {
+        self.crate_path(name, version).join("dependencies.json")
+    }
+
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
         self.crate_path(name, version).exists()
@@ -68,15 +74,41 @@ impl CacheStorage {
         Ok(())
     }
 
+    /// Calculate the total size of a directory in bytes
+    fn calculate_dir_size(&self, path: &Path) -> Result<u64> {
+        let mut total_size = 0u64;
+
+        if !path.exists() {
+            return Ok(0);
+        }
+
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let metadata = entry.metadata()?;
+
+            if metadata.is_dir() {
+                total_size += self.calculate_dir_size(&entry.path())?;
+            } else {
+                total_size += metadata.len();
+            }
+        }
+
+        Ok(total_size)
+    }
+
     /// Save metadata for a crate
     pub fn save_metadata(&self, name: &str, version: &str) -> Result<()> {
+        let crate_path = self.crate_path(name, version);
+        let size_bytes = self.calculate_dir_size(&crate_path)?;
+
         let metadata = CrateMetadata {
             name: name.to_string(),
             version: version.to_string(),
             cached_at: chrono::Utc::now(),
             doc_generated: self.has_docs(name, version),
+            size_bytes,
         };
-        
+
         let metadata_path = self.metadata_path(name, version);
         let json = serde_json::to_string_pretty(&metadata)?;
         fs::write(metadata_path, json)?;
@@ -120,15 +152,16 @@ impl CacheStorage {
                                     .and_then(|m| m.modified())
                                     .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
                                     .unwrap_or_else(|_| chrono::Utc::now());
-                                
+
                                 CrateMetadata {
                                     name: crate_name.clone(),
-                                    version,
+                                    version: version.clone(),
                                     cached_at,
                                     doc_generated: self.has_docs(
                                         &crate_name,
                                         &version_entry.file_name().to_string_lossy(),
                                     ),
+                                    size_bytes: 0,
                                 }
                             }
                         };
