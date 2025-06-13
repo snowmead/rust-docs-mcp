@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -151,9 +152,9 @@ pub struct GetItemSourceParams {
 
 #[tool(tool_box)]
 impl RustDocsService {
-    pub fn new() -> Result<Self> {
+    pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
-            cache: Arc::new(Mutex::new(CrateCache::new()?)),
+            cache: Arc::new(Mutex::new(CrateCache::new(cache_dir)?)),
         })
     }
 

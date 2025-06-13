@@ -21,11 +21,14 @@ pub struct CrateMetadata {
 
 impl CacheStorage {
     /// Create a new cache storage instance
-    pub fn new() -> Result<Self> {
-        let cache_dir = dirs::home_dir()
-            .context("Failed to get home directory")?
-            .join(".rust-docs-mcp")
-            .join("cache");
+    pub fn new(custom_cache_dir: Option<PathBuf>) -> Result<Self> {
+        let cache_dir = match custom_cache_dir {
+            Some(dir) => dir,
+            None => dirs::home_dir()
+                .context("Failed to get home directory")?
+                .join(".rust-docs-mcp")
+                .join("cache"),
+        };
 
         fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
@@ -75,7 +78,7 @@ impl CacheStorage {
     }
 
     /// Calculate the total size of a directory in bytes
-    fn calculate_dir_size(&self, path: &Path) -> Result<u64> {
+    pub fn calculate_dir_size(&self, path: &Path) -> Result<u64> {
         let mut total_size = 0u64;
 
         if !path.exists() {

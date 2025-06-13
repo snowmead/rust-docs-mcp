@@ -82,9 +82,9 @@ pub fn process_cargo_metadata(
         for dep in deps {
             let name = dep["name"].as_str().unwrap_or_default();
 
-            // Apply filter if provided
+            // Apply filter if provided (case-insensitive)
             if let Some(filter_str) = filter {
-                if !name.contains(filter_str) {
+                if !name.to_lowercase().contains(&filter_str.to_lowercase()) {
                     continue;
                 }
             }

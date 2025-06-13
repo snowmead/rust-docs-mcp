@@ -17,9 +17,9 @@ pub struct CrateCache {
 
 impl CrateCache {
     /// Create a new crate cache instance
-    pub fn new() -> Result<Self> {
+    pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         Ok(Self {
-            storage: CacheStorage::new()?,
+            storage: CacheStorage::new(cache_dir)?,
             client: reqwest::Client::new(),
         })
     }
