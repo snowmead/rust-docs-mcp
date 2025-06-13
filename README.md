@@ -28,3 +28,28 @@ An MCP (Model Context Protocol) server for querying Rust crate documentation. Th
   ```
 
 - Network access to download crates from [crates.io](https://crates.io)
+
+## Installation
+
+> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release. For now, you'll need to build from source.
+
+### Building from Source
+
+```bash
+git clone https://github.com/snowmead/rust-docs-mcp
+cd rust-docs-mcp
+cargo build --release
+```
+
+### MCP Configuration
+
+Add the server to your MCP configuration:
+
+```json
+{
+  "rust-docs": {
+    "command": "/path/to/rust-docs-mcp/target/release/rust-docs-mcp",
+    "transport": "stdio"
+  }
+}
+```

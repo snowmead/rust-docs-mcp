@@ -46,6 +46,11 @@ impl CacheStorage {
         self.crate_path(name, version).join("docs.json")
     }
 
+    /// Get the metadata path for a crate
+    pub fn metadata_path(&self, name: &str, version: &str) -> PathBuf {
+        self.crate_path(name, version).join("metadata.json")
+    }
+
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
         self.crate_path(name, version).exists()
@@ -61,6 +66,29 @@ impl CacheStorage {
         fs::create_dir_all(path)
             .with_context(|| format!("Failed to create directory: {}", path.display()))?;
         Ok(())
+    }
+
+    /// Save metadata for a crate
+    pub fn save_metadata(&self, name: &str, version: &str) -> Result<()> {
+        let metadata = CrateMetadata {
+            name: name.to_string(),
+            version: version.to_string(),
+            cached_at: chrono::Utc::now(),
+            doc_generated: self.has_docs(name, version),
+        };
+        
+        let metadata_path = self.metadata_path(name, version);
+        let json = serde_json::to_string_pretty(&metadata)?;
+        fs::write(metadata_path, json)?;
+        Ok(())
+    }
+
+    /// Load metadata for a crate
+    pub fn load_metadata(&self, name: &str, version: &str) -> Result<CrateMetadata> {
+        let metadata_path = self.metadata_path(name, version);
+        let json = fs::read_to_string(metadata_path)?;
+        let metadata: CrateMetadata = serde_json::from_str(&json)?;
+        Ok(metadata)
     }
 
     /// Get all cached crate versions
@@ -82,14 +110,27 @@ impl CacheStorage {
                     let version = version_entry.file_name().to_string_lossy().to_string();
 
                     if version_entry.file_type()?.is_dir() {
-                        let metadata = CrateMetadata {
-                            name: crate_name.clone(),
-                            version,
-                            cached_at: chrono::Utc::now(), // TODO: Store actual cache time
-                            doc_generated: self.has_docs(
-                                &crate_name,
-                                &version_entry.file_name().to_string_lossy(),
-                            ),
+                        // Try to load metadata, fall back to creating new metadata if not found
+                        let metadata = match self.load_metadata(&crate_name, &version) {
+                            Ok(meta) => meta,
+                            Err(_) => {
+                                // If metadata doesn't exist, create it based on file modification time
+                                let cached_at = version_entry
+                                    .metadata()
+                                    .and_then(|m| m.modified())
+                                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
+                                    .unwrap_or_else(|_| chrono::Utc::now());
+                                
+                                CrateMetadata {
+                                    name: crate_name.clone(),
+                                    version,
+                                    cached_at,
+                                    doc_generated: self.has_docs(
+                                        &crate_name,
+                                        &version_entry.file_name().to_string_lossy(),
+                                    ),
+                                }
+                            }
                         };
                         cached_crates.push(metadata);
                     }

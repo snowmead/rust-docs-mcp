@@ -124,6 +124,9 @@ impl CrateCache {
         // Clean up temp file
         std::fs::remove_file(&temp_file_path).ok();
 
+        // Save metadata for the cached crate
+        self.storage.save_metadata(name, version)?;
+
         tracing::info!("Successfully downloaded and extracted {}-{}", name, version);
         Ok(source_path)
     }
@@ -169,6 +172,9 @@ impl CrateCache {
 
         // Copy the JSON file to our cache location
         std::fs::copy(&json_file, &docs_path).context("Failed to copy documentation to cache")?;
+
+        // Update metadata to reflect that docs are now generated
+        self.storage.save_metadata(name, version)?;
 
         tracing::info!(
             "Successfully generated documentation for {}-{}",

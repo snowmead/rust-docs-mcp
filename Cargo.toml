@@ -2,6 +2,15 @@
 name = "rust-docs-mcp"
 version = "0.1.0"
 edition = "2024"
+authors = ["Michael Assaf <michael@snowmead.com>"]
+description = "MCP server for querying Rust crate documentation with offline caching"
+license = "MIT"
+documentation = "https://docs.rs/rust-docs-mcp"
+homepage = "https://github.com/snowmead/rust-docs-mcp"
+repository = "https://github.com/snowmead/rust-docs-mcp"
+readme = "README.md"
+keywords = ["mcp", "rust", "documentation", "rustdoc", "cache"]
+categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
