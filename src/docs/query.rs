@@ -20,6 +20,24 @@ pub struct ItemInfo {
     pub visibility: String,
 }
 
+/// Source location information
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SourceLocation {
+    pub filename: String,
+    pub line_start: usize,
+    pub column_start: usize,
+    pub line_end: usize,
+    pub column_end: usize,
+}
+
+/// Source code information for an item
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SourceInfo {
+    pub location: SourceLocation,
+    pub code: String,
+    pub context_lines: Option<usize>,
+}
+
 /// Detailed item information including signatures
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DetailedItem {
@@ -29,6 +47,7 @@ pub struct DetailedItem {
     pub fields: Option<Vec<ItemInfo>>,
     pub variants: Option<Vec<ItemInfo>>,
     pub methods: Option<Vec<ItemInfo>>,
+    pub source_location: Option<SourceLocation>,
 }
 
 impl DocQuery {
@@ -107,6 +126,7 @@ impl DocQuery {
             fields: None,
             variants: None,
             methods: None,
+            source_location: self.get_item_source_location(item),
         };
 
         // Add type-specific information
@@ -344,5 +364,57 @@ impl DocQuery {
                 self.item_to_info(item_id, item)
             })
             .collect()
+    }
+
+    /// Get source location information for an item
+    fn get_item_source_location(&self, item: &Item) -> Option<SourceLocation> {
+        let span = item.span.as_ref()?;
+        Some(SourceLocation {
+            filename: span.filename.to_string_lossy().to_string(),
+            line_start: span.begin.0,
+            column_start: span.begin.1,
+            line_end: span.end.0,
+            column_end: span.end.1,
+        })
+    }
+
+    /// Get source code for a specific item by ID
+    pub fn get_item_source(&self, item_id: u32, base_path: &std::path::Path, context_lines: usize) -> Result<SourceInfo> {
+        let id = Id(item_id);
+        let item = self.crate_data.index.get(&id).context("Item not found")?;
+        
+        let span = item.span.as_ref().context("Item has no source span")?;
+        let source_path = base_path.join(&span.filename);
+        
+        if !source_path.exists() {
+            anyhow::bail!("Source file not found: {}", source_path.display());
+        }
+        
+        let content = std::fs::read_to_string(&source_path)
+            .with_context(|| format!("Failed to read source file: {}", source_path.display()))?;
+        
+        let lines: Vec<&str> = content.lines().collect();
+        
+        // Calculate line range with context
+        let start_line = span.begin.0.saturating_sub(1).saturating_sub(context_lines);
+        let end_line = std::cmp::min(span.end.0 + context_lines, lines.len());
+        
+        // Extract the relevant lines
+        let code_lines: Vec<String> = lines[start_line..end_line]
+            .iter()
+            .map(|line| line.to_string())
+            .collect();
+        
+        Ok(SourceInfo {
+            location: SourceLocation {
+                filename: span.filename.to_string_lossy().to_string(),
+                line_start: span.begin.0,
+                column_start: span.begin.1,
+                line_end: span.end.0,
+                column_end: span.end.1,
+            },
+            code: code_lines.join("\n"),
+            context_lines: Some(context_lines),
+        })
     }
 }

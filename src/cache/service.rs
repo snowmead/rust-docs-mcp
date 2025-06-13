@@ -220,4 +220,9 @@ impl CrateCache {
     pub async fn remove_crate(&self, name: &str, version: &str) -> Result<()> {
         self.storage.remove_crate(name, version)
     }
+    
+    /// Get the source path for a crate
+    pub fn get_source_path(&self, name: &str, version: &str) -> PathBuf {
+        self.storage.source_path(name, version)
+    }
 }

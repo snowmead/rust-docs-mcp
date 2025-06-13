@@ -99,6 +99,18 @@ pub struct CacheCrateParams {
     pub version: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetItemSourceParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+    #[schemars(description = "The numeric ID of the item")]
+    pub item_id: u32,
+    #[schemars(description = "Number of context lines to include before and after the item (default: 3)")]
+    pub context_lines: Option<usize>,
+}
+
 #[tool(tool_box)]
 impl RustDocsService {
     pub fn new() -> Result<Self> {
@@ -421,6 +433,33 @@ impl RustDocsService {
             }
         }
     }
+
+    #[tool(description = "Get the source code for a specific item. Returns the actual source code with optional context lines. Use after finding items of interest to view their implementation. The source location is also included in get_item_details responses.")]
+    pub async fn get_item_source(&self, #[tool(aggr)] params: GetItemSourceParams) -> String {
+        let cache = self.cache.lock().await;
+        let source_base_path = cache.get_source_path(&params.crate_name, &params.version);
+        
+        match cache
+            .ensure_crate_docs(&params.crate_name, &params.version)
+            .await
+        {
+            Ok(crate_data) => {
+                let query = DocQuery::new(crate_data);
+                let context_lines = params.context_lines.unwrap_or(3);
+                
+                match query.get_item_source(params.item_id, &source_base_path, context_lines) {
+                    Ok(source_info) => serde_json::to_string_pretty(&source_info)
+                        .unwrap_or_else(|e| {
+                            format!(r#"{{"error": "Failed to serialize source info: {}"}}"#, e)
+                        }),
+                    Err(e) => format!(r#"{{"error": "Failed to get source: {}"}}"#, e),
+                }
+            }
+            Err(e) => {
+                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+            }
+        }
+    }
 }
 
 #[tool(tool_box)]
@@ -438,8 +477,9 @@ impl ServerHandler for RustDocsService {
             instructions: Some(
                 "MCP server for querying Rust crate documentation. \
                 IMPORTANT: Always use search_items_preview first to avoid token limits. \
-                Workflow: search_items_preview → get_item_details for specific items. \
-                All tools auto-cache crates. Default limit is 100 items per request."
+                Workflow: search_items_preview → get_item_details for specific items → get_item_source for source code. \
+                All tools auto-cache crates. Default limit is 100 items per request. \
+                Source locations are included in get_item_details responses."
                     .to_string(),
             ),
             ..Default::default()
