@@ -74,6 +74,7 @@ impl DocQuery {
 
         // Sort by path and name for consistent output
         items.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.name.cmp(&b.name)));
+
         items
     }
 
