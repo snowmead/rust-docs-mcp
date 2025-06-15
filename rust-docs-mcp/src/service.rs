@@ -120,6 +120,10 @@ pub struct CacheCrateParams {
     pub crate_name: String,
     #[schemars(description = "The version of the crate to cache")]
     pub version: String,
+    #[schemars(
+        description = "Optional source for the crate. Supports three formats:\n- GitHub URLs: https://github.com/user/repo or https://github.com/user/repo/tree/branch/path/to/crate\n- Local paths: /absolute/path, ~/home/path, ../relative/path, or ./current/path\n- If not provided, defaults to crates.io"
+    )]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -150,6 +154,34 @@ pub struct GetItemSourceParams {
     pub context_lines: Option<usize>,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AnalyzeCrateParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+    #[schemars(
+        description = "Package name to analyze in workspace (optional for single package crates)"
+    )]
+    pub package: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GetModuleDependenciesParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+    #[schemars(
+        description = "Package name to analyze in workspace (optional for single package crates)"
+    )]
+    pub package: Option<String>,
+    #[schemars(
+        description = "Include dependency graph format (default: false, returns tree structure)"
+    )]
+    pub graph_format: Option<bool>,
+}
+
 #[tool(tool_box)]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
@@ -169,7 +201,7 @@ impl RustDocsService {
     pub async fn list_crate_items(&self, #[tool(aggr)] params: ListItemsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -209,7 +241,7 @@ impl RustDocsService {
     pub async fn search_items(&self, #[tool(aggr)] params: SearchItemsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -301,7 +333,7 @@ impl RustDocsService {
     ) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -366,7 +398,7 @@ impl RustDocsService {
     pub async fn get_item_details(&self, #[tool(aggr)] params: GetItemDetailsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -390,7 +422,7 @@ impl RustDocsService {
     pub async fn get_item_docs(&self, #[tool(aggr)] params: GetItemDocsParams) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -442,7 +474,11 @@ impl RustDocsService {
     pub async fn cache_crate(&self, #[tool(aggr)] params: CacheCrateParams) -> String {
         let cache = self.cache.lock().await;
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(
+                &params.crate_name,
+                &params.version,
+                params.source.as_deref(),
+            )
             .await
         {
             Ok(_) => serde_json::json!({
@@ -493,7 +529,7 @@ impl RustDocsService {
         let source_base_path = cache.get_source_path(&params.crate_name, &params.version);
 
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(crate_data) => {
@@ -571,7 +607,7 @@ impl RustDocsService {
 
         // First ensure the crate is cached
         match cache
-            .ensure_crate_docs(&params.crate_name, &params.version)
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
             .await
         {
             Ok(_) => {
@@ -618,6 +654,140 @@ impl RustDocsService {
             }
         }
     }
+
+    #[tool(
+        description = "Analyze a cached crate's module structure. Provides detailed information about module hierarchy and relationships for offline analysis."
+    )]
+    pub async fn analyze_crate_structure(
+        &self,
+        #[tool(aggr)] params: AnalyzeCrateParams,
+    ) -> String {
+        let cache = self.cache.lock().await;
+
+        // Ensure the crate is cached
+        match cache
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
+            .await
+        {
+            Ok(_) => {
+                // Get the source path for the cached crate
+                let crate_path = cache.get_source_path(&params.crate_name, &params.version);
+
+                match cargo_modules_lib::analyze_crate(&crate_path) {
+                    Ok((crate_id, analysis_host, edition)) => {
+                        let db = analysis_host.raw_database();
+
+                        // Build module tree
+                        match cargo_modules_lib::build_module_tree(crate_id, db, edition) {
+                            Ok(module_tree) => {
+                                serde_json::json!({
+                                    "status": "success",
+                                    "crate_name": params.crate_name,
+                                    "version": params.version,
+                                    "package": params.package,
+                                    "edition": format!("{:?}", edition),
+                                    "module_tree": {
+                                        "type": "tree_structure",
+                                        "node_count": count_tree_nodes(&module_tree),
+                                        "description": "Module tree structure successfully built. Use get_module_dependencies for detailed dependency graph."
+                                    }
+                                }).to_string()
+                            }
+                            Err(e) => {
+                                format!(r#"{{"error": "Failed to build module tree: {}"}}"#, e)
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        format!(r#"{{"error": "Failed to analyze crate: {}"}}"#, e)
+                    }
+                }
+            }
+            Err(e) => {
+                format!(r#"{{"error": "Failed to ensure crate is cached: {}"}}"#, e)
+            }
+        }
+    }
+
+    #[tool(
+        description = "Get module dependencies and relationships for a cached crate. Returns either a tree structure or dependency graph showing how modules interact with each other."
+    )]
+    pub async fn get_module_dependencies(
+        &self,
+        #[tool(aggr)] params: GetModuleDependenciesParams,
+    ) -> String {
+        let cache = self.cache.lock().await;
+
+        // Ensure the crate is cached
+        match cache
+            .ensure_crate_docs(&params.crate_name, &params.version, None)
+            .await
+        {
+            Ok(_) => {
+                // Get the source path for the cached crate
+                let crate_path = cache.get_source_path(&params.crate_name, &params.version);
+
+                match cargo_modules_lib::analyze_crate(&crate_path) {
+                    Ok((crate_id, analysis_host, edition)) => {
+                        let db = analysis_host.raw_database();
+
+                        if params.graph_format.unwrap_or(false) {
+                            // Return dependency graph format
+                            match cargo_modules_lib::build_dependency_graph(crate_id, db, edition) {
+                                Ok((graph, _root_idx)) => {
+                                    serde_json::json!({
+                                        "status": "success",
+                                        "crate_name": params.crate_name,
+                                        "version": params.version,
+                                        "package": params.package,
+                                        "format": "dependency_graph",
+                                        "graph": {
+                                            "node_count": graph.node_count(),
+                                            "edge_count": graph.edge_count(),
+                                            "description": format!("Dependency graph with {} modules and {} relationships", graph.node_count(), graph.edge_count())
+                                        }
+                                    }).to_string()
+                                }
+                                Err(e) => {
+                                    format!(r#"{{"error": "Failed to build dependency graph: {}"}}"#, e)
+                                }
+                            }
+                        } else {
+                            // Return module tree format
+                            match cargo_modules_lib::build_module_tree(crate_id, db, edition) {
+                                Ok(module_tree) => serde_json::json!({
+                                    "status": "success",
+                                    "crate_name": params.crate_name,
+                                    "version": params.version,
+                                    "package": params.package,
+                                    "format": "module_tree",
+                                    "tree": {
+                                        "node_count": count_tree_nodes(&module_tree),
+                                        "description": "Module tree showing hierarchical structure"
+                                    }
+                                })
+                                .to_string(),
+                                Err(e) => {
+                                    format!(r#"{{"error": "Failed to build module tree: {}"}}"#, e)
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        format!(r#"{{"error": "Failed to analyze crate: {}"}}"#, e)
+                    }
+                }
+            }
+            Err(e) => {
+                format!(r#"{{"error": "Failed to ensure crate is cached: {}"}}"#, e)
+            }
+        }
+    }
+}
+
+/// Helper function to count nodes in a module tree
+fn count_tree_nodes(tree: &cargo_modules_lib::ModuleTree) -> usize {
+    1 + tree.subtrees.iter().map(count_tree_nodes).sum::<usize>()
 }
 
 #[tool(tool_box)]
@@ -633,11 +803,12 @@ impl ServerHandler for RustDocsService {
                 ..Default::default()
             },
             instructions: Some(
-                "MCP server for querying Rust crate documentation. \
+                "MCP server for querying Rust crate documentation and analyzing module dependencies. \
                 IMPORTANT: Always use search_items_preview first to avoid token limits. \
                 Workflow: search_items_preview → get_item_details for specific items → get_item_source for source code. \
                 Use get_dependencies to explore crate dependencies and resolve version conflicts. \
-                All tools auto-cache crates. Default limit is 100 items per request. \
+                For crate analysis: analyze_crate_structure → get_module_dependencies for detailed dependency graphs. \
+                All tools auto-cache crates from crates.io, GitHub, or local paths. Default limit is 100 items per request. \
                 Source locations are included in get_item_details responses."
                     .to_string(),
             ),

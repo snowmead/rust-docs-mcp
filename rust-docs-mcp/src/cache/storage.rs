@@ -17,6 +17,15 @@ pub struct CrateMetadata {
     pub cached_at: chrono::DateTime<chrono::Utc>,
     pub doc_generated: bool,
     pub size_bytes: u64,
+    #[serde(default = "default_source")]
+    pub source: String,
+    #[serde(default)]
+    pub source_path: Option<String>,
+}
+
+/// Default source for backward compatibility
+fn default_source() -> String {
+    "crates.io".to_string()
 }
 
 impl CacheStorage {
@@ -101,6 +110,11 @@ impl CacheStorage {
 
     /// Save metadata for a crate
     pub fn save_metadata(&self, name: &str, version: &str) -> Result<()> {
+        self.save_metadata_with_source(name, version, "crates.io", None)
+    }
+
+    /// Save metadata for a crate with source information
+    pub fn save_metadata_with_source(&self, name: &str, version: &str, source: &str, source_path: Option<&str>) -> Result<()> {
         let crate_path = self.crate_path(name, version);
         let size_bytes = self.calculate_dir_size(&crate_path)?;
 
@@ -110,6 +124,8 @@ impl CacheStorage {
             cached_at: chrono::Utc::now(),
             doc_generated: self.has_docs(name, version),
             size_bytes,
+            source: source.to_string(),
+            source_path: source_path.map(String::from),
         };
 
         let metadata_path = self.metadata_path(name, version);
@@ -165,6 +181,8 @@ impl CacheStorage {
                                         &version_entry.file_name().to_string_lossy(),
                                     ),
                                     size_bytes: 0,
+                                    source: default_source(),
+                                    source_path: None,
                                 }
                             }
                         };
