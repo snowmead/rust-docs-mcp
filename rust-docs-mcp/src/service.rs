@@ -672,34 +672,47 @@ impl RustDocsService {
             Ok(_) => {
                 // Get the source path for the cached crate
                 let crate_path = cache.get_source_path(&params.crate_name, &params.version);
+                let crate_name = params.crate_name.clone();
+                let version = params.version.clone();
+                let package = params.package.clone();
 
-                match cargo_modules_lib::analyze_crate(&crate_path) {
-                    Ok((crate_id, analysis_host, edition)) => {
-                        let db = analysis_host.raw_database();
+                // Drop the cache lock before the potentially long-running operation
+                drop(cache);
 
-                        // Build module tree
-                        match cargo_modules_lib::build_module_tree(crate_id, db, edition) {
-                            Ok(module_tree) => {
-                                serde_json::json!({
-                                    "status": "success",
-                                    "crate_name": params.crate_name,
-                                    "version": params.version,
-                                    "package": params.package,
-                                    "edition": format!("{:?}", edition),
-                                    "module_tree": {
-                                        "type": "tree_structure",
-                                        "node_count": count_tree_nodes(&module_tree),
-                                        "description": "Module tree structure successfully built. Use get_module_dependencies for detailed dependency graph."
-                                    }
-                                }).to_string()
-                            }
-                            Err(e) => {
-                                format!(r#"{{"error": "Failed to build module tree: {}"}}"#, e)
-                            }
+                // Wrap the entire analysis in a timeout to prevent hanging
+                let timeout_duration = std::time::Duration::from_secs(40);
+                let analysis_result = tokio::task::spawn_blocking(move || -> Result<String, anyhow::Error> {
+                    // Analyze the crate
+                    let (crate_id, analysis_host, edition) = cargo_modules_lib::analyze_crate(&crate_path)?;
+                    let db = analysis_host.raw_database();
+
+                    // Build module tree
+                    let module_tree = cargo_modules_lib::build_module_tree(crate_id, db, edition)?;
+
+                    Ok(serde_json::json!({
+                        "status": "success",
+                        "crate_name": crate_name,
+                        "version": version,
+                        "package": package,
+                        "edition": format!("{:?}", edition),
+                        "module_tree": {
+                            "type": "tree_structure",
+                            "node_count": count_tree_nodes(&module_tree),
+                            "description": "Module tree structure successfully built. Use get_module_dependencies for detailed dependency graph."
                         }
+                    }).to_string())
+                });
+
+                match tokio::time::timeout(timeout_duration, analysis_result).await {
+                    Ok(Ok(Ok(response))) => response,
+                    Ok(Ok(Err(e))) => {
+                        format!(r#"{{"error": "Failed to analyze crate structure: {}"}}"#, e)
                     }
-                    Err(e) => {
-                        format!(r#"{{"error": "Failed to analyze crate: {}"}}"#, e)
+                    Ok(Err(e)) => {
+                        format!(r#"{{"error": "Task panicked during crate analysis: {:?}"}}"#, e)
+                    }
+                    Err(_) => {
+                        format!(r#"{{"error": "Crate analysis timed out after 40 seconds"}}"#)
                     }
                 }
             }
