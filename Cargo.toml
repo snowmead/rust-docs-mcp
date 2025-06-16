@@ -1,3 +1,3 @@
 [workspace]
-members = ["rust-docs-mcp", "cargo-modules-lib"]
+members = ["rust-docs-mcp", "cargo-modules"]
 resolver = "2"

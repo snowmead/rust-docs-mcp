@@ -1,5 +1,5 @@
 /target
 snapshots
 **/*.snap
-cargo-modules-lib/tests/projects/
-cargo-modules-lib/tests/snapshots/
+cargo-modules/tests/projects/
+cargo-modules/tests/snapshots/

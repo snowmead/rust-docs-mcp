@@ -683,11 +683,11 @@ impl RustDocsService {
                 let timeout_duration = std::time::Duration::from_secs(40);
                 let analysis_result = tokio::task::spawn_blocking(move || -> Result<String, anyhow::Error> {
                     // Analyze the crate
-                    let (crate_id, analysis_host, edition) = cargo_modules_lib::analyze_crate(&crate_path)?;
+                    let (crate_id, analysis_host, edition) = cargo_modules::analyze_crate(&crate_path)?;
                     let db = analysis_host.raw_database();
 
                     // Build module tree
-                    let module_tree = cargo_modules_lib::build_module_tree(crate_id, db, edition)?;
+                    let module_tree = cargo_modules::build_module_tree(crate_id, db, edition)?;
 
                     Ok(serde_json::json!({
                         "status": "success",
@@ -740,13 +740,13 @@ impl RustDocsService {
                 // Get the source path for the cached crate
                 let crate_path = cache.get_source_path(&params.crate_name, &params.version);
 
-                match cargo_modules_lib::analyze_crate(&crate_path) {
+                match cargo_modules::analyze_crate(&crate_path) {
                     Ok((crate_id, analysis_host, edition)) => {
                         let db = analysis_host.raw_database();
 
                         if params.graph_format.unwrap_or(false) {
                             // Return dependency graph format
-                            match cargo_modules_lib::build_dependency_graph(crate_id, db, edition) {
+                            match cargo_modules::build_dependency_graph(crate_id, db, edition) {
                                 Ok((graph, _root_idx)) => {
                                     serde_json::json!({
                                         "status": "success",
@@ -767,7 +767,7 @@ impl RustDocsService {
                             }
                         } else {
                             // Return module tree format
-                            match cargo_modules_lib::build_module_tree(crate_id, db, edition) {
+                            match cargo_modules::build_module_tree(crate_id, db, edition) {
                                 Ok(module_tree) => serde_json::json!({
                                     "status": "success",
                                     "crate_name": params.crate_name,
@@ -799,7 +799,7 @@ impl RustDocsService {
 }
 
 /// Helper function to count nodes in a module tree
-fn count_tree_nodes(tree: &cargo_modules_lib::ModuleTree) -> usize {
+fn count_tree_nodes(tree: &cargo_modules::ModuleTree) -> usize {
     1 + tree.subtrees.iter().map(count_tree_nodes).sum::<usize>()
 }
 
