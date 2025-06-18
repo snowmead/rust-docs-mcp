@@ -1,18 +1,12 @@
 [![rust-docs banner](./assets/rust_docs_banner.jpeg)](https://github.com/snowmead/rust-docs-mcp)
 
-# 🦀 rust-docs-mcp
+# Rustdocs MCP Server
 
-> *Rust is the language of AI*
+_Rust is the language of AI_
 
 An MCP (Model Context Protocol) server that provides comprehensive access to Rust crate documentation, source code analysis, dependency trees, and module structure visualization. Built for agents to gain quality insights into Rust projects and build with confidence.
 
-## ⚡ Quick Install
-
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
-```
-
-## ✨ Agent Capabilities
+## Agent Capabilities
 
 - [x] **Multi-source caching** — crates.io, GitHub repositories, local filesystem paths
 - [x] **Workspace support** — Individual member analysis and caching for cargo workspaces
@@ -24,35 +18,7 @@ curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.
 - [x] **Offline operation** — Full functionality after initial crate caching
 - [x] **Token management** — Response truncation and preview modes for LLM compatibility
 
-## 🛠️ Installation Options
-
-### One-liner (Recommended)
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
-```
-
-### Custom install directory
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
-```
-
-### Manual build from source
-```bash
-git clone https://github.com/snowmead/rust-docs-mcp
-cd rust-docs-mcp/rust-docs-mcp
-cargo build --release
-./target/release/rust-docs-mcp install
-```
-
-### CLI Commands
-```bash
-rust-docs-mcp                    # Start MCP server
-rust-docs-mcp install           # Install to ~/.local/bin
-rust-docs-mcp install --force   # Force overwrite existing installation
-rust-docs-mcp --help            # Show help
-```
-
-## 🔧 MCP Tools
+## MCP Tools
 
 ### Cache Management
 
@@ -79,19 +45,7 @@ rust-docs-mcp --help            # Show help
 
 - `structure` - Generate hierarchical module tree using integrated cargo-modules
 
-## ⚙️ Configuration
-
-### MCP Setup
-Add to your MCP configuration file:
-
-```json
-{
-  "rust-docs": {
-    "command": "rust-docs-mcp",
-    "transport": "stdio"
-  }
-}
-```
+## Configuration
 
 ### Cache Directory
 
@@ -100,40 +54,82 @@ By default, crates are cached in `~/.rust-docs-mcp/cache/`. You can customize th
 ```bash
 # Command line option
 rust-docs-mcp --cache-dir /custom/path/to/cache
-
-# Environment variable
+# or set the environment variable
 export RUST_DOCS_MCP_CACHE_DIR=/custom/path/to/cache
 rust-docs-mcp
 ```
 
-## 📋 Requirements
+### Each crate version stores
 
-- **Rust nightly** (auto-installed by script)
+- Complete source code in `source/` directory
+- Cache metadata and timestamps in `metadata.json`
+- For workspace crates, individual members in `members/` directory:
+  - `members/{member-name}/docs.json` - Rustdoc JSON documentation
+  - `members/{member-name}/dependencies.json` - Cargo dependency metadata
+  - `members/{member-name}/metadata.json` - Member-specific cache metadata
+- For single crates:
+  - `docs.json` - Rustdoc JSON documentation
+  - `dependencies.json` - Cargo dependency metadata
+
+## Installation
+
+### Quick Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
+```
+
+### Installation Options
+
+#### One-liner (Recommended)
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
+```
+
+#### Custom install directory
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
+```
+
+#### Building from Source
+
+> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release.
+
+##### Requirements
+
+- Rust nightly toolchain (for Rustdoc JSON generation)
+
   ```bash
   rustup toolchain install nightly
   ```
-- **Network access** to download from [crates.io](https://crates.io)
 
-## 📁 Data Storage
+- Network access to download crates from [crates.io](https://crates.io)
 
-### Cache Structure
-
-```
-~/.rust-docs-mcp/cache/
-├── crate-name/
-│   └── version/
-│       ├── source/                    # Complete source code
-│       ├── metadata.json              # Cache metadata and timestamps
-│       ├── members/                   # For workspace crates
-│       │   └── {member-name}/
-│       │       ├── docs.json          # Rustdoc JSON documentation
-│       │       ├── dependencies.json  # Cargo dependency metadata
-│       │       └── metadata.json      # Member-specific cache metadata
-│       ├── docs.json                  # For single crates
-│       └── dependencies.json          # For single crates
+```bash
+git clone https://github.com/snowmead/rust-docs-mcp
+cd rust-docs-mcp/rust-docs-mcp
+cargo build --release
+./target/release/rust-docs-mcp install
 ```
 
----
+### CLI Commands
 
-**🎯 Ready to supercharge your Rust development with AI?**  
-Install now: `curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash`
+```bash
+rust-docs-mcp                    # Start MCP server
+rust-docs-mcp install           # Install to ~/.local/bin
+rust-docs-mcp install --force   # Force overwrite existing installation
+rust-docs-mcp --help            # Show help
+```
+
+### MCP Configuration
+
+Add the server to your MCP configuration:
+
+```json
+{
+  "rust-docs": {
+    "command": "/path/to/rust-docs-mcp/target/release/rust-docs-mcp",
+    "transport": "stdio"
+  }
+}
+```
