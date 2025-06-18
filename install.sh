@@ -104,16 +104,16 @@ main() {
     fi
     
     # Build and install
-    info "Building rust-docs-mcp (this may take a few minutes)..."
-    cd "${TEMP_DIR}/rust-docs-mcp/rust-docs-mcp"
+    info "Building rust-docs-mcp in release mode (this may take a few minutes)..."
+    cd "${TEMP_DIR}/rust-docs-mcp"
     
-    if ! cargo build --release; then
+    if ! cargo build --release -p rust-docs-mcp; then
         error "Failed to build rust-docs-mcp"
     fi
     
     # Install using the built-in install command
     info "Installing rust-docs-mcp to ${INSTALL_DIR}..."
-    if ! ./target/release/rust-docs-mcp install --target-dir "${INSTALL_DIR}" --force; then
+    if ! "${TEMP_DIR}/rust-docs-mcp/target/release/rust-docs-mcp" install --target-dir "${INSTALL_DIR}" --force; then
         error "Failed to install rust-docs-mcp"
     fi
     
