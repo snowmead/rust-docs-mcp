@@ -150,6 +150,24 @@ main() {
                 success "rust-docs-mcp added to Claude Code!"
                 echo
                 echo -e "${GREEN}You can now use Rust documentation features in Claude Code!${NC}"
+                echo
+                echo -e "${YELLOW}To enable all rust-docs tools, add these to your Claude settings allow list:${NC}"
+                echo -e "${BLUE}(~/.claude/settings.json or your project/local settings)${NC}"
+                echo
+                echo -e "${GREEN}
+      \"mcp__rust-docs__cache_crate\",
+      \"mcp__rust-docs__remove_crate\",
+      \"mcp__rust-docs__list_cached_crates\",
+      \"mcp__rust-docs__list_crate_versions\",
+      \"mcp__rust-docs__get_crates_metadata\",
+      \"mcp__rust-docs__search_items_preview\",
+      \"mcp__rust-docs__search_items\",
+      \"mcp__rust-docs__list_crate_items\",
+      \"mcp__rust-docs__get_item_details\",
+      \"mcp__rust-docs__get_item_docs\",
+      \"mcp__rust-docs__get_item_source\",
+      \"mcp__rust-docs__get_dependencies\",
+      \"mcp__rust-docs__structure\"${NC}"
             else
                 warn "Failed to add rust-docs-mcp to Claude Code"
                 echo
