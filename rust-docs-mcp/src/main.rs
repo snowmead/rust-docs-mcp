@@ -4,6 +4,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
+mod analysis;
 mod cache;
 mod deps;
 mod docs;
@@ -23,7 +24,7 @@ struct Args {
 async fn main() -> Result<()> {
     // Parse command line arguments
     let args = Args::parse();
-    
+
     // Initialize tracing to stderr to avoid conflicts with stdio transport
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive(tracing::Level::INFO.into()))

@@ -120,7 +120,7 @@ pub fn cargo_config(
 
     let invocation_strategy = project_model::InvocationStrategy::PerWorkspace;
 
-    let no_deps: bool = false;
+    let no_deps: bool = true; // Skip external dependencies for performance
 
     let run_build_script_command = None;
 

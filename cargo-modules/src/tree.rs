@@ -5,9 +5,9 @@
 mod builder;
 
 pub use self::builder::TreeBuilder;
+use crate::item::Item;
 use ra_ap_hir::{self as hir};
 use ra_ap_ide::{self as ide};
-use crate::item::Item;
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Tree<N> {
@@ -29,7 +29,11 @@ pub type ModuleTree = Tree<Item>;
 
 impl ModuleTree {
     /// Builds a module tree from a crate
-    pub fn build(db: &ide::RootDatabase, crate_id: &hir::Crate, _edition: ide::Edition) -> anyhow::Result<Self> {
+    pub fn build(
+        db: &ide::RootDatabase,
+        crate_id: &hir::Crate,
+        _edition: ide::Edition,
+    ) -> anyhow::Result<Self> {
         let builder = TreeBuilder::new(db, *crate_id);
         builder.build()
     }

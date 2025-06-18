@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rmcp::schemars;
 use rustdoc_types::{Crate, Id, Item, ItemEnum};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

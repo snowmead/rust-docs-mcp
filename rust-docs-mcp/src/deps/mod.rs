@@ -1,3 +1,6 @@
+pub mod tools;
+
+use rmcp::schemars;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

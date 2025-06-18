@@ -17,11 +17,11 @@ use ra_ap_hir::{self as hir};
 use ra_ap_ide::{self as ide};
 
 pub use crate::{
-    graph::{Graph, Node, Edge, Relationship, GraphBuilder},
-    item::Item,
-    tree::{Tree, ModuleTree, TreeBuilder},
     analyzer::LoadOptions,
+    graph::{Edge, Graph, GraphBuilder, Node, Relationship},
+    item::Item,
     options::{GeneralOptions, ProjectOptions},
+    tree::{ModuleTree, Tree, TreeBuilder},
 };
 
 pub mod analyzer;
@@ -33,37 +33,92 @@ pub mod utils;
 
 mod colors;
 
+/// Analysis configuration to control performance and depth
+#[derive(Debug, Clone)]
+pub struct AnalysisConfig {
+    pub cfg_test: bool,
+    pub sysroot: bool,
+    pub no_default_features: bool,
+    pub all_features: bool,
+    pub features: Vec<String>,
+}
+
+impl Default for AnalysisConfig {
+    fn default() -> Self {
+        Self::fast()
+    }
+}
+
+impl AnalysisConfig {
+    /// Fast analysis with minimal dependencies - recommended for large crates
+    pub fn fast() -> Self {
+        Self {
+            cfg_test: false,
+            sysroot: false,
+            no_default_features: true, // Skip default features for speed
+            all_features: false,
+            features: vec![],
+        }
+    }
+
+    /// Standard analysis with default features
+    pub fn standard() -> Self {
+        Self {
+            cfg_test: false,
+            sysroot: false,
+            no_default_features: false,
+            all_features: false,
+            features: vec![],
+        }
+    }
+
+    /// Ultra fast analysis with absolute minimal processing - for large workspaces
+    pub fn ultra_fast() -> Self {
+        Self {
+            cfg_test: false,
+            sysroot: false,
+            no_default_features: true, // Skip all default features
+            all_features: false,       // Don't analyze any features
+            features: vec![],          // No specific features
+        }
+    }
+}
+
 /// Analyzes a Rust crate at the given path and returns the analysis components
 ///
 /// # Arguments
 /// * `path` - Path to the crate root (containing Cargo.toml)
+/// * `package` - Optional package name for workspace crates
+/// * `config` - Analysis configuration to control performance and depth
 ///
 /// # Returns
 /// A tuple of (crate, database, edition) that can be used for further analysis
-pub fn analyze_crate(path: &Path) -> Result<(hir::Crate, ide::AnalysisHost, ide::Edition)> {
-    let general_options = GeneralOptions {
-        verbose: false,
-    };
-    
+pub fn analyze_crate(
+    path: &Path,
+    package: Option<&str>,
+    config: AnalysisConfig,
+) -> Result<(hir::Crate, ide::AnalysisHost, ide::Edition)> {
+    let general_options = GeneralOptions { verbose: false };
+
     let project_options = ProjectOptions {
         lib: false,
         bin: None,
-        package: None,
-        no_default_features: false,
-        all_features: false,
-        features: vec![],
+        package: package.map(|p| p.to_string()),
+        no_default_features: config.no_default_features,
+        all_features: config.all_features,
+        features: config.features,
         target: None,
         manifest_path: path.to_path_buf(),
     };
-    
+
     let load_options = LoadOptions {
-        cfg_test: false,
-        // Keep sysroot disabled to prevent hanging on system library loading
-        sysroot: false,
+        cfg_test: config.cfg_test,
+        sysroot: config.sysroot,
     };
-    
-    let (crate_id, analysis_host, _vfs, edition) = analyzer::load_workspace(&general_options, &project_options, &load_options)?;
-    
+
+    let (crate_id, analysis_host, _vfs, edition) =
+        analyzer::load_workspace(&general_options, &project_options, &load_options)?;
+
     Ok((crate_id, analysis_host, edition))
 }
 
@@ -77,9 +132,9 @@ pub fn analyze_crate(path: &Path) -> Result<(hir::Crate, ide::AnalysisHost, ide:
 /// # Returns
 /// A tuple of (dependency graph, root node index)
 pub fn build_dependency_graph(
-    crate_id: hir::Crate, 
-    db: &ide::RootDatabase, 
-    edition: ide::Edition
+    crate_id: hir::Crate,
+    db: &ide::RootDatabase,
+    edition: ide::Edition,
 ) -> Result<(Graph<Node, Edge>, petgraph::graph::NodeIndex)> {
     let builder = GraphBuilder::new(db, edition, crate_id);
     builder.build()
@@ -97,7 +152,7 @@ pub fn build_dependency_graph(
 pub fn build_module_tree(
     crate_id: hir::Crate,
     db: &ide::RootDatabase,
-    edition: ide::Edition
+    edition: ide::Edition,
 ) -> Result<ModuleTree> {
     ModuleTree::build(db, &crate_id, edition)
 }
@@ -124,18 +179,22 @@ mod tests {
     #[test]
     fn test_analyze_current_crate() {
         let current_dir = std::env::current_dir().unwrap();
-        let result = analyze_crate(&current_dir);
-        
+        let config = AnalysisConfig::fast();
+        let result = analyze_crate(&current_dir, None, config);
+
         match result {
             Ok((crate_id, analysis_host, edition)) => {
                 println!("Successfully analyzed crate: {:?}", crate_id);
                 println!("Edition: {:?}", edition);
-                
+
                 // Test building dependency graph
                 let db = analysis_host.raw_database();
                 match build_dependency_graph(crate_id, db, edition) {
                     Ok((graph, _root_idx)) => {
-                        println!("Successfully built dependency graph with {} nodes", graph.node_count());
+                        println!(
+                            "Successfully built dependency graph with {} nodes",
+                            graph.node_count()
+                        );
                     }
                     Err(e) => {
                         println!("Failed to build dependency graph: {}", e);
