@@ -37,6 +37,17 @@ command_exists() {
 install_rust() {
     if command_exists rustc && command_exists cargo; then
         info "Rust is already installed ($(rustc --version))"
+        
+        # Check if nightly toolchain is available
+        if rustup toolchain list | grep -q nightly; then
+            info "Rust nightly toolchain is already available"
+        else
+            info "Installing Rust nightly toolchain..."
+            if ! rustup toolchain install nightly; then
+                error "Failed to install Rust nightly toolchain"
+            fi
+            success "Rust nightly toolchain installed"
+        fi
         return 0
     fi
     
@@ -56,6 +67,13 @@ install_rust() {
     fi
     
     success "Rust installed successfully"
+    
+    # Install nightly toolchain
+    info "Installing Rust nightly toolchain..."
+    if ! rustup toolchain install nightly; then
+        error "Failed to install Rust nightly toolchain"
+    fi
+    success "Rust nightly toolchain installed"
 }
 
 # Main installation function
