@@ -1,33 +1,49 @@
-[![rust-docs banner](./assets/rust_docs_banner.png)](https://github.com/snowmead/rust-docs-mcp)
+[![rust-docs banner](./assets/rust_docs_banner.jpeg)](https://github.com/snowmead/rust-docs-mcp)
 
-# rust-docs-mcp
+# Rustdocs MCP Server
 
 _Rust is the language of AI_
 
-An MCP (Model Context Protocol) server for agents to explore crate docs, analyze source code, and build with confidence.
+An MCP (Model Context Protocol) server that provides comprehensive access to Rust crate documentation, source code analysis, dependency trees, and module structure visualization. Built for agents to gain quality insights into Rust projects and build with confidence.
 
-## Features
+## Agent Capabilities
 
-- **Search and browse** Rust crate documentation
-- **View detailed information** about structs, functions, traits, and other items
-- **Retrieve source code** for any documented item with line-level precision
-- **Explore dependency trees** to understand crate relationships and resolve version conflicts
-- **Automatic caching** of crate documentation for offline access
-- **Efficient preview mode** to avoid token limits when exploring large crates
+- [x] **Multi-source caching** — crates.io, GitHub repositories, local filesystem paths
+- [x] **Workspace support** — Individual member analysis and caching for cargo workspaces
+- [x] **Documentation search** — Pattern matching with kind/path filtering and preview modes
+- [x] **Item inspection** — Detailed signatures, fields, methods, and documentation strings
+- [x] **Source code access** — Line-level precision with parameterized surrounding context
+- [x] **Dependency analysis** — Direct and transitive dependency trees with metadata
+- [x] **Module structure** — Hierarchical tree generation via cargo-modules integration
+- [x] **Offline operation** — Full functionality after initial crate caching
+- [x] **Token management** — Response truncation and preview modes for LLM compatibility
 
-## Available Tools
+## MCP Tools
 
-- **`search_items_preview`** - Search for items by name (returns minimal info to avoid token limits)
-- **`search_items`** - Search with full documentation (may exceed token limits)
-- **`list_crate_items`** - List all items in a crate
-- **`get_item_details`** - Get detailed information about a specific item
-- **`get_item_docs`** - Get just the documentation string for an item
-- **`get_item_source`** - View the source code of an item
-- **`get_dependencies`** - Get dependency information for a crate
-- **`cache_crate`** - Pre-cache a crate for offline use
-- **`list_crate_versions`** - List cached versions of a specific crate
-- **`list_cached_crates`** - List all cached crates with their versions and disk usage
-- **`remove_crate`** - Remove a cached crate version
+### Cache Management
+
+- `cache_crate` - Download and cache crates from crates.io, GitHub, or local paths
+- `remove_crate` - Remove cached crate versions to free disk space
+- `list_cached_crates` - View all cached crates with versions and sizes
+- `list_crate_versions` - List cached versions for a specific crate
+- `get_crates_metadata` - Batch metadata queries for multiple crates
+
+### Documentation Queries
+
+- `search_items_preview` - Lightweight search returning only IDs, names, and types
+- `search_items` - Full search with complete documentation (may hit token limits)
+- `list_crate_items` - Browse all items in a crate with optional filtering
+- `get_item_details` - Detailed information about specific items (signatures, fields, etc.)
+- `get_item_docs` - Extract just the documentation string for an item
+- `get_item_source` - View source code with configurable context lines
+
+### Dependency Analysis
+
+- `get_dependencies` - Analyze direct and transitive dependencies with filtering
+
+### Structure Analysis
+
+- `structure` - Generate hierarchical module tree using integrated cargo-modules
 
 ## Configuration
 
@@ -35,43 +51,41 @@ An MCP (Model Context Protocol) server for agents to explore crate docs, analyze
 
 By default, crates are cached in `~/.rust-docs-mcp/cache/`. You can customize this location using:
 
-1. **Command line argument:**
+```bash
+# Command line option
+rust-docs-mcp --cache-dir /custom/path/to/cache
+# or set the environment variable
+export RUST_DOCS_MCP_CACHE_DIR=/custom/path/to/cache
+rust-docs-mcp
+```
 
-   ```bash
-   rust-docs-mcp --cache-dir /custom/path/to/cache
-   ```
+### Each crate version stores
 
-2. **Environment variable:**
-   ```bash
-   export RUST_DOCS_MCP_CACHE_DIR=/custom/path/to/cache
-   rust-docs-mcp
-   ```
-
-The cache directory will be created automatically if it doesn't exist.
-
-## Data Storage
-
-- Crates are cached in the configured cache directory (default: `~/.rust-docs-mcp/cache/`)
-- Each crate version stores:
-  - Source code in `source/` directory
-  - Rustdoc JSON in `docs.json`
-  - Dependency metadata in `dependencies.json`
-
-## Requirements
-
-- Rust nightly toolchain (for rustdoc JSON generation)
-
-  ```bash
-  rustup toolchain install nightly
-  ```
-
-- Network access to download crates from [crates.io](https://crates.io)
+- Complete source code in `source/` directory
+- Cache metadata and timestamps in `metadata.json`
+- For workspace crates, individual members in `members/` directory:
+  - `members/{member-name}/docs.json` - Rustdoc JSON documentation
+  - `members/{member-name}/dependencies.json` - Cargo dependency metadata
+  - `members/{member-name}/metadata.json` - Member-specific cache metadata
+- For single crates:
+  - `docs.json` - Rustdoc JSON documentation
+  - `dependencies.json` - Cargo dependency metadata
 
 ## Installation
 
 > **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release. For now, you'll need to build from source.
 
 ### Building from Source
+
+#### Requirements
+
+- Rust nightly toolchain (for Rustdoc JSON generation)
+
+  ```bash
+  rustup toolchain install nightly
+  ```
+
+- Network access to download crates from [crates.io](https://crates.io)
 
 ```bash
 git clone https://github.com/snowmead/rust-docs-mcp
