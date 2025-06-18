@@ -94,7 +94,7 @@ impl<'a> GraphBuilder<'a> {
             };
 
             for impl_item_idx in self.process_impl(impl_hir) {
-                self.add_edge(impl_ty_idx, impl_item_idx, Edge::Owns);
+                self.add_edge(impl_ty_idx, impl_item_idx, Edge::OWNS);
             }
         }
 
@@ -206,7 +206,7 @@ impl<'a> GraphBuilder<'a> {
                     continue;
                 };
 
-                self.add_edge(node_idx, declaration_idx, Edge::Owns);
+                self.add_edge(node_idx, declaration_idx, Edge::OWNS);
             }
         }
 
@@ -770,7 +770,7 @@ impl<'a> GraphBuilder<'a> {
                 continue;
             };
 
-            self.add_edge(depender_idx, dependency_hir, Edge::Uses);
+            self.add_edge(depender_idx, dependency_hir, Edge::USES);
         }
     }
 
@@ -791,7 +791,8 @@ impl<'a> GraphBuilder<'a> {
             }
             None => {
                 // Otherwise try to add a node:
-                let node = Item::new(module_def_hir);
+                let item = Item::new(module_def_hir);
+                let node = Node { item };
                 let node_idx = self.graph.add_node(node);
                 self.nodes.insert(module_def_hir, node_idx);
 
@@ -810,7 +811,7 @@ impl<'a> GraphBuilder<'a> {
             return None;
         }
 
-        let edge_id = (source_idx, edge, target_idx);
+        let edge_id = (source_idx, edge.relationship, target_idx);
 
         // tracing::trace!(
         //     "Adding edge: {source_path} --({edge_name})-> {target_path}...",

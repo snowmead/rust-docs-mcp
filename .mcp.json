@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "rust-docs": {
+    "rust-docs-testing": {
       "type": "stdio",
       "command": "target/debug/rust-docs-mcp",
       "args": [],

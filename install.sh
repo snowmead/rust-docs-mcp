@@ -155,14 +155,16 @@ main() {
                 echo -e "${BLUE}(~/.claude/settings.json or your project/local settings)${NC}"
                 echo
                 echo -e "${GREEN}
-      \"mcp__rust-docs__cache_crate\",
+      \"mcp__rust-docs__cache_crate_from_cratesio\",
+      \"mcp__rust-docs__cache_crate_from_github\",
+      \"mcp__rust-docs__cache_crate_from_local\",
       \"mcp__rust-docs__remove_crate\",
       \"mcp__rust-docs__list_cached_crates\",
       \"mcp__rust-docs__list_crate_versions\",
       \"mcp__rust-docs__get_crates_metadata\",
-      \"mcp__rust-docs__search_items_preview\",
-      \"mcp__rust-docs__search_items\",
       \"mcp__rust-docs__list_crate_items\",
+      \"mcp__rust-docs__search_items\",
+      \"mcp__rust-docs__search_items_preview\",
       \"mcp__rust-docs__get_item_details\",
       \"mcp__rust-docs__get_item_docs\",
       \"mcp__rust-docs__get_item_source\",

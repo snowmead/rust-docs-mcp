@@ -1,4 +1,5 @@
 use crate::cache::storage::CacheStorage;
+use crate::cache::tools::{CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams};
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
@@ -22,6 +23,14 @@ enum SourceType {
     Local {
         path: String,
     },
+}
+
+/// Unified crate source enum that reuses the parameter structs from tools
+#[derive(Debug, Clone)]
+pub enum CrateSource {
+    CratesIO(CacheCrateFromCratesIOParams),
+    GitHub(CacheCrateFromGitHubParams),
+    LocalPath(CacheCrateFromLocalParams),
 }
 
 /// Service for managing crate caching and documentation generation
@@ -146,10 +155,9 @@ impl CrateCache {
     ) -> Result<rustdoc_types::Crate> {
         // Check if docs already exist for this member
         let member_name = member_path.split('/').last().unwrap_or(member_path);
-        let docs_key = format!("{}-{}", name, member_name);
 
-        if self.storage.has_docs(&docs_key, version) {
-            return self.load_docs(&docs_key, version).await;
+        if self.storage.has_member_docs(name, version, member_name) {
+            return self.load_member_docs(name, version, member_name).await;
         }
 
         // Check if crate is downloaded
@@ -162,7 +170,7 @@ impl CrateCache {
             .await?;
 
         // Load and return the generated docs
-        self.load_docs(&docs_key, version).await
+        self.load_member_docs(name, version, member_name).await
     }
 
     /// Ensure documentation is available for a crate or workspace member
@@ -328,8 +336,34 @@ impl CrateCache {
         }
 
         // Clone the repository
-        let _repo = Repository::clone(repo_url, &temp_dir)
+        let repo = Repository::clone(repo_url, &temp_dir)
             .with_context(|| format!("Failed to clone repository: {}", repo_url))?;
+        
+        // Checkout the specific branch or tag (version contains the branch/tag name)
+        // The version parameter here is actually the branch or tag name
+        if version != "main" && version != "master" {
+            // Try to checkout as a branch first
+            let refname = format!("refs/remotes/origin/{}", version);
+            if let Ok(reference) = repo.find_reference(&refname) {
+                let oid = reference.target().ok_or_else(|| anyhow::anyhow!("Reference has no target"))?;
+                repo.set_head_detached(oid)
+                    .with_context(|| format!("Failed to checkout branch: {}", version))?;
+                repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+                    .with_context(|| format!("Failed to checkout branch: {}", version))?;
+            } else {
+                // Try as a tag
+                let tag_ref = format!("refs/tags/{}", version);
+                if let Ok(reference) = repo.find_reference(&tag_ref) {
+                    let oid = reference.target().ok_or_else(|| anyhow::anyhow!("Reference has no target"))?;
+                    repo.set_head_detached(oid)
+                        .with_context(|| format!("Failed to checkout tag: {}", version))?;
+                    repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
+                        .with_context(|| format!("Failed to checkout tag: {}", version))?;
+                } else {
+                    bail!("Could not find branch or tag: {}", version);
+                }
+            }
+        }
 
         // Determine source path within the repository
         let repo_source_path = if let Some(path) = repo_path {
@@ -644,6 +678,24 @@ impl CrateCache {
 
         Ok(crate_docs)
     }
+    
+    /// Load workspace member documentation from cache
+    pub async fn load_member_docs(&self, name: &str, version: &str, member_name: &str) -> Result<rustdoc_types::Crate> {
+        let docs_path = self.storage.member_docs_path(name, version, member_name);
+
+        if !docs_path.exists() {
+            bail!("Documentation not found for {}/{} in {}-{}", member_name, name, name, version);
+        }
+
+        let json_string = tokio::fs::read_to_string(&docs_path)
+            .await
+            .context("Failed to read member documentation file")?;
+
+        let crate_docs: rustdoc_types::Crate =
+            serde_json::from_str(&json_string).context("Failed to parse member documentation JSON")?;
+
+        Ok(crate_docs)
+    }
 
     /// Get cached versions of a crate
     pub async fn get_cached_versions(&self, name: &str) -> Result<Vec<String>> {
@@ -916,5 +968,187 @@ impl CrateCache {
             .ok_or_else(|| anyhow::anyhow!("No 'name' field found in [package] section"))?;
 
         Ok(name.to_string())
+    }
+
+    /// Common method to cache a crate from any source
+    pub async fn cache_crate_with_source(&self, source: CrateSource) -> String {
+        let (crate_name, version_owned, members, source_str);
+        
+        match &source {
+            CrateSource::CratesIO(params) => {
+                crate_name = &params.crate_name;
+                version_owned = params.version.clone();
+                members = &params.members;
+                source_str = None;
+            }
+            CrateSource::GitHub(params) => {
+                crate_name = &params.crate_name;
+                // Use branch or tag as version
+                version_owned = if let Some(branch) = &params.branch {
+                    branch.clone()
+                } else if let Some(tag) = &params.tag {
+                    tag.clone()
+                } else {
+                    // This should not happen due to validation in the tool layer
+                    return format!(r#"{{"error": "Either branch or tag must be specified"}}"#);
+                };
+                members = &params.members;
+                // Include branch/tag in the source string for tracking
+                source_str = if let Some(branch) = &params.branch {
+                    Some(format!("{}#branch:{}", params.github_url, branch))
+                } else if let Some(tag) = &params.tag {
+                    Some(format!("{}#tag:{}", params.github_url, tag))
+                } else {
+                    Some(params.github_url.clone())
+                };
+            }
+            CrateSource::LocalPath(params) => {
+                crate_name = &params.crate_name;
+                version_owned = params.version.clone();
+                members = &params.members;
+                source_str = Some(params.path.clone());
+            }
+        }
+        
+        let version = &version_owned;
+
+        // If members are specified, cache those specific workspace members
+        if let Some(members) = members {
+            let mut results = Vec::new();
+            let mut errors = Vec::new();
+
+            for member in members {
+                match self
+                    .ensure_workspace_member_docs(
+                        crate_name,
+                        version,
+                        source_str.as_deref(),
+                        member,
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        results.push(format!("Successfully cached member: {}", member));
+                    }
+                    Err(e) => {
+                        errors.push(format!("Failed to cache member {}: {}", member, e));
+                    }
+                }
+            }
+
+            if errors.is_empty() {
+                return serde_json::json!({
+                    "status": "success",
+                    "message": format!("Successfully cached {} workspace members", results.len()),
+                    "crate": crate_name,
+                    "version": version,
+                    "members": members,
+                    "results": results
+                })
+                .to_string();
+            } else {
+                return serde_json::json!({
+                    "status": "partial_success",
+                    "message": format!("Cached {} members with {} errors", results.len(), errors.len()),
+                    "crate": crate_name,
+                    "version": version,
+                    "members": members,
+                    "results": results,
+                    "errors": errors
+                })
+                .to_string();
+            }
+        }
+
+        // First, download the crate if not already cached
+        let source_path = match self
+            .download_or_copy_crate(
+                crate_name,
+                version,
+                source_str.as_deref(),
+            )
+            .await
+        {
+            Ok(path) => path,
+            Err(e) => return format!(r#"{{"error": "Failed to download crate: {}"}}"#, e),
+        };
+
+        // Check if it's a workspace
+        let cargo_toml_path = source_path.join("Cargo.toml");
+        match self.is_workspace(&cargo_toml_path) {
+            Ok(true) => {
+                // It's a workspace, get the members
+                match self.get_workspace_members(&cargo_toml_path) {
+                    Ok(members) => {
+                        serde_json::json!({
+                            "status": "workspace_detected",
+                            "message": "This is a workspace crate. Please specify which members to cache using the 'members' parameter.",
+                            "crate": crate_name,
+                            "version": version,
+                            "workspace_members": members,
+                            "example_usage": format!(
+                                "cache_crate_from_{}(crate_name=\"{}\", version=\"{}\", members={:?})",
+                                match source {
+                                    CrateSource::CratesIO(_) => "cratesio",
+                                    CrateSource::GitHub(_) => "github",
+                                    CrateSource::LocalPath(_) => "local",
+                                },
+                                crate_name,
+                                version,
+                                members.get(0..2.min(members.len())).unwrap_or(&[])
+                            )
+                        })
+                        .to_string()
+                    }
+                    Err(e) => {
+                        format!(r#"{{"error": "Failed to get workspace members: {}"}}"#, e)
+                    }
+                }
+            }
+            Ok(false) => {
+                // Not a workspace, proceed with normal caching
+                match self
+                    .ensure_crate_docs(
+                        crate_name,
+                        version,
+                        source_str.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(_) => serde_json::json!({
+                        "status": "success",
+                        "message": format!("Successfully cached {}-{}", crate_name, version),
+                        "crate": crate_name,
+                        "version": version
+                    })
+                    .to_string(),
+                    Err(e) => {
+                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+                    }
+                }
+            }
+            Err(_e) => {
+                // Error checking workspace status, try normal caching anyway
+                match self
+                    .ensure_crate_docs(
+                        crate_name,
+                        version,
+                        source_str.as_deref(),
+                    )
+                    .await
+                {
+                    Ok(_) => serde_json::json!({
+                        "status": "success",
+                        "message": format!("Successfully cached {}-{}", crate_name, version),
+                        "crate": crate_name,
+                        "version": version
+                    })
+                    .to_string(),
+                    Err(e) => {
+                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+                    }
+                }
+            }
+        }
     }
 }

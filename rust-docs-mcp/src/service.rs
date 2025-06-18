@@ -10,7 +10,7 @@ use rmcp::{
 };
 
 use crate::analysis::tools::AnalysisTools;
-use crate::cache::{CrateCache, tools::CacheTools};
+use crate::cache::{CrateCache, tools::{CacheTools, CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams}};
 use crate::deps::tools::DepsTools;
 use crate::docs::tools::DocsTools;
 
@@ -39,13 +39,33 @@ impl RustDocsService {
 
     // Cache tools
     #[tool(
-        description = "Download and cache a specific crate version for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
+        description = "Download and cache a specific crate version from crates.io for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
     )]
-    pub async fn cache_crate(
+    pub async fn cache_crate_from_cratesio(
         &self,
-        #[tool(aggr)] params: crate::cache::tools::CacheCrateParams,
+        #[tool(aggr)] params: CacheCrateFromCratesIOParams,
     ) -> String {
-        self.cache_tools.cache_crate(params).await
+        self.cache_tools.cache_crate_from_cratesio(params).await
+    }
+
+    #[tool(
+        description = "Download and cache a specific crate version from GitHub for offline use. Supports cloning from any GitHub repository URL. You must specify either a branch OR a tag (but not both). The crate will be cached using the branch/tag name as the version."
+    )]
+    pub async fn cache_crate_from_github(
+        &self,
+        #[tool(aggr)] params: CacheCrateFromGitHubParams,
+    ) -> String {
+        self.cache_tools.cache_crate_from_github(params).await
+    }
+
+    #[tool(
+        description = "Cache a specific crate version from a local file system path. Supports absolute paths, home paths (~), and relative paths. The specified directory must contain a Cargo.toml file."
+    )]
+    pub async fn cache_crate_from_local(
+        &self,
+        #[tool(aggr)] params: CacheCrateFromLocalParams,
+    ) -> String {
+        self.cache_tools.cache_crate_from_local(params).await
     }
 
     #[tool(

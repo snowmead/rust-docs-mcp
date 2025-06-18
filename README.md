@@ -22,7 +22,9 @@ An MCP (Model Context Protocol) server that provides comprehensive access to Rus
 
 ### Cache Management
 
-- `cache_crate` - Download and cache crates from crates.io, GitHub, or local paths
+- `cache_crate_from_cratesio` - Download and cache a specific crate version from crates.io
+- `cache_crate_from_github` - Download and cache from GitHub (specify branch or tag)
+- `cache_crate_from_local` - Cache from a local file system path
 - `remove_crate` - Remove cached crate versions to free disk space
 - `list_cached_crates` - View all cached crates with versions and sizes
 - `list_crate_versions` - List cached versions for a specific crate

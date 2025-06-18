@@ -101,3 +101,123 @@ impl ItemAttrs {
         self.test.is_none() && self.cfgs.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ra_ap_hir::Symbol;
+
+    #[test]
+    fn test_cfg_attr_flag() {
+        let cfg = cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("test")));
+        let attr = ItemCfgAttr::new(&cfg).unwrap();
+        
+        assert_eq!(attr, ItemCfgAttr::Flag("test".to_string()));
+        assert_eq!(attr.to_string(), "test");
+    }
+
+    #[test]
+    fn test_cfg_attr_key_value() {
+        let cfg = cfg::CfgExpr::Atom(cfg::CfgAtom::KeyValue {
+            key: Symbol::intern("target_os"),
+            value: Symbol::intern("linux"),
+        });
+        let attr = ItemCfgAttr::new(&cfg).unwrap();
+        
+        assert_eq!(attr, ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string()));
+        assert_eq!(attr.to_string(), "target_os = \"linux\"");
+    }
+
+    #[test]
+    fn test_cfg_attr_all() {
+        let cfgs = vec![
+            cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("test"))),
+            cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("debug_assertions"))),
+        ];
+        let cfg = cfg::CfgExpr::All(cfgs.into_boxed_slice());
+        let attr = ItemCfgAttr::new(&cfg).unwrap();
+        
+        match &attr {
+            ItemCfgAttr::All(items) => {
+                assert_eq!(items.len(), 2);
+                assert_eq!(items[0], ItemCfgAttr::Flag("test".to_string()));
+                assert_eq!(items[1], ItemCfgAttr::Flag("debug_assertions".to_string()));
+            }
+            _ => panic!("Expected All variant"),
+        }
+        assert_eq!(attr.to_string(), "all(test, debug_assertions)");
+    }
+
+    #[test]
+    fn test_cfg_attr_any() {
+        let cfgs = vec![
+            cfg::CfgExpr::Atom(cfg::CfgAtom::KeyValue {
+                key: Symbol::intern("target_os"),
+                value: Symbol::intern("linux"),
+            }),
+            cfg::CfgExpr::Atom(cfg::CfgAtom::KeyValue {
+                key: Symbol::intern("target_os"),
+                value: Symbol::intern("macos"),
+            }),
+        ];
+        let cfg = cfg::CfgExpr::Any(cfgs.into_boxed_slice());
+        let attr = ItemCfgAttr::new(&cfg).unwrap();
+        
+        match &attr {
+            ItemCfgAttr::Any(items) => {
+                assert_eq!(items.len(), 2);
+            }
+            _ => panic!("Expected Any variant"),
+        }
+        assert_eq!(attr.to_string(), "any(target_os = \"linux\", target_os = \"macos\")");
+    }
+
+    #[test]
+    fn test_cfg_attr_not() {
+        let inner = cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("test")));
+        let cfg = cfg::CfgExpr::Not(Box::new(inner));
+        let attr = ItemCfgAttr::new(&cfg).unwrap();
+        
+        match &attr {
+            ItemCfgAttr::Not(inner) => {
+                assert_eq!(**inner, ItemCfgAttr::Flag("test".to_string()));
+            }
+            _ => panic!("Expected Not variant"),
+        }
+        assert_eq!(attr.to_string(), "not(test)");
+    }
+
+    #[test]
+    fn test_cfg_attr_invalid() {
+        let cfg = cfg::CfgExpr::Invalid;
+        let attr = ItemCfgAttr::new(&cfg);
+        assert!(attr.is_none());
+    }
+
+    #[test]
+    fn test_item_test_attr_display() {
+        let attr = ItemTestAttr;
+        assert_eq!(attr.to_string(), "test");
+    }
+
+    #[test]
+    fn test_item_attrs_is_empty() {
+        let attrs = ItemAttrs {
+            cfgs: vec![],
+            test: None,
+        };
+        assert!(attrs.is_empty());
+
+        let attrs = ItemAttrs {
+            cfgs: vec![ItemCfgAttr::Flag("test".to_string())],
+            test: None,
+        };
+        assert!(!attrs.is_empty());
+
+        let attrs = ItemAttrs {
+            cfgs: vec![],
+            test: Some(ItemTestAttr),
+        };
+        assert!(!attrs.is_empty());
+    }
+}

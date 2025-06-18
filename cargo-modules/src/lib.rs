@@ -29,6 +29,11 @@ pub mod options;
 pub mod tree;
 pub mod utils;
 
+
+// Internal modules not part of the public API
+mod graph;
+mod colors;
+
 /// Analysis configuration to control performance and depth
 #[derive(Debug, Clone)]
 pub struct AnalysisConfig {

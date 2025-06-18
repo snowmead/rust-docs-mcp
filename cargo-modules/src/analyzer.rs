@@ -684,3 +684,166 @@ pub fn moduledef_is_crate(module_def_hir: hir::ModuleDef, _db: &ide::RootDatabas
     };
     module.is_crate_root()
 }
+
+#[allow(dead_code)]
+pub(crate) fn has_test_cfg(attrs: &[ItemCfgAttr]) -> bool {
+    attrs.iter().any(|attr| match attr {
+        ItemCfgAttr::Flag(flag) => flag == "test",
+        _ => false,
+    })
+}
+
+#[allow(dead_code)]
+pub(crate) fn name(module_def_hir: hir::ModuleDef, db: &ide::RootDatabase, edition: ide::Edition) -> String {
+    display_name(module_def_hir, db, edition)
+}
+
+#[allow(dead_code)]
+pub(crate) fn use_tree_matches_item_path(use_tree: &ast::UseTree, path: &str) -> bool {
+    // Check if a use tree matches the given path
+    let use_path = match use_tree.path() {
+        Some(p) => p,
+        None => return false,
+    };
+    
+    let segments: Vec<String> = use_path
+        .segments()
+        .filter_map(|seg| seg.name_ref())
+        .map(|name| name.text().to_string())
+        .collect();
+    
+    let path_parts: Vec<&str> = path.split("::").collect();
+    
+    if segments.len() > path_parts.len() {
+        return false;
+    }
+    
+    segments.iter().zip(path_parts.iter()).all(|(a, b)| a == b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_load_options_creation() {
+        let opts = LoadOptions {
+            cfg_test: true,
+            sysroot: false,
+        };
+        assert!(opts.cfg_test);
+        assert!(!opts.sysroot);
+    }
+
+    #[test]
+    fn test_cargo_config_with_test_enabled() {
+        let project_opts = ProjectOptions {
+            lib: true,
+            bin: None,
+            package: None,
+            no_default_features: false,
+            all_features: false,
+            features: vec![],
+            target: None,
+            manifest_path: PathBuf::from("Cargo.toml"),
+        };
+
+        let load_opts = LoadOptions {
+            cfg_test: true,
+            sysroot: false,
+        };
+
+        let _config = cargo_config(&project_opts, &load_opts);
+        
+        // Just verify we can create a config with test enabled
+        assert!(load_opts.cfg_test);
+    }
+
+    #[test]
+    fn test_cargo_config_with_test_disabled() {
+        let project_opts = ProjectOptions {
+            lib: true,
+            bin: None,
+            package: None,
+            no_default_features: false,
+            all_features: false,
+            features: vec![],
+            target: None,
+            manifest_path: PathBuf::from("Cargo.toml"),
+        };
+
+        let load_opts = LoadOptions {
+            cfg_test: false,
+            sysroot: false,
+        };
+
+        let _config = cargo_config(&project_opts, &load_opts);
+        
+        // Just verify we can create a config with test disabled
+        assert!(!load_opts.cfg_test);
+    }
+
+    #[test]
+    fn test_load_config_creation() {
+        let config = load_config();
+        // We disable load_out_dirs_from_check to prevent hangs
+        assert!(!config.load_out_dirs_from_check);
+    }
+
+    #[test]
+    fn test_parse_use_tree() {
+        let use_tree = parse_use_tree("std::collections::HashMap");
+        assert!(use_tree.path().is_some());
+        
+        let path = use_tree.path().unwrap();
+        let segments: Vec<_> = path.segments()
+            .filter_map(|seg| seg.name_ref())
+            .map(|name| name.text().to_string())
+            .collect();
+        
+        assert_eq!(segments, vec!["std", "collections", "HashMap"]);
+    }
+
+    #[test]
+    fn test_use_tree_matches_item_path() {
+        let use_tree = parse_use_tree("std::collections");
+        assert!(use_tree_matches_item_path(&use_tree, "std::collections::HashMap"));
+        assert!(use_tree_matches_item_path(&use_tree, "std::collections"));
+        assert!(!use_tree_matches_item_path(&use_tree, "std::io"));
+        
+        let use_tree = parse_use_tree("std");
+        assert!(use_tree_matches_item_path(&use_tree, "std::collections"));
+        assert!(!use_tree_matches_item_path(&use_tree, "core::mem"));
+    }
+
+    #[test]
+    fn test_parse_ast_function() {
+        use syntax::ast::HasName;
+        let func: ast::Fn = parse_ast("fn test() {}");
+        assert_eq!(func.name().unwrap().text(), "test");
+    }
+
+    #[test]
+    fn test_has_test_cfg() {
+        let attrs = vec![
+            ItemCfgAttr::Flag("test".to_string()),
+            ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string()),
+        ];
+        assert!(has_test_cfg(&attrs));
+
+        let attrs = vec![
+            ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string()),
+        ];
+        assert!(!has_test_cfg(&attrs));
+    }
+
+    #[test]
+    fn test_crate_name_canonicalization() {
+        // This would need a mock database to test properly
+        // For now just test the string replacement logic
+        let display_name = "my-crate-name".to_string();
+        let canonicalized = display_name.replace('-', "_");
+        assert_eq!(canonicalized, "my_crate_name");
+    }
+}

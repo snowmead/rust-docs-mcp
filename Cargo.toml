@@ -1,3 +1,4 @@
 [workspace]
 members = ["rust-docs-mcp", "cargo-modules"]
 resolver = "2"
+exclude = ["cargo-modules/tests/projects/**"]

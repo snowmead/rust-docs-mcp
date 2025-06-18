@@ -6,6 +6,51 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::CrateCache;
+use crate::cache::service::CrateSource;
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheCrateFromCratesIOParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+    #[schemars(
+        description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
+    )]
+    pub members: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheCrateFromGitHubParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "GitHub repository URL (e.g., https://github.com/user/repo)")]
+    pub github_url: String,
+    #[schemars(description = "Branch to use (e.g., 'main', 'develop'). Only one of branch or tag can be specified.")]
+    pub branch: Option<String>,
+    #[schemars(description = "Tag to use (e.g., 'v1.0.0', '0.2.1'). Only one of branch or tag can be specified.")]
+    pub tag: Option<String>,
+    #[schemars(
+        description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
+    )]
+    pub members: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheCrateFromLocalParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version to use for caching (e.g., '0.1.0')")]
+    pub version: String,
+    #[schemars(
+        description = "Local file system path. Supports absolute paths (/path), home paths (~/path), and relative paths (./path, ../path)"
+    )]
+    pub path: String,
+    #[schemars(
+        description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
+    )]
+    pub members: Option<Vec<String>>,
+}
 
 /// Format bytes into human-readable string
 fn format_bytes(bytes: u64) -> String {
@@ -28,23 +73,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CacheCrateParams {
-    #[schemars(description = "The name of the crate to cache")]
-    pub crate_name: String,
-    #[schemars(description = "The version of the crate to cache")]
-    pub version: String,
-    #[schemars(
-        description = "Optional source for the crate. Supports three formats:\n- GitHub URLs: https://github.com/user/repo or https://github.com/user/repo/tree/branch/path/to/crate\n- Local paths: /absolute/path, ~/home/path, ../relative/path, or ./current/path\n- If not provided, defaults to crates.io"
-    )]
-    pub source: Option<String>,
-    #[schemars(
-        description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
-    )]
-    pub members: Option<Vec<String>>,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CrateMetadataQuery {
     #[schemars(description = "The name of the crate")]
     pub crate_name: String,
@@ -56,7 +85,7 @@ pub struct CrateMetadataQuery {
     pub members: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GetCratesMetadataParams {
     #[schemars(description = "List of crates and their members to query metadata for")]
     pub queries: Vec<CrateMetadataQuery>,
@@ -72,143 +101,37 @@ impl CacheTools {
         Self { cache }
     }
 
-    pub async fn cache_crate(&self, params: CacheCrateParams) -> String {
+    pub async fn cache_crate_from_cratesio(&self, params: CacheCrateFromCratesIOParams) -> String {
         let cache = self.cache.lock().await;
+        let source = CrateSource::CratesIO(params);
+        cache.cache_crate_with_source(source).await
+    }
 
-        // If members are specified, cache those specific workspace members
-        if let Some(members) = &params.members {
-            let mut results = Vec::new();
-            let mut errors = Vec::new();
-
-            for member in members {
-                match cache
-                    .ensure_workspace_member_docs(
-                        &params.crate_name,
-                        &params.version,
-                        params.source.as_deref(),
-                        member,
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        results.push(format!("Successfully cached member: {}", member));
-                    }
-                    Err(e) => {
-                        errors.push(format!("Failed to cache member {}: {}", member, e));
-                    }
-                }
-            }
-
-            if errors.is_empty() {
+    pub async fn cache_crate_from_github(&self, params: CacheCrateFromGitHubParams) -> String {
+        // Validate that only one of branch or tag is provided
+        match (&params.branch, &params.tag) {
+            (Some(_), Some(_)) => {
                 return serde_json::json!({
-                    "status": "success",
-                    "message": format!("Successfully cached {} workspace members", results.len()),
-                    "crate": params.crate_name,
-                    "version": params.version,
-                    "members": members,
-                    "results": results
-                })
-                .to_string();
-            } else {
+                    "error": "Only one of 'branch' or 'tag' can be specified, not both"
+                }).to_string();
+            }
+            (None, None) => {
                 return serde_json::json!({
-                    "status": "partial_success",
-                    "message": format!("Cached {} members with {} errors", results.len(), errors.len()),
-                    "crate": params.crate_name,
-                    "version": params.version,
-                    "members": members,
-                    "results": results,
-                    "errors": errors
-                })
-                .to_string();
+                    "error": "Either 'branch' or 'tag' must be specified"
+                }).to_string();
             }
+            _ => {} // Valid: exactly one is provided
         }
+        
+        let cache = self.cache.lock().await;
+        let source = CrateSource::GitHub(params);
+        cache.cache_crate_with_source(source).await
+    }
 
-        // First, download the crate if not already cached
-        let source_path = match cache
-            .download_or_copy_crate(
-                &params.crate_name,
-                &params.version,
-                params.source.as_deref(),
-            )
-            .await
-        {
-            Ok(path) => path,
-            Err(e) => return format!(r#"{{"error": "Failed to download crate: {}"}}"#, e),
-        };
-
-        // Check if it's a workspace
-        let cargo_toml_path = source_path.join("Cargo.toml");
-        match cache.is_workspace(&cargo_toml_path) {
-            Ok(true) => {
-                // It's a workspace, get the members
-                match cache.get_workspace_members(&cargo_toml_path) {
-                    Ok(members) => {
-                        serde_json::json!({
-                            "status": "workspace_detected",
-                            "message": "This is a workspace crate. Please specify which members to cache using the 'members' parameter.",
-                            "crate": params.crate_name,
-                            "version": params.version,
-                            "workspace_members": members,
-                            "example_usage": format!(
-                                "cache_crate(crate_name=\"{}\", version=\"{}\", source={:?}, members={:?})",
-                                params.crate_name,
-                                params.version,
-                                params.source,
-                                members.get(0..2.min(members.len())).unwrap_or(&[])
-                            )
-                        })
-                        .to_string()
-                    }
-                    Err(e) => {
-                        format!(r#"{{"error": "Failed to get workspace members: {}"}}"#, e)
-                    }
-                }
-            }
-            Ok(false) => {
-                // Not a workspace, proceed with normal caching
-                match cache
-                    .ensure_crate_docs(
-                        &params.crate_name,
-                        &params.version,
-                        params.source.as_deref(),
-                    )
-                    .await
-                {
-                    Ok(_) => serde_json::json!({
-                        "status": "success",
-                        "message": format!("Successfully cached {}-{}", params.crate_name, params.version),
-                        "crate": params.crate_name,
-                        "version": params.version
-                    })
-                    .to_string(),
-                    Err(e) => {
-                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
-                    }
-                }
-            }
-            Err(_e) => {
-                // Error checking workspace status, try normal caching anyway
-                match cache
-                    .ensure_crate_docs(
-                        &params.crate_name,
-                        &params.version,
-                        params.source.as_deref(),
-                    )
-                    .await
-                {
-                    Ok(_) => serde_json::json!({
-                        "status": "success",
-                        "message": format!("Successfully cached {}-{}", params.crate_name, params.version),
-                        "crate": params.crate_name,
-                        "version": params.version
-                    })
-                    .to_string(),
-                    Err(e) => {
-                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
-                    }
-                }
-            }
-        }
+    pub async fn cache_crate_from_local(&self, params: CacheCrateFromLocalParams) -> String {
+        let cache = self.cache.lock().await;
+        let source = CrateSource::LocalPath(params);
+        cache.cache_crate_with_source(source).await
     }
 
     pub async fn remove_crate(&self, crate_name: String, version: String) -> String {
