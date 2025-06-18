@@ -133,6 +133,36 @@ main() {
         echo -e "${GREEN}✅ You can now run 'rust-docs-mcp' from anywhere!${NC}"
     fi
     
+    # Check if Claude Code is installed and ask about MCP server setup
+    if command_exists claude && claude --version >/dev/null 2>&1; then
+        echo
+        echo -e "${BLUE}Would you like to add rust-docs-mcp to Claude Code as an MCP server?${NC}"
+        echo -e "${YELLOW}This will enable you to use Rust documentation features directly in Claude Code.${NC}"
+        echo
+        read -p "Add to Claude Code? [y/N] " -n 1 -r
+        echo
+        
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            info "Adding rust-docs-mcp to Claude Code..."
+            
+            # Add the MCP server to Claude Code
+            if claude mcp add rust-docs -s user "${INSTALL_DIR}/rust-docs-mcp" -t stdio; then
+                success "rust-docs-mcp added to Claude Code!"
+                echo
+                echo -e "${GREEN}You can now use Rust documentation features in Claude Code!${NC}"
+            else
+                warn "Failed to add rust-docs-mcp to Claude Code"
+                echo
+                echo -e "${YELLOW}You can try adding it manually with:${NC}"
+                echo -e "${BLUE}claude mcp add rust-docs -s user ${INSTALL_DIR}/rust-docs-mcp -t stdio${NC}"
+            fi
+        else
+            echo
+            echo -e "${YELLOW}You can add rust-docs-mcp to Claude Code later with:${NC}"
+            echo -e "${BLUE}claude mcp add rust-docs -s user ${INSTALL_DIR}/rust-docs-mcp -t stdio${NC}"
+        fi
+    fi
+    
     echo
     echo -e "${BLUE}Usage:${NC}"
     echo -e "  ${GREEN}rust-docs-mcp${NC}                 # Start MCP server"
