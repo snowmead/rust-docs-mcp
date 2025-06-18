@@ -480,16 +480,6 @@ pub(crate) fn display_name(
     }
 }
 
-pub(crate) fn name(
-    module_def_hir: hir::ModuleDef,
-    db: &ide::RootDatabase,
-    edition: ide::Edition,
-) -> Option<String> {
-    module_def_hir
-        .name(db)
-        .map(|name| name.display(db, edition).to_string())
-}
-
 pub(crate) fn display_path(
     module_def_hir: hir::ModuleDef,
     db: &ide::RootDatabase,
@@ -602,92 +592,6 @@ pub(crate) fn parse_ast<N: syntax::AstNode>(text: &str) -> N {
 
 pub(crate) fn parse_use_tree(path_expr: &str) -> ast::UseTree {
     parse_ast(&format!("use {path_expr};"))
-}
-
-pub(crate) fn parse_path_expr(path_expr: &str) -> ast::Path {
-    parse_ast(path_expr)
-}
-
-pub(crate) fn use_tree_matches_item_path(use_tree: &ast::UseTree, item_path: &str) -> bool {
-    if item_path.is_empty() {
-        return false;
-    }
-    let node_path: ast::Path = parse_path_expr(item_path);
-    use_tree_matches_path(use_tree, &node_path)
-}
-
-pub(crate) fn use_tree_matches_path(use_tree: &ast::UseTree, path: &ast::Path) -> bool {
-    let mut path_segments_iter = path.segments();
-
-    if let Some(use_tree_path) = use_tree.path() {
-        for use_tree_segment in use_tree_path.segments() {
-            match path_segments_iter.next() {
-                Some(path_segment) => {
-                    if use_tree_segment.syntax().text() == path_segment.syntax().text() {
-                        continue;
-                    } else {
-                        return false;
-                    }
-                }
-                None => {
-                    return false;
-                }
-            }
-        }
-    }
-
-    let path_segments: Vec<_> = path_segments_iter.collect();
-
-    if path_segments.is_empty() {
-        return use_tree.is_simple_path() || tree_contains_self(use_tree);
-    }
-
-    if use_tree.star_token().is_some() {
-        return path_segments.len() == 1;
-    }
-
-    let path_suffix = ast::make::path_from_segments(path_segments, false);
-
-    use_tree
-        .use_tree_list()
-        .into_iter()
-        .flat_map(|list| list.use_trees())
-        .any(|use_tree| use_tree_matches_path(&use_tree, &path_suffix))
-}
-
-fn path_is_self(path: &ast::Path) -> bool {
-    path.segment().and_then(|seg| seg.self_token()).is_some() && path.qualifier().is_none()
-}
-
-fn tree_is_self(tree: &ast::UseTree) -> bool {
-    tree.path().as_ref().map(path_is_self).unwrap_or(false)
-}
-
-fn tree_contains_self(tree: &ast::UseTree) -> bool {
-    tree.use_tree_list()
-        .map(|tree_list| tree_list.use_trees().any(|tree| tree_is_self(&tree)))
-        .unwrap_or(false)
-}
-
-pub(crate) fn has_test_cfg(hir: hir::ModuleDef, db: &ide::RootDatabase) -> bool {
-    let Some(attrs) = hir.attrs(db) else {
-        return false;
-    };
-
-    let test_key = hir::Symbol::intern("test");
-    let cfg_exprs: Vec<_> = attrs.cfgs().collect();
-
-    cfg_exprs.into_iter().any(|cfg_expr| {
-        cfg_expr
-            .fold(&|cfg| {
-                use ra_ap_cfg::CfgAtom;
-                match cfg {
-                    CfgAtom::Flag(symbol) => symbol == &test_key,
-                    CfgAtom::KeyValue { .. } => false,
-                }
-            })
-            .unwrap_or_default()
-    })
 }
 
 pub(crate) fn is_test_function(function: hir::Function, db: &ide::RootDatabase) -> bool {

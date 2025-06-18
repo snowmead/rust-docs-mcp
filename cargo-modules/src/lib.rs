@@ -18,20 +18,16 @@ use ra_ap_ide::{self as ide};
 
 pub use crate::{
     analyzer::LoadOptions,
-    graph::{Edge, Graph, GraphBuilder, Node, Relationship},
     item::Item,
     options::{GeneralOptions, ProjectOptions},
     tree::{ModuleTree, Tree, TreeBuilder},
 };
 
 pub mod analyzer;
-pub mod graph;
 pub mod item;
 pub mod options;
 pub mod tree;
 pub mod utils;
-
-mod colors;
 
 /// Analysis configuration to control performance and depth
 #[derive(Debug, Clone)]
@@ -122,24 +118,6 @@ pub fn analyze_crate(
     Ok((crate_id, analysis_host, edition))
 }
 
-/// Builds a dependency graph from a crate analysis
-///
-/// # Arguments
-/// * `crate_id` - The crate to analyze
-/// * `db` - The analysis database
-/// * `edition` - The Rust edition
-///
-/// # Returns
-/// A tuple of (dependency graph, root node index)
-pub fn build_dependency_graph(
-    crate_id: hir::Crate,
-    db: &ide::RootDatabase,
-    edition: ide::Edition,
-) -> Result<(Graph<Node, Edge>, petgraph::graph::NodeIndex)> {
-    let builder = GraphBuilder::new(db, edition, crate_id);
-    builder.build()
-}
-
 /// Builds a module tree from a crate analysis
 ///
 /// # Arguments
@@ -170,40 +148,4 @@ pub fn detect_orphans(path: &Path) -> Result<Vec<std::path::PathBuf>> {
     // For now, return empty vector
     let _ = path;
     Ok(vec![])
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_analyze_current_crate() {
-        let current_dir = std::env::current_dir().unwrap();
-        let config = AnalysisConfig::fast();
-        let result = analyze_crate(&current_dir, None, config);
-
-        match result {
-            Ok((crate_id, analysis_host, edition)) => {
-                println!("Successfully analyzed crate: {:?}", crate_id);
-                println!("Edition: {:?}", edition);
-
-                // Test building dependency graph
-                let db = analysis_host.raw_database();
-                match build_dependency_graph(crate_id, db, edition) {
-                    Ok((graph, _root_idx)) => {
-                        println!(
-                            "Successfully built dependency graph with {} nodes",
-                            graph.node_count()
-                        );
-                    }
-                    Err(e) => {
-                        println!("Failed to build dependency graph: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Analysis failed: {}", e);
-            }
-        }
-    }
 }
