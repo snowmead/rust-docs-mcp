@@ -49,6 +49,13 @@ impl CacheStorage {
         self.cache_dir.join("crates").join(name).join(version)
     }
 
+    /// Get the path for a specific workspace member
+    pub fn member_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
+        self.crate_path(name, version)
+            .join("members")
+            .join(member_name)
+    }
+
     /// Get the source directory path for a crate
     pub fn source_path(&self, name: &str, version: &str) -> PathBuf {
         self.crate_path(name, version).join("source")
@@ -59,14 +66,37 @@ impl CacheStorage {
         self.crate_path(name, version).join("docs.json")
     }
 
+    /// Get the documentation JSON path for a workspace member
+    pub fn member_docs_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
+        self.member_path(name, version, member_name)
+            .join("docs.json")
+    }
+
     /// Get the metadata path for a crate
     pub fn metadata_path(&self, name: &str, version: &str) -> PathBuf {
         self.crate_path(name, version).join("metadata.json")
     }
 
+    /// Get the metadata path for a workspace member
+    pub fn member_metadata_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
+        self.member_path(name, version, member_name)
+            .join("metadata.json")
+    }
+
     /// Get the dependencies path for a crate
     pub fn dependencies_path(&self, name: &str, version: &str) -> PathBuf {
         self.crate_path(name, version).join("dependencies.json")
+    }
+
+    /// Get the dependencies path for a workspace member
+    pub fn member_dependencies_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> PathBuf {
+        self.member_path(name, version, member_name)
+            .join("dependencies.json")
     }
 
     /// Check if a crate version is cached
@@ -77,6 +107,16 @@ impl CacheStorage {
     /// Check if documentation is generated for a crate
     pub fn has_docs(&self, name: &str, version: &str) -> bool {
         self.docs_path(name, version).exists()
+    }
+
+    /// Check if a workspace member is cached
+    pub fn is_member_cached(&self, name: &str, version: &str, member_name: &str) -> bool {
+        self.member_path(name, version, member_name).exists()
+    }
+
+    /// Check if documentation is generated for a workspace member
+    pub fn has_member_docs(&self, name: &str, version: &str, member_name: &str) -> bool {
+        self.member_docs_path(name, version, member_name).exists()
     }
 
     /// Ensure a directory exists
@@ -114,7 +154,13 @@ impl CacheStorage {
     }
 
     /// Save metadata for a crate with source information
-    pub fn save_metadata_with_source(&self, name: &str, version: &str, source: &str, source_path: Option<&str>) -> Result<()> {
+    pub fn save_metadata_with_source(
+        &self,
+        name: &str,
+        version: &str,
+        source: &str,
+        source_path: Option<&str>,
+    ) -> Result<()> {
         let crate_path = self.crate_path(name, version);
         let size_bytes = self.calculate_dir_size(&crate_path)?;
 
@@ -134,9 +180,52 @@ impl CacheStorage {
         Ok(())
     }
 
+    /// Save metadata for a workspace member
+    pub fn save_member_metadata(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+        package_name: &str,
+        source: &str,
+        source_path: Option<&str>,
+    ) -> Result<()> {
+        let member_path = self.member_path(name, version, member_name);
+        let size_bytes = self.calculate_dir_size(&member_path)?;
+
+        let metadata = CrateMetadata {
+            name: package_name.to_string(), // Use actual package name
+            version: version.to_string(),
+            cached_at: chrono::Utc::now(),
+            doc_generated: self.has_member_docs(name, version, member_name),
+            size_bytes,
+            source: source.to_string(),
+            source_path: source_path.map(String::from),
+        };
+
+        let metadata_path = self.member_metadata_path(name, version, member_name);
+        self.ensure_dir(metadata_path.parent().unwrap())?;
+        let json = serde_json::to_string_pretty(&metadata)?;
+        fs::write(metadata_path, json)?;
+        Ok(())
+    }
+
     /// Load metadata for a crate
     pub fn load_metadata(&self, name: &str, version: &str) -> Result<CrateMetadata> {
         let metadata_path = self.metadata_path(name, version);
+        let json = fs::read_to_string(metadata_path)?;
+        let metadata: CrateMetadata = serde_json::from_str(&json)?;
+        Ok(metadata)
+    }
+
+    /// Load metadata for a workspace member
+    pub fn load_member_metadata(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> Result<CrateMetadata> {
+        let metadata_path = self.member_metadata_path(name, version, member_name);
         let json = fs::read_to_string(metadata_path)?;
         let metadata: CrateMetadata = serde_json::from_str(&json)?;
         Ok(metadata)
@@ -193,6 +282,26 @@ impl CacheStorage {
         }
 
         Ok(cached_crates)
+    }
+
+    /// Get all workspace members for a cached crate
+    pub fn list_workspace_members(&self, name: &str, version: &str) -> Result<Vec<String>> {
+        let members_dir = self.crate_path(name, version).join("members");
+        let mut members = Vec::new();
+
+        if !members_dir.exists() {
+            return Ok(members);
+        }
+
+        for member_entry in fs::read_dir(&members_dir)? {
+            let member_entry = member_entry?;
+            if member_entry.file_type()?.is_dir() {
+                let member_name = member_entry.file_name().to_string_lossy().to_string();
+                members.push(member_name);
+            }
+        }
+
+        Ok(members)
     }
 
     /// Remove a cached crate version

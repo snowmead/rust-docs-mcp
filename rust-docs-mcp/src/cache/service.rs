@@ -2,26 +2,32 @@ use crate::cache::storage::CacheStorage;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
+use git2::Repository;
+use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tar::Archive;
-use git2::Repository;
-use std::fs;
+use toml::Value;
 
 /// Different source types for crates
 #[derive(Debug, Clone, PartialEq)]
 enum SourceType {
     CratesIo,
-    GitHub { url: String, repo_path: Option<String> },
-    Local { path: String },
+    GitHub {
+        url: String,
+        repo_path: Option<String>,
+    },
+    Local {
+        path: String,
+    },
 }
 
 /// Service for managing crate caching and documentation generation
 #[derive(Debug, Clone)]
 pub struct CrateCache {
-    storage: CacheStorage,
+    pub(crate) storage: CacheStorage,
     client: reqwest::Client,
 }
 
@@ -41,12 +47,20 @@ impl CrateCache {
             Some(s) => {
                 if s.starts_with("http://") || s.starts_with("https://") {
                     self.parse_github_url(s)
-                } else if s.starts_with('/') || s.starts_with("~/") || s.starts_with("../") || s.starts_with("./") {
-                    SourceType::Local { path: s.to_string() }
+                } else if s.starts_with('/')
+                    || s.starts_with("~/")
+                    || s.starts_with("../")
+                    || s.starts_with("./")
+                {
+                    SourceType::Local {
+                        path: s.to_string(),
+                    }
                 } else {
                     // If it contains path separators, treat as local path
                     if s.contains('/') || s.contains('\\') {
-                        SourceType::Local { path: s.to_string() }
+                        SourceType::Local {
+                            path: s.to_string(),
+                        }
                     } else {
                         SourceType::CratesIo
                     }
@@ -60,29 +74,31 @@ impl CrateCache {
         // Handle GitHub URLs like:
         // https://github.com/user/repo
         // https://github.com/user/repo/tree/branch/path/to/crate
-        
+
         if let Some(github_part) = url.strip_prefix("https://github.com/") {
             let parts: Vec<&str> = github_part.split('/').collect();
             if parts.len() >= 2 {
                 let base_url = format!("https://github.com/{}/{}", parts[0], parts[1]);
-                
+
                 // Check if there's a path specification (tree/branch/path)
                 if parts.len() > 4 && parts[2] == "tree" {
                     // Skip "tree" and branch name, take the rest as path
                     let repo_path = parts[4..].join("/");
-                    SourceType::GitHub { 
-                        url: base_url, 
-                        repo_path: Some(repo_path) 
+                    SourceType::GitHub {
+                        url: base_url,
+                        repo_path: Some(repo_path),
                     }
                 } else {
-                    SourceType::GitHub { 
-                        url: base_url, 
-                        repo_path: None 
+                    SourceType::GitHub {
+                        url: base_url,
+                        repo_path: None,
                     }
                 }
             } else {
                 // Invalid GitHub URL, treat as local path
-                SourceType::Local { path: url.to_string() }
+                SourceType::Local {
+                    path: url.to_string(),
+                }
             }
         } else if url.starts_with("http://github.com/") {
             // Convert http to https and recurse
@@ -90,7 +106,9 @@ impl CrateCache {
             self.parse_github_url(&https_url)
         } else {
             // Not a GitHub URL, treat as local path
-            SourceType::Local { path: url.to_string() }
+            SourceType::Local {
+                path: url.to_string(),
+            }
         }
     }
 
@@ -118,20 +136,88 @@ impl CrateCache {
         self.load_docs(name, version).await
     }
 
+    /// Ensure a workspace member's documentation is available
+    pub async fn ensure_workspace_member_docs(
+        &self,
+        name: &str,
+        version: &str,
+        source: Option<&str>,
+        member_path: &str,
+    ) -> Result<rustdoc_types::Crate> {
+        // Check if docs already exist for this member
+        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let docs_key = format!("{}-{}", name, member_name);
+
+        if self.storage.has_docs(&docs_key, version) {
+            return self.load_docs(&docs_key, version).await;
+        }
+
+        // Check if crate is downloaded
+        if !self.storage.is_cached(name, version) {
+            self.download_or_copy_crate(name, version, source).await?;
+        }
+
+        // Generate documentation for the specific workspace member
+        self.generate_workspace_member_docs(name, version, member_path)
+            .await?;
+
+        // Load and return the generated docs
+        self.load_docs(&docs_key, version).await
+    }
+
+    /// Ensure documentation is available for a crate or workspace member
+    pub async fn ensure_crate_or_member_docs(
+        &self,
+        name: &str,
+        version: &str,
+        member: Option<&str>,
+    ) -> Result<rustdoc_types::Crate> {
+        // If member is specified, use workspace member logic
+        if let Some(member_path) = member {
+            return self
+                .ensure_workspace_member_docs(name, version, None, member_path)
+                .await;
+        }
+
+        // Check if crate is already downloaded
+        if self.storage.is_cached(name, version) {
+            let source_path = self.storage.source_path(name, version);
+            let cargo_toml_path = source_path.join("Cargo.toml");
+
+            // Check if it's a workspace
+            if cargo_toml_path.exists() && self.is_workspace(&cargo_toml_path)? {
+                // It's a workspace without member specified
+                let members = self.get_workspace_members(&cargo_toml_path)?;
+                bail!(
+                    "This is a workspace crate. Please specify a member using the 'member' parameter.\n\
+                    Available members: {:?}\n\
+                    Example: specify member=\"{}\"",
+                    members,
+                    members.first().unwrap_or(&"crates/example".to_string())
+                );
+            }
+        }
+
+        // Regular crate, use normal flow
+        self.ensure_crate_docs(name, version, None).await
+    }
+
     /// Download or copy a crate based on source type
-    async fn download_or_copy_crate(&self, name: &str, version: &str, source: Option<&str>) -> Result<PathBuf> {
+    pub async fn download_or_copy_crate(
+        &self,
+        name: &str,
+        version: &str,
+        source: Option<&str>,
+    ) -> Result<PathBuf> {
         let source_type = self.detect_source_type(source);
-        
+
         match source_type {
-            SourceType::CratesIo => {
-                self.download_crate(name, version).await
-            }
+            SourceType::CratesIo => self.download_crate(name, version).await,
             SourceType::GitHub { url, repo_path } => {
-                self.download_from_github(name, version, &url, repo_path.as_deref()).await
+                self.download_from_github(name, version, &url, repo_path.as_deref())
+                    .await
             }
-            SourceType::Local { path } => {
-                self.copy_from_local(name, version, &path).await
-            }
+            SourceType::Local { path } => self.copy_from_local(name, version, &path).await,
         }
     }
 
@@ -220,11 +306,22 @@ impl CrateCache {
     }
 
     /// Download a crate from GitHub repository
-    async fn download_from_github(&self, name: &str, version: &str, repo_url: &str, repo_path: Option<&str>) -> Result<PathBuf> {
-        tracing::info!("Downloading crate {}-{} from GitHub: {}", name, version, repo_url);
+    async fn download_from_github(
+        &self,
+        name: &str,
+        version: &str,
+        repo_url: &str,
+        repo_path: Option<&str>,
+    ) -> Result<PathBuf> {
+        tracing::info!(
+            "Downloading crate {}-{} from GitHub: {}",
+            name,
+            version,
+            repo_url
+        );
 
         let temp_dir = std::env::temp_dir().join(format!("rust-docs-mcp-git-{}-{}", name, version));
-        
+
         // Clean up any existing temp directory
         if temp_dir.exists() {
             fs::remove_dir_all(&temp_dir).context("Failed to clean temp directory")?;
@@ -244,7 +341,10 @@ impl CrateCache {
         // Verify Cargo.toml exists
         let cargo_toml = repo_source_path.join("Cargo.toml");
         if !cargo_toml.exists() {
-            bail!("No Cargo.toml found at path: {}", repo_source_path.display());
+            bail!(
+                "No Cargo.toml found at path: {}",
+                repo_source_path.display()
+            );
         }
 
         // Copy to cache location
@@ -262,15 +362,30 @@ impl CrateCache {
             Some(path) => format!("{}#{}", repo_url, path),
             None => repo_url.to_string(),
         };
-        self.storage.save_metadata_with_source(name, version, "github", Some(&source_info))?;
+        self.storage
+            .save_metadata_with_source(name, version, "github", Some(&source_info))?;
 
-        tracing::info!("Successfully downloaded and extracted {}-{} from GitHub", name, version);
+        tracing::info!(
+            "Successfully downloaded and extracted {}-{} from GitHub",
+            name,
+            version
+        );
         Ok(source_path)
     }
 
     /// Copy a crate from local file system
-    async fn copy_from_local(&self, name: &str, version: &str, local_path: &str) -> Result<PathBuf> {
-        tracing::info!("Copying crate {}-{} from local path: {}", name, version, local_path);
+    async fn copy_from_local(
+        &self,
+        name: &str,
+        version: &str,
+        local_path: &str,
+    ) -> Result<PathBuf> {
+        tracing::info!(
+            "Copying crate {}-{} from local path: {}",
+            name,
+            version,
+            local_path
+        );
 
         // Expand tilde and other shell expansions
         let expanded_path = shellexpand::full(local_path)
@@ -284,7 +399,10 @@ impl CrateCache {
 
         let cargo_toml = source_path_input.join("Cargo.toml");
         if !cargo_toml.exists() {
-            bail!("No Cargo.toml found at path: {}", source_path_input.display());
+            bail!(
+                "No Cargo.toml found at path: {}",
+                source_path_input.display()
+            );
         }
 
         // Copy to cache location
@@ -295,7 +413,8 @@ impl CrateCache {
             .context("Failed to copy local directory contents")?;
 
         // Save metadata with source information
-        self.storage.save_metadata_with_source(name, version, "local", Some(local_path))?;
+        self.storage
+            .save_metadata_with_source(name, version, "local", Some(local_path))?;
 
         tracing::info!("Successfully copied {}-{} from local path", name, version);
         Ok(source_path)
@@ -320,8 +439,13 @@ impl CrateCache {
                 }
                 self.copy_directory_contents(&path, &dest_path)?;
             } else {
-                fs::copy(&path, &dest_path)
-                    .with_context(|| format!("Failed to copy file from {} to {}", path.display(), dest_path.display()))?;
+                fs::copy(&path, &dest_path).with_context(|| {
+                    format!(
+                        "Failed to copy file from {} to {}",
+                        path.display(),
+                        dest_path.display()
+                    )
+                })?;
             }
         }
 
@@ -378,6 +502,103 @@ impl CrateCache {
 
         tracing::info!(
             "Successfully generated documentation for {}-{}",
+            name,
+            version
+        );
+        Ok(docs_path)
+    }
+
+    /// Generate JSON documentation for a workspace member
+    pub async fn generate_workspace_member_docs(
+        &self,
+        name: &str,
+        version: &str,
+        member_path: &str,
+    ) -> Result<PathBuf> {
+        let source_path = self.storage.source_path(name, version);
+        let member_full_path = source_path.join(member_path);
+
+        if !source_path.exists() {
+            bail!(
+                "Source not found for {}-{}. Download it first.",
+                name,
+                version
+            );
+        }
+
+        if !member_full_path.exists() {
+            bail!(
+                "Workspace member not found at path: {}",
+                member_full_path.display()
+            );
+        }
+
+        // Get the actual package name from the member's Cargo.toml
+        let member_cargo_toml = member_full_path.join("Cargo.toml");
+        let package_name = self.get_package_name(&member_cargo_toml)?;
+
+        // Extract the member name from the path (last directory)
+        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let docs_path = self.storage.member_docs_path(name, version, member_name);
+
+        tracing::info!(
+            "Generating documentation for workspace member {} (package: {}) in {}-{}",
+            member_path,
+            package_name,
+            name,
+            version
+        );
+
+        // Run cargo rustdoc with JSON output for the specific package
+        let output = Command::new("cargo")
+            .args(&[
+                "+nightly",
+                "rustdoc",
+                "-p",
+                &package_name,
+                "--",
+                "--output-format",
+                "json",
+                "-Z",
+                "unstable-options",
+            ])
+            .current_dir(&source_path)
+            .output()
+            .context("Failed to run cargo rustdoc")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("Failed to generate documentation: {}", stderr);
+        }
+
+        // Find the generated JSON file in target/doc
+        let doc_dir = source_path.join("target").join("doc");
+        // The JSON file is named after the package name (with underscores)
+        let json_file = self.find_json_doc(&doc_dir, &package_name)?;
+
+        // Copy the JSON file to our cache location
+        self.storage.ensure_dir(docs_path.parent().unwrap())?;
+        std::fs::copy(&json_file, &docs_path).context("Failed to copy documentation to cache")?;
+
+        // Generate and save dependency information for the member
+        self.generate_workspace_member_dependencies(name, version, member_path)
+            .await?;
+
+        // Update metadata to reflect that docs are now generated
+        self.storage.save_member_metadata(
+            name,
+            version,
+            member_name,
+            &package_name,
+            "github",
+            Some(member_path),
+        )?;
+
+        // Trigger background analysis
+        tracing::info!(
+            "Successfully generated documentation for workspace member {} (package: {}) in {}-{}",
+            member_path,
+            package_name,
             name,
             version
         );
@@ -453,6 +674,67 @@ impl CrateCache {
         self.storage.source_path(name, version)
     }
 
+    /// Ensure a crate's source is available, downloading if necessary (without generating docs)
+    pub async fn ensure_crate_source(
+        &self,
+        name: &str,
+        version: &str,
+        source: Option<&str>,
+    ) -> Result<PathBuf> {
+        // Check if crate is already downloaded
+        if !self.storage.is_cached(name, version) {
+            self.download_or_copy_crate(name, version, source).await?;
+        }
+
+        Ok(self.storage.source_path(name, version))
+    }
+
+    /// Ensure source is available for a crate or workspace member
+    pub async fn ensure_crate_or_member_source(
+        &self,
+        name: &str,
+        version: &str,
+        member: Option<&str>,
+        source: Option<&str>,
+    ) -> Result<PathBuf> {
+        // Ensure the crate source is downloaded
+        let source_path = self.ensure_crate_source(name, version, source).await?;
+
+        // If member is specified, return the member's source path
+        if let Some(member_path) = member {
+            let member_source_path = source_path.join(member_path);
+            let member_cargo_toml = member_source_path.join("Cargo.toml");
+
+            if !member_cargo_toml.exists() {
+                bail!(
+                    "Workspace member '{}' not found in {}-{}. \
+                    Make sure the member path is correct.",
+                    member_path,
+                    name,
+                    version
+                );
+            }
+
+            return Ok(member_source_path);
+        }
+
+        // Check if it's a workspace without member specified
+        let cargo_toml_path = source_path.join("Cargo.toml");
+        if cargo_toml_path.exists() && self.is_workspace(&cargo_toml_path)? {
+            let members = self.get_workspace_members(&cargo_toml_path)?;
+            bail!(
+                "This is a workspace crate. Please specify a member using the 'member' parameter.\n\
+                Available members: {:?}\n\
+                Example: specify member=\"{}\"",
+                members,
+                members.first().unwrap_or(&"crates/example".to_string())
+            );
+        }
+
+        // Regular crate, return source path
+        Ok(source_path)
+    }
+
     /// Generate and save dependency information for a crate
     async fn generate_dependencies(&self, name: &str, version: &str) -> Result<()> {
         let source_path = self.storage.source_path(name, version);
@@ -496,5 +778,143 @@ impl CrateCache {
             serde_json::from_str(&json_string).context("Failed to parse dependencies JSON")?;
 
         Ok(deps)
+    }
+
+    /// Generate and save dependency information for a workspace member
+    async fn generate_workspace_member_dependencies(
+        &self,
+        name: &str,
+        version: &str,
+        member_path: &str,
+    ) -> Result<()> {
+        let source_path = self.storage.source_path(name, version);
+        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let deps_path = self
+            .storage
+            .member_dependencies_path(name, version, member_name);
+
+        tracing::info!(
+            "Generating dependency information for workspace member {} in {}-{}",
+            member_path,
+            name,
+            version
+        );
+
+        // Path to the member's Cargo.toml
+        let member_cargo_toml = source_path.join(member_path).join("Cargo.toml");
+
+        // Run cargo metadata with --manifest-path for the specific member
+        let output = Command::new("cargo")
+            .args(&[
+                "metadata",
+                "--format-version",
+                "1",
+                "--manifest-path",
+                &member_cargo_toml.to_string_lossy(),
+            ])
+            .output()
+            .context("Failed to run cargo metadata")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!("Failed to generate dependency metadata: {}", stderr);
+        }
+
+        // Ensure the member directory exists
+        self.storage.ensure_dir(deps_path.parent().unwrap())?;
+
+        // Save the raw metadata output
+        tokio::fs::write(&deps_path, &output.stdout)
+            .await
+            .context("Failed to write dependencies to cache")?;
+
+        Ok(())
+    }
+
+    /// Check if a Cargo.toml is a virtual manifest (workspace without [package])
+    pub fn is_workspace(&self, cargo_toml_path: &Path) -> Result<bool> {
+        let content = fs::read_to_string(cargo_toml_path).with_context(|| {
+            format!("Failed to read Cargo.toml at {}", cargo_toml_path.display())
+        })?;
+
+        let parsed: Value = toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse Cargo.toml at {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        // A virtual manifest has [workspace] but no [package]
+        let has_workspace = parsed.get("workspace").is_some();
+        let has_package = parsed.get("package").is_some();
+
+        Ok(has_workspace && !has_package)
+    }
+
+    /// Get workspace members from a workspace Cargo.toml
+    pub fn get_workspace_members(&self, cargo_toml_path: &Path) -> Result<Vec<String>> {
+        let content = fs::read_to_string(cargo_toml_path).with_context(|| {
+            format!("Failed to read Cargo.toml at {}", cargo_toml_path.display())
+        })?;
+
+        let parsed: Value = toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse Cargo.toml at {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        let workspace = parsed
+            .get("workspace")
+            .ok_or_else(|| anyhow::anyhow!("No [workspace] section found in Cargo.toml"))?;
+
+        let members = workspace
+            .get("members")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| anyhow::anyhow!("No members array found in [workspace] section"))?;
+
+        let mut member_list = Vec::new();
+        for member in members {
+            if let Some(member_str) = member.as_str() {
+                // Expand glob patterns
+                if member_str.contains('*') {
+                    // For now, we'll skip glob patterns and handle them later if needed
+                    // In the real implementation, we'd expand these patterns
+                    if member_str == "examples/*" {
+                        // Skip examples for now as requested
+                        continue;
+                    }
+                } else {
+                    member_list.push(member_str.to_string());
+                }
+            }
+        }
+
+        Ok(member_list)
+    }
+
+    /// Get the package name from a Cargo.toml file
+    pub fn get_package_name(&self, cargo_toml_path: &Path) -> Result<String> {
+        let content = fs::read_to_string(cargo_toml_path).with_context(|| {
+            format!("Failed to read Cargo.toml at {}", cargo_toml_path.display())
+        })?;
+
+        let parsed: Value = toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse Cargo.toml at {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        let package = parsed
+            .get("package")
+            .ok_or_else(|| anyhow::anyhow!("No [package] section found in Cargo.toml"))?;
+
+        let name = package
+            .get("name")
+            .and_then(|n| n.as_str())
+            .ok_or_else(|| anyhow::anyhow!("No 'name' field found in [package] section"))?;
+
+        Ok(name.to_string())
     }
 }

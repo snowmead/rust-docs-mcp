@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
+mod analysis;
 mod cache;
 mod deps;
 mod docs;

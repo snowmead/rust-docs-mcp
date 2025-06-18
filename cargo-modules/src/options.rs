@@ -40,9 +40,7 @@ pub struct ProjectOptions {
 
 impl Default for GeneralOptions {
     fn default() -> Self {
-        Self {
-            verbose: false,
-        }
+        Self { verbose: false }
     }
 }
 

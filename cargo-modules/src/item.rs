@@ -10,13 +10,11 @@ use crate::analyzer;
 pub(crate) use self::{
     attr::{ItemAttrs, ItemCfgAttr, ItemTestAttr},
     kind_display_name::ItemKindDisplayName,
-    kind_ordering::ItemKindOrdering,
     visibility::ItemVisibility,
 };
 
 mod attr;
 mod kind_display_name;
-mod kind_ordering;
 mod visibility;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -35,14 +33,6 @@ impl Item {
 
     pub fn attrs(&self, db: &ide::RootDatabase, _edition: ide::Edition) -> ItemAttrs {
         ItemAttrs::new(self, db)
-    }
-
-    pub fn kind_ordering(
-        &self,
-        db: &ide::RootDatabase,
-        _edition: ide::Edition,
-    ) -> ItemKindOrdering {
-        ItemKindOrdering::new(self, db)
     }
 
     pub fn kind_display_name(
