@@ -73,11 +73,29 @@ rust-docs-mcp
 
 ## Installation
 
-> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release. For now, you'll need to build from source.
+### Quick Install
 
-### Building from Source
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
+```
 
-#### Requirements
+### Installation Options
+
+#### One-liner (Recommended)
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
+```
+
+#### Custom install directory
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
+```
+
+#### Building from Source
+
+> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release.
+
+##### Requirements
 
 - Rust nightly toolchain (for Rustdoc JSON generation)
 
@@ -89,8 +107,18 @@ rust-docs-mcp
 
 ```bash
 git clone https://github.com/snowmead/rust-docs-mcp
-cd rust-docs-mcp
+cd rust-docs-mcp/rust-docs-mcp
 cargo build --release
+./target/release/rust-docs-mcp install
+```
+
+### CLI Commands
+
+```bash
+rust-docs-mcp                    # Start MCP server
+rust-docs-mcp install           # Install to ~/.local/bin
+rust-docs-mcp install --force   # Force overwrite existing installation
+rust-docs-mcp --help            # Show help
 ```
 
 ### MCP Configuration
