@@ -1,6 +1,8 @@
+[![rust-docs banner](./assets/rust_docs_banner.png)](https://github.com/snowmead/rust-docs-mcp)
+
 # rust-docs-mcp
 
-*Rust is the language of AI*
+_Rust is the language of AI_
 
 An MCP (Model Context Protocol) server for agents to explore crate docs, analyze source code, and build with confidence.
 
@@ -34,6 +36,7 @@ An MCP (Model Context Protocol) server for agents to explore crate docs, analyze
 By default, crates are cached in `~/.rust-docs-mcp/cache/`. You can customize this location using:
 
 1. **Command line argument:**
+
    ```bash
    rust-docs-mcp --cache-dir /custom/path/to/cache
    ```
