@@ -7,6 +7,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
 
+/// Enhanced node structure for better readability
+#[derive(Debug, Serialize)]
+struct EnhancedNode {
+    kind: String,
+    name: String,
+    path: String,
+    visibility: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    children: Option<Vec<EnhancedNode>>,
+}
+
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AnalyzeCrateStructureParams {
     #[schemars(description = "The name of the crate")]
@@ -144,7 +155,7 @@ async fn analyze_with_cargo_modules(
     // Run the analysis synchronously in a blocking task
     let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
         // Load the workspace
-        let (crate_id, analysis_host, _vfs, _edition) = cargo_modules::analyzer::load_workspace(
+        let (crate_id, analysis_host, _vfs, edition) = cargo_modules::analyzer::load_workspace(
             &general_options,
             &project_options,
             &load_options,
@@ -164,7 +175,8 @@ async fn analyze_with_cargo_modules(
         let result = serde_json::json!({
             "status": "success",
             "message": "Module structure analysis completed",
-            "tree": format_tree(&tree),
+            "tree": format_tree(&tree, db, edition),
+            "usage_hint": "Use the 'path' and 'name' fields to search for items with search_items_preview tool"
         });
 
         Ok(serde_json::to_string_pretty(&result).unwrap())
@@ -178,22 +190,41 @@ async fn analyze_with_cargo_modules(
     }
 }
 
-// Helper function to format the tree structure
-fn format_tree<N: std::fmt::Debug>(tree: &cargo_modules::tree::Tree<N>) -> serde_json::Value {
-    fn format_node<N: std::fmt::Debug>(node: &cargo_modules::tree::Tree<N>) -> serde_json::Value {
-        let node_str = format!("{:?}", node.node);
-
-        if node.subtrees.is_empty() {
-            serde_json::json!({
-                "node": node_str,
-            })
-        } else {
-            serde_json::json!({
-                "node": node_str,
-                "children": node.subtrees.iter().map(format_node).collect::<Vec<_>>(),
-            })
+// Helper function to format the tree structure with enhanced information
+fn format_tree(
+    tree: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
+    db: &ra_ap_ide::RootDatabase,
+    edition: ra_ap_ide::Edition,
+) -> serde_json::Value {
+    use ra_ap_ide as ide;
+    
+    fn format_node(
+        node: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
+        db: &ra_ap_ide::RootDatabase,
+        edition: ide::Edition,
+    ) -> EnhancedNode {
+        let item = &node.node;
+        
+        // Extract readable information
+        let kind = item.kind_display_name(db, edition).to_string();
+        let name = item.display_name(db, edition);
+        let path = item.display_path(db, edition);
+        let visibility = item.visibility(db, edition).to_string();
+        
+        EnhancedNode {
+            kind,
+            name,
+            path,
+            visibility,
+            children: if node.subtrees.is_empty() {
+                None
+            } else {
+                Some(node.subtrees.iter()
+                    .map(|subtree| format_node(subtree, db, edition))
+                    .collect())
+            },
         }
     }
-
-    format_node(tree)
+    
+    serde_json::to_value(format_node(tree, db, edition)).unwrap()
 }

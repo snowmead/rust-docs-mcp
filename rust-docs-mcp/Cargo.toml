@@ -14,6 +14,7 @@ categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
 cargo-modules = { path = "../cargo-modules" }
+ra_ap_ide = "=0.0.285"
 
 rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
     "server",

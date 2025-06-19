@@ -2757,6 +2757,7 @@ dependencies = [
  "flate2",
  "futures",
  "git2",
+ "ra_ap_ide",
  "reqwest",
  "rmcp",
  "rmcp-macros",
