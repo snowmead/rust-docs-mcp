@@ -8,11 +8,11 @@
 
 pub mod cli {
     use yansi::{Color, Style};
-    
+
     pub fn color_palette() -> ColorPalette {
         ColorPalette::default()
     }
-    
+
     #[derive(Debug, Clone)]
     pub struct ColorPalette {
         pub normal: Style,
@@ -26,7 +26,7 @@ pub mod cli {
         pub cyan: Color,
         pub orange: Color,
     }
-    
+
     impl Default for ColorPalette {
         fn default() -> Self {
             Self {

@@ -111,7 +111,7 @@ mod tests {
     fn test_cfg_attr_flag() {
         let cfg = cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("test")));
         let attr = ItemCfgAttr::new(&cfg).unwrap();
-        
+
         assert_eq!(attr, ItemCfgAttr::Flag("test".to_string()));
         assert_eq!(attr.to_string(), "test");
     }
@@ -123,8 +123,11 @@ mod tests {
             value: Symbol::intern("linux"),
         });
         let attr = ItemCfgAttr::new(&cfg).unwrap();
-        
-        assert_eq!(attr, ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string()));
+
+        assert_eq!(
+            attr,
+            ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string())
+        );
         assert_eq!(attr.to_string(), "target_os = \"linux\"");
     }
 
@@ -136,7 +139,7 @@ mod tests {
         ];
         let cfg = cfg::CfgExpr::All(cfgs.into_boxed_slice());
         let attr = ItemCfgAttr::new(&cfg).unwrap();
-        
+
         match &attr {
             ItemCfgAttr::All(items) => {
                 assert_eq!(items.len(), 2);
@@ -162,14 +165,17 @@ mod tests {
         ];
         let cfg = cfg::CfgExpr::Any(cfgs.into_boxed_slice());
         let attr = ItemCfgAttr::new(&cfg).unwrap();
-        
+
         match &attr {
             ItemCfgAttr::Any(items) => {
                 assert_eq!(items.len(), 2);
             }
             _ => panic!("Expected Any variant"),
         }
-        assert_eq!(attr.to_string(), "any(target_os = \"linux\", target_os = \"macos\")");
+        assert_eq!(
+            attr.to_string(),
+            "any(target_os = \"linux\", target_os = \"macos\")"
+        );
     }
 
     #[test]
@@ -177,7 +183,7 @@ mod tests {
         let inner = cfg::CfgExpr::Atom(cfg::CfgAtom::Flag(Symbol::intern("test")));
         let cfg = cfg::CfgExpr::Not(Box::new(inner));
         let attr = ItemCfgAttr::new(&cfg).unwrap();
-        
+
         match &attr {
             ItemCfgAttr::Not(inner) => {
                 assert_eq!(**inner, ItemCfgAttr::Flag("test".to_string()));

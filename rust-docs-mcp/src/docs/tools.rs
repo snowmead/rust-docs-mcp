@@ -35,7 +35,9 @@ pub struct SearchItemsParams {
     pub crate_name: String,
     #[schemars(description = "The version of the crate")]
     pub version: String,
-    #[schemars(description = "The pattern to search for in item names")]
+    #[schemars(
+        description = "The pattern to search for in item names. Note: passing '*' will not return any items - use specific Rust symbols or generalize over common names (e.g., 'new', 'parse', 'Error') to get meaningful results"
+    )]
     pub pattern: String,
     #[schemars(description = "Maximum number of items to return (default: 100)")]
     pub limit: Option<usize>,
@@ -57,7 +59,9 @@ pub struct SearchItemsPreviewParams {
     pub crate_name: String,
     #[schemars(description = "The version of the crate")]
     pub version: String,
-    #[schemars(description = "The pattern to search for in item names")]
+    #[schemars(
+        description = "The pattern to search for in item names. Note: passing '*' will not return any items - use specific Rust symbols or generalize over common names (e.g., 'new', 'parse', 'Error') to get meaningful results"
+    )]
     pub pattern: String,
     #[schemars(description = "Maximum number of items to return (default: 100)")]
     pub limit: Option<usize>,
@@ -165,9 +169,8 @@ impl DocsTools {
                     }
                 });
 
-                serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
-                })
+                serde_json::to_string_pretty(&response)
+                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
             }
             Err(e) => {
                 format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
@@ -255,9 +258,8 @@ impl DocsTools {
                     );
                 }
 
-                serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
-                })
+                serde_json::to_string_pretty(&response)
+                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
             }
             Err(e) => {
                 format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
@@ -321,9 +323,8 @@ impl DocsTools {
                     }
                 });
 
-                serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
-                })
+                serde_json::to_string_pretty(&response)
+                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
             }
             Err(e) => {
                 format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)

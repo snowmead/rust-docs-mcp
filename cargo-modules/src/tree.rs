@@ -51,7 +51,7 @@ mod tests {
             Tree::new(3, vec![Tree::new(4, vec![])]),
         ];
         let tree = Tree::new(root, children);
-        
+
         assert_eq!(tree.node, 1);
         assert_eq!(tree.subtrees.len(), 2);
         assert_eq!(tree.subtrees[0].node, 2);
@@ -63,11 +63,11 @@ mod tests {
     fn test_push_subtree() {
         let mut tree = Tree::new(1, vec![]);
         assert_eq!(tree.subtrees.len(), 0);
-        
+
         tree.push_subtree(Tree::new(2, vec![]));
         assert_eq!(tree.subtrees.len(), 1);
         assert_eq!(tree.subtrees[0].node, 2);
-        
+
         tree.push_subtree(Tree::new(3, vec![]));
         assert_eq!(tree.subtrees.len(), 2);
         assert_eq!(tree.subtrees[1].node, 3);
@@ -78,7 +78,7 @@ mod tests {
         let tree1 = Tree::new(1, vec![Tree::new(2, vec![])]);
         let tree2 = Tree::new(1, vec![Tree::new(2, vec![])]);
         let tree3 = Tree::new(1, vec![Tree::new(3, vec![])]);
-        
+
         assert_eq!(tree1, tree2);
         assert_ne!(tree1, tree3);
     }
@@ -89,7 +89,7 @@ mod tests {
         let branch = Tree::new(3, vec![leaf]);
         let subtree = Tree::new(2, vec![branch]);
         let root = Tree::new(1, vec![subtree]);
-        
+
         assert_eq!(root.node, 1);
         assert_eq!(root.subtrees[0].node, 2);
         assert_eq!(root.subtrees[0].subtrees[0].node, 3);

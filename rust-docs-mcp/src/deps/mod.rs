@@ -87,13 +87,13 @@ pub fn process_cargo_metadata(
 
             // Apply filter if provided (case-insensitive)
             if let Some(filter_str) = filter
-                && !name.to_lowercase().contains(&filter_str.to_lowercase()) {
-                    continue;
+                && !name.to_lowercase().contains(&filter_str.to_lowercase())
+            {
+                continue;
             }
 
             // Find resolved version from the resolve section
-            let resolved_version =
-                find_resolved_version(metadata, crate_name, crate_version, name);
+            let resolved_version = find_resolved_version(metadata, crate_name, crate_version, name);
 
             direct_dependencies.push(Dependency {
                 name: name.to_string(),

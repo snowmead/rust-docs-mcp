@@ -63,8 +63,9 @@ impl DocQuery {
 
         for (id, item) in &self.crate_data.index {
             if let Some(filter) = &kind_filter
-                && self.get_item_kind_string(&item.inner) != *filter {
-                    continue;
+                && self.get_item_kind_string(&item.inner) != *filter
+            {
+                continue;
             }
 
             if let Some(info) = self.item_to_info(id, item) {
@@ -85,8 +86,9 @@ impl DocQuery {
         for (id, item) in &self.crate_data.index {
             if let Some(name) = &item.name
                 && name.to_lowercase().contains(&pattern_lower)
-                && let Some(info) = self.item_to_info(id, item) {
-                    items.push(info);
+                && let Some(info) = self.item_to_info(id, item)
+            {
+                items.push(info);
             }
         }
 

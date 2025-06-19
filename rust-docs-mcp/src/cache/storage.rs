@@ -1,7 +1,10 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::cache::types::CrateIdentifier;
+use crate::cache::utils::copy_directory_contents;
 
 /// Manages the file system storage for cached crates and their documentation
 #[derive(Debug, Clone)]
@@ -46,7 +49,15 @@ impl CacheStorage {
 
     /// Get the path for a specific crate version
     pub fn crate_path(&self, name: &str, version: &str) -> PathBuf {
-        self.cache_dir.join("crates").join(name).join(version)
+        self.crate_path_for_id(&CrateIdentifier::new(name, version).unwrap())
+    }
+
+    /// Get the path for a specific crate using CrateIdentifier
+    pub fn crate_path_for_id(&self, crate_id: &CrateIdentifier) -> PathBuf {
+        self.cache_dir
+            .join("crates")
+            .join(crate_id.name())
+            .join(crate_id.version())
     }
 
     /// Get the path for a specific workspace member
@@ -55,6 +66,7 @@ impl CacheStorage {
             .join("members")
             .join(member_name)
     }
+
 
     /// Get the source directory path for a crate
     pub fn source_path(&self, name: &str, version: &str) -> PathBuf {
@@ -181,35 +193,6 @@ impl CacheStorage {
         Ok(())
     }
 
-    /// Save metadata for a workspace member
-    pub fn save_member_metadata(
-        &self,
-        name: &str,
-        version: &str,
-        member_name: &str,
-        package_name: &str,
-        source: &str,
-        source_path: Option<&str>,
-    ) -> Result<()> {
-        let member_path = self.member_path(name, version, member_name);
-        let size_bytes = self.calculate_dir_size(&member_path)?;
-
-        let metadata = CrateMetadata {
-            name: package_name.to_string(), // Use actual package name
-            version: version.to_string(),
-            cached_at: chrono::Utc::now(),
-            doc_generated: self.has_member_docs(name, version, member_name),
-            size_bytes,
-            source: source.to_string(),
-            source_path: source_path.map(String::from),
-        };
-
-        let metadata_path = self.member_metadata_path(name, version, member_name);
-        self.ensure_dir(metadata_path.parent().unwrap())?;
-        let json = serde_json::to_string_pretty(&metadata)?;
-        fs::write(metadata_path, json)?;
-        Ok(())
-    }
 
     /// Load metadata for a crate
     pub fn load_metadata(&self, name: &str, version: &str) -> Result<CrateMetadata> {
@@ -311,6 +294,71 @@ impl CacheStorage {
         if path.exists() {
             fs::remove_dir_all(&path)
                 .with_context(|| format!("Failed to remove crate cache: {name}/{version}"))?;
+        }
+        Ok(())
+    }
+
+    /// Copy a crate to a temporary backup location
+    pub fn backup_crate_to_temp(&self, name: &str, version: &str) -> Result<PathBuf> {
+        let source = self.crate_path(name, version);
+        if !source.exists() {
+            bail!("Crate {name}-{version} not found in cache");
+        }
+
+        let temp_dir = std::env::temp_dir()
+            .join("rust-docs-mcp-backup")
+            .join(format!(
+                "{name}-{version}-{}",
+                chrono::Utc::now().timestamp()
+            ));
+
+        self.ensure_dir(&temp_dir)?;
+        copy_directory_contents(&source, &temp_dir)
+            .with_context(|| format!("Failed to backup crate {name}-{version}"))?;
+
+        Ok(temp_dir)
+    }
+
+    /// Restore a crate from temporary backup
+    pub fn restore_crate_from_backup(
+        &self,
+        name: &str,
+        version: &str,
+        backup_path: &Path,
+    ) -> Result<()> {
+        if !backup_path.exists() {
+            bail!("Backup path does not exist: {}", backup_path.display());
+        }
+
+        let target = self.crate_path(name, version);
+
+        // Remove current version if it exists
+        if target.exists() {
+            fs::remove_dir_all(&target)
+                .with_context(|| "Failed to remove existing crate before restore".to_string())?;
+        }
+
+        // Ensure parent directory exists
+        if let Some(parent) = target.parent() {
+            self.ensure_dir(parent)?;
+        }
+
+        // Create the target directory first
+        self.ensure_dir(&target)?;
+
+        // Restore from backup
+        copy_directory_contents(backup_path, &target)
+            .with_context(|| format!("Failed to restore crate {name}-{version} from backup"))?;
+
+        Ok(())
+    }
+
+    /// Clean up temporary backup
+    pub fn cleanup_backup(&self, backup_path: &Path) -> Result<()> {
+        if backup_path.exists() {
+            fs::remove_dir_all(backup_path).with_context(|| {
+                format!("Failed to cleanup backup at {}", backup_path.display())
+            })?;
         }
         Ok(())
     }

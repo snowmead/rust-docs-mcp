@@ -96,7 +96,10 @@ impl AnalysisTools {
                 let manifest_path = source_path.join("Cargo.toml");
 
                 // Extract the package name for workspace members
-                let package = params.member.as_ref().map(|member| member.split('/').next_back().unwrap_or(member).to_string());
+                let package = params
+                    .member
+                    .as_ref()
+                    .map(|member| member.split('/').next_back().unwrap_or(member).to_string());
 
                 drop(cache); // Release the lock before the blocking operation
 
@@ -104,9 +107,7 @@ impl AnalysisTools {
                 analyze_with_cargo_modules(manifest_path, package, params).await
             }
             Err(e) => {
-                format!(
-                    r#"{{"error": "Failed to ensure crate source is available: {e}"}}"#
-                )
+                format!(r#"{{"error": "Failed to ensure crate source is available: {e}"}}"#)
             }
         }
     }

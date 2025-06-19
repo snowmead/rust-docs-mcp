@@ -10,7 +10,13 @@ use rmcp::{
 };
 
 use crate::analysis::tools::AnalysisTools;
-use crate::cache::{CrateCache, tools::{CacheTools, CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams}};
+use crate::cache::{
+    CrateCache,
+    tools::{
+        CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
+        CacheTools,
+    },
+};
 use crate::deps::tools::DepsTools;
 use crate::docs::tools::DocsTools;
 

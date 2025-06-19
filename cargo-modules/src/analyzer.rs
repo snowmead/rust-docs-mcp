@@ -45,7 +45,7 @@ pub fn load_workspace(
 
     let progress = |string| {
         tracing::info!("Cargo analysis progress: {}", string);
-        eprintln!("Cargo analysis progress: {}", string);
+        eprintln!("Cargo analysis progress: {string}");
     };
 
     let mut project_workspace = load_project_workspace(&project_path, &cargo_config, &progress)?;
@@ -694,7 +694,11 @@ pub(crate) fn has_test_cfg(attrs: &[ItemCfgAttr]) -> bool {
 }
 
 #[allow(dead_code)]
-pub(crate) fn name(module_def_hir: hir::ModuleDef, db: &ide::RootDatabase, edition: ide::Edition) -> String {
+pub(crate) fn name(
+    module_def_hir: hir::ModuleDef,
+    db: &ide::RootDatabase,
+    edition: ide::Edition,
+) -> String {
     display_name(module_def_hir, db, edition)
 }
 
@@ -705,19 +709,19 @@ pub(crate) fn use_tree_matches_item_path(use_tree: &ast::UseTree, path: &str) ->
         Some(p) => p,
         None => return false,
     };
-    
+
     let segments: Vec<String> = use_path
         .segments()
         .filter_map(|seg| seg.name_ref())
         .map(|name| name.text().to_string())
         .collect();
-    
+
     let path_parts: Vec<&str> = path.split("::").collect();
-    
+
     if segments.len() > path_parts.len() {
         return false;
     }
-    
+
     segments.iter().zip(path_parts.iter()).all(|(a, b)| a == b)
 }
 
@@ -755,7 +759,7 @@ mod tests {
         };
 
         let _config = cargo_config(&project_opts, &load_opts);
-        
+
         // Just verify we can create a config with test enabled
         assert!(load_opts.cfg_test);
     }
@@ -779,7 +783,7 @@ mod tests {
         };
 
         let _config = cargo_config(&project_opts, &load_opts);
-        
+
         // Just verify we can create a config with test disabled
         assert!(!load_opts.cfg_test);
     }
@@ -795,23 +799,27 @@ mod tests {
     fn test_parse_use_tree() {
         let use_tree = parse_use_tree("std::collections::HashMap");
         assert!(use_tree.path().is_some());
-        
+
         let path = use_tree.path().unwrap();
-        let segments: Vec<_> = path.segments()
+        let segments: Vec<_> = path
+            .segments()
             .filter_map(|seg| seg.name_ref())
             .map(|name| name.text().to_string())
             .collect();
-        
+
         assert_eq!(segments, vec!["std", "collections", "HashMap"]);
     }
 
     #[test]
     fn test_use_tree_matches_item_path() {
         let use_tree = parse_use_tree("std::collections");
-        assert!(use_tree_matches_item_path(&use_tree, "std::collections::HashMap"));
+        assert!(use_tree_matches_item_path(
+            &use_tree,
+            "std::collections::HashMap"
+        ));
         assert!(use_tree_matches_item_path(&use_tree, "std::collections"));
         assert!(!use_tree_matches_item_path(&use_tree, "std::io"));
-        
+
         let use_tree = parse_use_tree("std");
         assert!(use_tree_matches_item_path(&use_tree, "std::collections"));
         assert!(!use_tree_matches_item_path(&use_tree, "core::mem"));
@@ -832,9 +840,10 @@ mod tests {
         ];
         assert!(has_test_cfg(&attrs));
 
-        let attrs = vec![
-            ItemCfgAttr::KeyValue("target_os".to_string(), "linux".to_string()),
-        ];
+        let attrs = vec![ItemCfgAttr::KeyValue(
+            "target_os".to_string(),
+            "linux".to_string(),
+        )];
         assert!(!has_test_cfg(&attrs));
     }
 

@@ -6,7 +6,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::CrateCache;
-use crate::cache::service::CrateSource;
+use crate::cache::downloader::CrateSource;
+use crate::cache::utils::{CacheResponse, format_bytes};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CacheCrateFromCratesIOParams {
@@ -18,6 +19,10 @@ pub struct CacheCrateFromCratesIOParams {
         description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
     )]
     pub members: Option<Vec<String>>,
+    #[schemars(
+        description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
+    )]
+    pub update: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -26,14 +31,22 @@ pub struct CacheCrateFromGitHubParams {
     pub crate_name: String,
     #[schemars(description = "GitHub repository URL (e.g., https://github.com/user/repo)")]
     pub github_url: String,
-    #[schemars(description = "Branch to use (e.g., 'main', 'develop'). Only one of branch or tag can be specified.")]
+    #[schemars(
+        description = "Branch to use (e.g., 'main', 'develop'). Only one of branch or tag can be specified."
+    )]
     pub branch: Option<String>,
-    #[schemars(description = "Tag to use (e.g., 'v1.0.0', '0.2.1'). Only one of branch or tag can be specified.")]
+    #[schemars(
+        description = "Tag to use (e.g., 'v1.0.0', '0.2.1'). Only one of branch or tag can be specified."
+    )]
     pub tag: Option<String>,
     #[schemars(
         description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
     )]
     pub members: Option<Vec<String>>,
+    #[schemars(
+        description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
+    )]
+    pub update: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -50,27 +63,10 @@ pub struct CacheCrateFromLocalParams {
         description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
     )]
     pub members: Option<Vec<String>>,
-}
-
-/// Format bytes into human-readable string
-fn format_bytes(bytes: u64) -> String {
-    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
-    if bytes == 0 {
-        return "0 B".to_string();
-    }
-
-    let base = 1024_f64;
-    let exponent = (bytes as f64).ln() / base.ln();
-    let exponent = exponent.floor() as usize;
-
-    let unit = UNITS.get(exponent).unwrap_or(&"TB");
-    let size = bytes as f64 / base.powi(exponent as i32);
-
-    if size.fract() == 0.0 {
-        format!("{size:.0} {unit}")
-    } else {
-        format!("{size:.2} {unit}")
-    }
+    #[schemars(
+        description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
+    )]
+    pub update: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -111,18 +107,18 @@ impl CacheTools {
         // Validate that only one of branch or tag is provided
         match (&params.branch, &params.tag) {
             (Some(_), Some(_)) => {
-                return serde_json::json!({
-                    "error": "Only one of 'branch' or 'tag' can be specified, not both"
-                }).to_string();
+                return CacheResponse::error(
+                    "Only one of 'branch' or 'tag' can be specified, not both",
+                )
+                .to_json();
             }
             (None, None) => {
-                return serde_json::json!({
-                    "error": "Either 'branch' or 'tag' must be specified"
-                }).to_string();
+                return CacheResponse::error("Either 'branch' or 'tag' must be specified")
+                    .to_json();
             }
             _ => {} // Valid: exactly one is provided
         }
-        
+
         let cache = self.cache.lock().await;
         let source = CrateSource::GitHub(params);
         cache.cache_crate_with_source(source).await
@@ -144,9 +140,7 @@ impl CacheTools {
                 "version": version
             })
             .to_string(),
-            Err(e) => {
-                format!(r#"{{"error": "Failed to remove crate: {e}"}}"#)
-            }
+            Err(e) => CacheResponse::error(format!("Failed to remove crate: {e}")).to_json(),
         }
     }
 
@@ -203,12 +197,11 @@ impl CacheTools {
                     "total_size_human": format_bytes(total_size_bytes)
                 });
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize cached crates: {e}"}}"#)
+                    CacheResponse::error(format!("Failed to serialize cached crates: {e}"))
+                        .to_json()
                 })
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to list cached crates: {e}"}}"#)
-            }
+            Err(e) => CacheResponse::error(format!("Failed to list cached crates: {e}")).to_json(),
         }
     }
 
@@ -220,9 +213,7 @@ impl CacheTools {
                 "versions": versions
             })
             .to_string(),
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get cached versions: {e}"}}"#)
-            }
+            Err(e) => CacheResponse::error(format!("Failed to get cached versions: {e}")).to_json(),
         }
     }
 

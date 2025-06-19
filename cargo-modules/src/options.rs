@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::path::PathBuf;
 use clap::Args;
+use std::path::PathBuf;
 
 #[derive(Args, Clone, PartialEq, Eq, Debug)]
+#[derive(Default)]
 pub struct GeneralOptions {
     /// Use verbose output.
     #[arg(long, short)]
@@ -48,11 +49,6 @@ pub struct ProjectOptions {
     pub manifest_path: PathBuf,
 }
 
-impl Default for GeneralOptions {
-    fn default() -> Self {
-        Self { verbose: false }
-    }
-}
 
 impl Default for ProjectOptions {
     fn default() -> Self {
