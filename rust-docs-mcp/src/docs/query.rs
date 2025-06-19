@@ -84,7 +84,17 @@ impl DocQuery {
         let mut items = Vec::new();
 
         for (id, item) in &self.crate_data.index {
-            if let Some(name) = &item.name
+            // First check if item has a direct name
+            let item_name = if let Some(name) = &item.name {
+                Some(name.clone())
+            } else if let Some(path_summary) = self.crate_data.paths.get(id) {
+                // Fall back to using the last component of the path
+                path_summary.path.last().cloned()
+            } else {
+                None
+            };
+
+            if let Some(name) = item_name
                 && name.to_lowercase().contains(&pattern_lower)
                 && let Some(info) = self.item_to_info(id, item)
             {
@@ -165,7 +175,15 @@ impl DocQuery {
 
     /// Helper to convert an Item to ItemInfo
     fn item_to_info(&self, id: &Id, item: &Item) -> Option<ItemInfo> {
-        let name = item.name.clone()?;
+        // Get name from item or from paths
+        let name = if let Some(name) = &item.name {
+            name.clone()
+        } else if let Some(path_summary) = self.crate_data.paths.get(id) {
+            path_summary.path.last()?.clone()
+        } else {
+            return None;
+        };
+        
         let kind = self.get_item_kind_string(&item.inner);
         let path = self.get_item_path(id);
         let visibility = self.get_visibility_string(&item.visibility);

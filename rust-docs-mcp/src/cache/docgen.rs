@@ -41,6 +41,7 @@ impl DocGenerator {
             .args([
                 "+nightly",
                 "rustdoc",
+                "--all-features",
                 "--",
                 "--output-format",
                 "json",
@@ -125,6 +126,7 @@ impl DocGenerator {
                 "rustdoc",
                 "-p",
                 &package_name,
+                "--all-features",
                 "--",
                 "--output-format",
                 "json",
