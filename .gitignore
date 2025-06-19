@@ -3,3 +3,4 @@ snapshots
 **/*.snap
 cargo-modules/tests/projects/
 cargo-modules/tests/snapshots/
+.mcp.json
