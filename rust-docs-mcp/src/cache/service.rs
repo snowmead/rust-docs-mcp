@@ -372,14 +372,31 @@ impl CrateCache {
         source_str: Option<&str>,
         updated: bool,
     ) -> CacheResponse {
+        use futures::future::join_all;
+
+        // Create futures for all member caching operations
+        let member_futures: Vec<_> = members
+            .iter()
+            .map(|member| {
+                let member_clone = member.clone();
+                async move {
+                    let result = self
+                        .ensure_workspace_member_docs(crate_name, version, source_str, &member_clone)
+                        .await;
+                    (member_clone, result)
+                }
+            })
+            .collect();
+
+        // Execute all futures concurrently
+        let results_with_members = join_all(member_futures).await;
+
+        // Collect results and errors
         let mut results = Vec::new();
         let mut errors = Vec::new();
 
-        for member in members {
-            match self
-                .ensure_workspace_member_docs(crate_name, version, source_str, member)
-                .await
-            {
+        for (member, result) in results_with_members {
+            match result {
                 Ok(_) => {
                     results.push(format!("Successfully cached member: {member}"));
                 }
