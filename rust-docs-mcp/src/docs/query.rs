@@ -62,10 +62,9 @@ impl DocQuery {
         let mut items = Vec::new();
 
         for (id, item) in &self.crate_data.index {
-            if let Some(filter) = &kind_filter {
-                if self.get_item_kind_string(&item.inner) != *filter {
+            if let Some(filter) = &kind_filter
+                && self.get_item_kind_string(&item.inner) != *filter {
                     continue;
-                }
             }
 
             if let Some(info) = self.item_to_info(id, item) {
@@ -84,12 +83,10 @@ impl DocQuery {
         let mut items = Vec::new();
 
         for (id, item) in &self.crate_data.index {
-            if let Some(name) = &item.name {
-                if name.to_lowercase().contains(&pattern_lower) {
-                    if let Some(info) = self.item_to_info(id, item) {
-                        items.push(info);
-                    }
-                }
+            if let Some(name) = &item.name
+                && name.to_lowercase().contains(&pattern_lower)
+                && let Some(info) = self.item_to_info(id, item) {
+                    items.push(info);
             }
         }
 
@@ -239,7 +236,7 @@ impl DocQuery {
                 let generics = self.format_generics(&f.generics);
                 let params = self.format_fn_params(&f.sig.inputs);
                 let output = self.format_fn_output(&f.sig.output);
-                Some(format!("fn {}{}{}{}", name, generics, params, output))
+                Some(format!("fn {name}{generics}{params}{output}"))
             }
             _ => None,
         }
@@ -256,7 +253,7 @@ impl DocQuery {
     }
 
     /// Format function parameters
-    fn format_fn_params(&self, params: &Vec<(String, rustdoc_types::Type)>) -> String {
+    fn format_fn_params(&self, params: &[(String, rustdoc_types::Type)]) -> String {
         let param_strs: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
         format!("({})", param_strs.join(", "))
     }
@@ -288,7 +285,7 @@ impl DocQuery {
                     } else {
                         Some(ItemInfo {
                             id: String::new(),
-                            name: format!("(field {} stripped)", i),
+                            name: format!("(field {i} stripped)"),
                             kind: "field".to_string(),
                             path: Vec::new(),
                             docs: None,
@@ -351,7 +348,7 @@ impl DocQuery {
     }
 
     /// Get trait items as ItemInfo
-    fn get_trait_items(&self, items: &Vec<Id>) -> Vec<ItemInfo> {
+    fn get_trait_items(&self, items: &[Id]) -> Vec<ItemInfo> {
         items
             .iter()
             .filter_map(|item_id| {
@@ -362,7 +359,7 @@ impl DocQuery {
     }
 
     /// Get impl items as ItemInfo
-    fn get_impl_items(&self, items: &Vec<Id>) -> Vec<ItemInfo> {
+    fn get_impl_items(&self, items: &[Id]) -> Vec<ItemInfo> {
         items
             .iter()
             .filter_map(|item_id| {

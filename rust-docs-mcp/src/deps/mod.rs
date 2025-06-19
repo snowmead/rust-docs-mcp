@@ -86,15 +86,14 @@ pub fn process_cargo_metadata(
             let name = dep["name"].as_str().unwrap_or_default();
 
             // Apply filter if provided (case-insensitive)
-            if let Some(filter_str) = filter {
-                if !name.to_lowercase().contains(&filter_str.to_lowercase()) {
+            if let Some(filter_str) = filter
+                && !name.to_lowercase().contains(&filter_str.to_lowercase()) {
                     continue;
-                }
             }
 
             // Find resolved version from the resolve section
             let resolved_version =
-                find_resolved_version(&metadata, crate_name, crate_version, name);
+                find_resolved_version(metadata, crate_name, crate_version, name);
 
             direct_dependencies.push(Dependency {
                 name: name.to_string(),
@@ -124,7 +123,7 @@ pub fn process_cargo_metadata(
                 .find(|n| {
                     n["id"]
                         .as_str()
-                        .map(|id| id.starts_with(&format!("{} {}", crate_name, crate_version)))
+                        .map(|id| id.starts_with(&format!("{crate_name} {crate_version}")))
                         .unwrap_or(false)
                 })
                 .and_then(|n| n["dependencies"].as_array())
@@ -166,7 +165,7 @@ fn find_resolved_version(
     let parent_node = nodes.iter().find(|n| {
         n["id"]
             .as_str()
-            .map(|id| id.starts_with(&format!("{} {}", parent_name, parent_version)))
+            .map(|id| id.starts_with(&format!("{parent_name} {parent_version}")))
             .unwrap_or(false)
     })?;
 

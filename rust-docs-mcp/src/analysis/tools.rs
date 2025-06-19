@@ -96,13 +96,7 @@ impl AnalysisTools {
                 let manifest_path = source_path.join("Cargo.toml");
 
                 // Extract the package name for workspace members
-                let package = if let Some(ref member) = params.member {
-                    // For workspace members, we need to figure out the actual package name
-                    // It's usually the last component of the member path
-                    Some(member.split('/').last().unwrap_or(member).to_string())
-                } else {
-                    None
-                };
+                let package = params.member.as_ref().map(|member| member.split('/').next_back().unwrap_or(member).to_string());
 
                 drop(cache); // Release the lock before the blocking operation
 
@@ -111,8 +105,7 @@ impl AnalysisTools {
             }
             Err(e) => {
                 format!(
-                    r#"{{"error": "Failed to ensure crate source is available: {}"}}"#,
-                    e
+                    r#"{{"error": "Failed to ensure crate source is available: {e}"}}"#
                 )
             }
         }
@@ -155,7 +148,7 @@ async fn analyze_with_cargo_modules(
             &project_options,
             &load_options,
         )
-        .map_err(|e| format!("Failed to load workspace: {}", e))?;
+        .map_err(|e| format!("Failed to load workspace: {e}"))?;
 
         let db = analysis_host.raw_database();
 
@@ -164,7 +157,7 @@ async fn analyze_with_cargo_modules(
         let builder = TreeBuilder::new(db, crate_id);
         let tree = builder
             .build()
-            .map_err(|e| format!("Failed to build tree: {}", e))?;
+            .map_err(|e| format!("Failed to build tree: {e}"))?;
 
         // Format the tree structure as JSON
         let result = serde_json::json!({
@@ -179,8 +172,8 @@ async fn analyze_with_cargo_modules(
 
     match result {
         Ok(Ok(output)) => output,
-        Ok(Err(e)) => format!(r#"{{"error": "Analysis failed: {}"}}"#, e),
-        Err(e) => format!(r#"{{"error": "Task failed: {}"}}"#, e),
+        Ok(Err(e)) => format!(r#"{{"error": "Analysis failed: {e}"}}"#),
+        Err(e) => format!(r#"{{"error": "Task failed: {e}"}}"#),
     }
 }
 

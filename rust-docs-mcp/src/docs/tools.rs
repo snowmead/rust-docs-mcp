@@ -166,11 +166,11 @@ impl DocsTools {
                 });
 
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {}"}}"#, e)
+                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
                 })
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }
@@ -256,11 +256,11 @@ impl DocsTools {
                 }
 
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {}"}}"#, e)
+                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
                 })
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }
@@ -322,11 +322,11 @@ impl DocsTools {
                 });
 
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize items: {}"}}"#, e)
+                    format!(r#"{{"error": "Failed to serialize items: {e}"}}"#)
                 })
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }
@@ -345,13 +345,13 @@ impl DocsTools {
                 let query = DocQuery::new(crate_data);
                 match query.get_item_details(params.item_id) {
                     Ok(details) => serde_json::to_string_pretty(&details).unwrap_or_else(|e| {
-                        format!(r#"{{"error": "Failed to serialize details: {}"}}"#, e)
+                        format!(r#"{{"error": "Failed to serialize details: {e}"}}"#)
                     }),
-                    Err(e) => format!(r#"{{"error": "Item not found: {}"}}"#, e),
+                    Err(e) => format!(r#"{{"error": "Item not found: {e}"}}"#),
                 }
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }
@@ -378,11 +378,11 @@ impl DocsTools {
                         "message": "No documentation available for this item"
                     })
                     .to_string(),
-                    Err(e) => format!(r#"{{"error": "Failed to get docs: {}"}}"#, e),
+                    Err(e) => format!(r#"{{"error": "Failed to get docs: {e}"}}"#),
                 }
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }
@@ -406,14 +406,14 @@ impl DocsTools {
                 match query.get_item_source(params.item_id, &source_base_path, context_lines) {
                     Ok(source_info) => {
                         serde_json::to_string_pretty(&source_info).unwrap_or_else(|e| {
-                            format!(r#"{{"error": "Failed to serialize source info: {}"}}"#, e)
+                            format!(r#"{{"error": "Failed to serialize source info: {e}"}}"#)
                         })
                     }
-                    Err(e) => format!(r#"{{"error": "Failed to get source: {}"}}"#, e),
+                    Err(e) => format!(r#"{{"error": "Failed to get source: {e}"}}"#),
                 }
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
             }
         }
     }

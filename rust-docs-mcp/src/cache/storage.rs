@@ -127,6 +127,7 @@ impl CacheStorage {
     }
 
     /// Calculate the total size of a directory in bytes
+    #[allow(clippy::only_used_in_recursion)]
     pub fn calculate_dir_size(&self, path: &Path) -> Result<u64> {
         let mut total_size = 0u64;
 
@@ -258,7 +259,7 @@ impl CacheStorage {
                                 let cached_at = version_entry
                                     .metadata()
                                     .and_then(|m| m.modified())
-                                    .map(|t| chrono::DateTime::<chrono::Utc>::from(t))
+                                    .map(chrono::DateTime::<chrono::Utc>::from)
                                     .unwrap_or_else(|_| chrono::Utc::now());
 
                                 CrateMetadata {
@@ -309,7 +310,7 @@ impl CacheStorage {
         let path = self.crate_path(name, version);
         if path.exists() {
             fs::remove_dir_all(&path)
-                .with_context(|| format!("Failed to remove crate cache: {}/{}", name, version))?;
+                .with_context(|| format!("Failed to remove crate cache: {name}/{version}"))?;
         }
         Ok(())
     }

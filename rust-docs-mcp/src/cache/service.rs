@@ -79,6 +79,7 @@ impl CrateCache {
     }
 
     /// Parse a GitHub URL and extract repository information
+    #[allow(clippy::only_used_in_recursion)]
     fn parse_github_url(&self, url: &str) -> SourceType {
         // Handle GitHub URLs like:
         // https://github.com/user/repo
@@ -154,7 +155,7 @@ impl CrateCache {
         member_path: &str,
     ) -> Result<rustdoc_types::Crate> {
         // Check if docs already exist for this member
-        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let member_name = member_path.split('/').next_back().unwrap_or(member_path);
 
         if self.storage.has_member_docs(name, version, member_name) {
             return self.load_member_docs(name, version, member_name).await;
@@ -232,8 +233,7 @@ impl CrateCache {
     /// Download a crate from crates.io
     pub async fn download_crate(&self, name: &str, version: &str) -> Result<PathBuf> {
         let url = format!(
-            "https://crates.io/api/v1/crates/{}/{}/download",
-            name, version
+            "https://crates.io/api/v1/crates/{name}/{version}/download"
         );
 
         tracing::info!("Downloading crate {}-{} from {}", name, version, url);
@@ -263,7 +263,7 @@ impl CrateCache {
 
         // Create temporary file for download
         let temp_dir = std::env::temp_dir();
-        let temp_file_path = temp_dir.join(format!("{}-{}.tar.gz", name, version));
+        let temp_file_path = temp_dir.join(format!("{name}-{version}.tar.gz"));
         let mut temp_file =
             File::create(&temp_file_path).context("Failed to create temporary file")?;
 
@@ -328,7 +328,7 @@ impl CrateCache {
             repo_url
         );
 
-        let temp_dir = std::env::temp_dir().join(format!("rust-docs-mcp-git-{}-{}", name, version));
+        let temp_dir = std::env::temp_dir().join(format!("rust-docs-mcp-git-{name}-{version}"));
 
         // Clean up any existing temp directory
         if temp_dir.exists() {
@@ -337,28 +337,28 @@ impl CrateCache {
 
         // Clone the repository
         let repo = Repository::clone(repo_url, &temp_dir)
-            .with_context(|| format!("Failed to clone repository: {}", repo_url))?;
+            .with_context(|| format!("Failed to clone repository: {repo_url}"))?;
         
         // Checkout the specific branch or tag (version contains the branch/tag name)
         // The version parameter here is actually the branch or tag name
         if version != "main" && version != "master" {
             // Try to checkout as a branch first
-            let refname = format!("refs/remotes/origin/{}", version);
+            let refname = format!("refs/remotes/origin/{version}");
             if let Ok(reference) = repo.find_reference(&refname) {
                 let oid = reference.target().ok_or_else(|| anyhow::anyhow!("Reference has no target"))?;
                 repo.set_head_detached(oid)
-                    .with_context(|| format!("Failed to checkout branch: {}", version))?;
+                    .with_context(|| format!("Failed to checkout branch: {version}"))?;
                 repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-                    .with_context(|| format!("Failed to checkout branch: {}", version))?;
+                    .with_context(|| format!("Failed to checkout branch: {version}"))?;
             } else {
                 // Try as a tag
-                let tag_ref = format!("refs/tags/{}", version);
+                let tag_ref = format!("refs/tags/{version}");
                 if let Ok(reference) = repo.find_reference(&tag_ref) {
                     let oid = reference.target().ok_or_else(|| anyhow::anyhow!("Reference has no target"))?;
                     repo.set_head_detached(oid)
-                        .with_context(|| format!("Failed to checkout tag: {}", version))?;
+                        .with_context(|| format!("Failed to checkout tag: {version}"))?;
                     repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-                        .with_context(|| format!("Failed to checkout tag: {}", version))?;
+                        .with_context(|| format!("Failed to checkout tag: {version}"))?;
                 } else {
                     bail!("Could not find branch or tag: {}", version);
                 }
@@ -393,7 +393,7 @@ impl CrateCache {
 
         // Save metadata with source information
         let source_info = match repo_path {
-            Some(path) => format!("{}#{}", repo_url, path),
+            Some(path) => format!("{repo_url}#{path}"),
             None => repo_url.to_string(),
         };
         self.storage
@@ -423,7 +423,7 @@ impl CrateCache {
 
         // Expand tilde and other shell expansions
         let expanded_path = shellexpand::full(local_path)
-            .with_context(|| format!("Failed to expand path: {}", local_path))?;
+            .with_context(|| format!("Failed to expand path: {local_path}"))?;
         let source_path_input = Path::new(expanded_path.as_ref());
 
         // Verify the path exists and contains Cargo.toml
@@ -455,6 +455,7 @@ impl CrateCache {
     }
 
     /// Recursively copy directory contents
+    #[allow(clippy::only_used_in_recursion)]
     fn copy_directory_contents(&self, src: &Path, dest: &Path) -> Result<()> {
         if !dest.exists() {
             fs::create_dir_all(dest)?;
@@ -503,7 +504,7 @@ impl CrateCache {
 
         // Run cargo rustdoc with JSON output
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "+nightly",
                 "rustdoc",
                 "--",
@@ -572,7 +573,7 @@ impl CrateCache {
         let package_name = self.get_package_name(&member_cargo_toml)?;
 
         // Extract the member name from the path (last directory)
-        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let member_name = member_path.split('/').next_back().unwrap_or(member_path);
         let docs_path = self.storage.member_docs_path(name, version, member_name);
 
         tracing::info!(
@@ -585,7 +586,7 @@ impl CrateCache {
 
         // Run cargo rustdoc with JSON output for the specific package
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "+nightly",
                 "rustdoc",
                 "-p",
@@ -643,7 +644,7 @@ impl CrateCache {
     fn find_json_doc(&self, doc_dir: &Path, crate_name: &str) -> Result<PathBuf> {
         // The JSON file is usually named after the crate with underscores
         let normalized_name = crate_name.replace("-", "_");
-        let json_path = doc_dir.join(format!("{}.json", normalized_name));
+        let json_path = doc_dir.join(format!("{normalized_name}.json"));
 
         if json_path.exists() {
             return Ok(json_path);
@@ -796,7 +797,7 @@ impl CrateCache {
 
         // Run cargo metadata to get dependency information
         let output = Command::new("cargo")
-            .args(&["metadata", "--format-version", "1"])
+            .args(["metadata", "--format-version", "1"])
             .current_dir(&source_path)
             .output()
             .context("Failed to run cargo metadata")?;
@@ -840,7 +841,7 @@ impl CrateCache {
         member_path: &str,
     ) -> Result<()> {
         let source_path = self.storage.source_path(name, version);
-        let member_name = member_path.split('/').last().unwrap_or(member_path);
+        let member_name = member_path.split('/').next_back().unwrap_or(member_path);
         let deps_path = self
             .storage
             .member_dependencies_path(name, version, member_name);
@@ -857,7 +858,7 @@ impl CrateCache {
 
         // Run cargo metadata with --manifest-path for the specific member
         let output = Command::new("cargo")
-            .args(&[
+            .args([
                 "metadata",
                 "--format-version",
                 "1",
@@ -990,14 +991,14 @@ impl CrateCache {
                     tag.clone()
                 } else {
                     // This should not happen due to validation in the tool layer
-                    return format!(r#"{{"error": "Either branch or tag must be specified"}}"#);
+                    return r#"{"error": "Either branch or tag must be specified"}"#.to_string();
                 };
                 members = &params.members;
                 // Include branch/tag in the source string for tracking
                 source_str = if let Some(branch) = &params.branch {
-                    Some(format!("{}#branch:{}", params.github_url, branch))
+                    Some(format!("{}#branch:{branch}", params.github_url))
                 } else if let Some(tag) = &params.tag {
-                    Some(format!("{}#tag:{}", params.github_url, tag))
+                    Some(format!("{}#tag:{tag}", params.github_url))
                 } else {
                     Some(params.github_url.clone())
                 };
@@ -1028,10 +1029,10 @@ impl CrateCache {
                     .await
                 {
                     Ok(_) => {
-                        results.push(format!("Successfully cached member: {}", member));
+                        results.push(format!("Successfully cached member: {member}"));
                     }
                     Err(e) => {
-                        errors.push(format!("Failed to cache member {}: {}", member, e));
+                        errors.push(format!("Failed to cache member {member}: {e}"));
                     }
                 }
             }
@@ -1070,7 +1071,7 @@ impl CrateCache {
             .await
         {
             Ok(path) => path,
-            Err(e) => return format!(r#"{{"error": "Failed to download crate: {}"}}"#, e),
+            Err(e) => return format!(r#"{{"error": "Failed to download crate: {e}"}}"#),
         };
 
         // Check if it's a workspace
@@ -1101,7 +1102,7 @@ impl CrateCache {
                         .to_string()
                     }
                     Err(e) => {
-                        format!(r#"{{"error": "Failed to get workspace members: {}"}}"#, e)
+                        format!(r#"{{"error": "Failed to get workspace members: {e}"}}"#)
                     }
                 }
             }
@@ -1117,13 +1118,13 @@ impl CrateCache {
                 {
                     Ok(_) => serde_json::json!({
                         "status": "success",
-                        "message": format!("Successfully cached {}-{}", crate_name, version),
+                        "message": format!("Successfully cached {crate_name}-{version}"),
                         "crate": crate_name,
                         "version": version
                     })
                     .to_string(),
                     Err(e) => {
-                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+                        format!(r#"{{"error": "Failed to cache crate: {e}"}}"#)
                     }
                 }
             }
@@ -1139,13 +1140,13 @@ impl CrateCache {
                 {
                     Ok(_) => serde_json::json!({
                         "status": "success",
-                        "message": format!("Successfully cached {}-{}", crate_name, version),
+                        "message": format!("Successfully cached {crate_name}-{version}"),
                         "crate": crate_name,
                         "version": version
                     })
                     .to_string(),
                     Err(e) => {
-                        format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+                        format!(r#"{{"error": "Failed to cache crate: {e}"}}"#)
                     }
                 }
             }

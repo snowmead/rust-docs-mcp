@@ -66,15 +66,13 @@ impl DepsTools {
                             Ok(dep_info) => {
                                 serde_json::to_string_pretty(&dep_info).unwrap_or_else(|e| {
                                     format!(
-                                        r#"{{"error": "Failed to serialize dependency info: {}"}}"#,
-                                        e
+                                        r#"{{"error": "Failed to serialize dependency info: {e}"}}"#
                                     )
                                 })
                             }
                             Err(e) => {
                                 format!(
-                                    r#"{{"error": "Failed to process dependency metadata: {}"}}"#,
-                                    e
+                                    r#"{{"error": "Failed to process dependency metadata: {e}"}}"#
                                 )
                             }
                         }
@@ -88,7 +86,7 @@ impl DepsTools {
                 }
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to cache crate: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to cache crate: {e}"}}"#)
             }
         }
     }

@@ -67,9 +67,9 @@ fn format_bytes(bytes: u64) -> String {
     let size = bytes as f64 / base.powi(exponent as i32);
 
     if size.fract() == 0.0 {
-        format!("{:.0} {}", size, unit)
+        format!("{size:.0} {unit}")
     } else {
-        format!("{:.2} {}", size, unit)
+        format!("{size:.2} {unit}")
     }
 }
 
@@ -139,13 +139,13 @@ impl CacheTools {
         match cache.remove_crate(&crate_name, &version).await {
             Ok(_) => serde_json::json!({
                 "status": "success",
-                "message": format!("Successfully removed {}-{}", crate_name, version),
+                "message": format!("Successfully removed {crate_name}-{version}"),
                 "crate": crate_name,
                 "version": version
             })
             .to_string(),
             Err(e) => {
-                format!(r#"{{"error": "Failed to remove crate: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to remove crate: {e}"}}"#)
             }
         }
     }
@@ -203,11 +203,11 @@ impl CacheTools {
                     "total_size_human": format_bytes(total_size_bytes)
                 });
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize cached crates: {}"}}"#, e)
+                    format!(r#"{{"error": "Failed to serialize cached crates: {e}"}}"#)
                 })
             }
             Err(e) => {
-                format!(r#"{{"error": "Failed to list cached crates: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to list cached crates: {e}"}}"#)
             }
         }
     }
@@ -221,7 +221,7 @@ impl CacheTools {
             })
             .to_string(),
             Err(e) => {
-                format!(r#"{{"error": "Failed to get cached versions: {}"}}"#, e)
+                format!(r#"{{"error": "Failed to get cached versions: {e}"}}"#)
             }
         }
     }
@@ -253,7 +253,7 @@ impl CacheTools {
                             "version": version,
                             "member": null,
                             "cached": true,
-                            "error": format!("Failed to load metadata: {}", e)
+                            "error": format!("Failed to load metadata: {e}")
                         })
                     }
                 }
@@ -270,7 +270,7 @@ impl CacheTools {
             // Check requested members if any
             if let Some(members) = query.members {
                 for member_path in members {
-                    let member_name = member_path.split('/').last().unwrap_or(&member_path);
+                    let member_name = member_path.split('/').next_back().unwrap_or(&member_path);
                     let member_result =
                         if cache
                             .storage
@@ -297,7 +297,7 @@ impl CacheTools {
                                         "version": version,
                                         "member": member_path,
                                         "cached": true,
-                                        "error": format!("Failed to load member metadata: {}", e)
+                                        "error": format!("Failed to load member metadata: {e}")
                                     })
                                 }
                             }
