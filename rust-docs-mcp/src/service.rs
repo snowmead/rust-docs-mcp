@@ -215,8 +215,7 @@ impl ServerHandler for RustDocsService {
                 ..Default::default()
             },
             instructions: Some(
-                "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.",
-                    .to_string(),
+                "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.".to_string(),
             ),
             ..Default::default()
         }

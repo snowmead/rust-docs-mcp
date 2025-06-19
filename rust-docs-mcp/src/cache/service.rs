@@ -200,7 +200,6 @@ impl CrateCache {
         self.storage.source_path(name, version)
     }
 
-
     /// Ensure a crate's source is available, downloading if necessary (without generating docs)
     pub async fn ensure_crate_source(
         &self,
@@ -381,7 +380,12 @@ impl CrateCache {
                 let member_clone = member.clone();
                 async move {
                     let result = self
-                        .ensure_workspace_member_docs(crate_name, version, source_str, &member_clone)
+                        .ensure_workspace_member_docs(
+                            crate_name,
+                            version,
+                            source_str,
+                            &member_clone,
+                        )
                         .await;
                     (member_clone, result)
                 }

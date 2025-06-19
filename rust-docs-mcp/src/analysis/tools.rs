@@ -197,20 +197,20 @@ fn format_tree(
     edition: ra_ap_ide::Edition,
 ) -> serde_json::Value {
     use ra_ap_ide as ide;
-    
+
     fn format_node(
         node: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
         db: &ra_ap_ide::RootDatabase,
         edition: ide::Edition,
     ) -> EnhancedNode {
         let item = &node.node;
-        
+
         // Extract readable information
         let kind = item.kind_display_name(db, edition).to_string();
         let name = item.display_name(db, edition);
         let path = item.display_path(db, edition);
         let visibility = item.visibility(db, edition).to_string();
-        
+
         EnhancedNode {
             kind,
             name,
@@ -219,12 +219,15 @@ fn format_tree(
             children: if node.subtrees.is_empty() {
                 None
             } else {
-                Some(node.subtrees.iter()
-                    .map(|subtree| format_node(subtree, db, edition))
-                    .collect())
+                Some(
+                    node.subtrees
+                        .iter()
+                        .map(|subtree| format_node(subtree, db, edition))
+                        .collect(),
+                )
             },
         }
     }
-    
+
     serde_json::to_value(format_node(tree, db, edition)).unwrap()
 }

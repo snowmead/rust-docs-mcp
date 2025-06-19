@@ -34,12 +34,7 @@ impl GraphWalker {
         }
     }
 
-    pub fn walk_graph<F>(
-        &mut self,
-        graph: &Graph<Node, Edge>,
-        start: NodeIndex,
-        mut visitor: F,
-    )
+    pub fn walk_graph<F>(&mut self, graph: &Graph<Node, Edge>, start: NodeIndex, mut visitor: F)
     where
         F: FnMut(&Edge, &Node, usize) -> bool,
     {

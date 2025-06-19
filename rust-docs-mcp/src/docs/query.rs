@@ -183,7 +183,7 @@ impl DocQuery {
         } else {
             return None;
         };
-        
+
         let kind = self.get_item_kind_string(&item.inner);
         let path = self.get_item_path(id);
         let visibility = self.get_visibility_string(&item.visibility);

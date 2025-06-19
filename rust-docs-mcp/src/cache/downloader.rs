@@ -286,7 +286,6 @@ impl CrateDownloader {
         tracing::info!("Successfully copied {}-{} from local path", name, version);
         Ok(source_path)
     }
-
 }
 
 #[cfg(test)]
@@ -303,5 +302,4 @@ mod tests {
         // Just verify it was created successfully
         assert!(format!("{downloader:?}").contains("CrateDownloader"));
     }
-
 }

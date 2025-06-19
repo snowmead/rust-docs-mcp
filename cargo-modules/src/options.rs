@@ -5,8 +5,7 @@
 use clap::Args;
 use std::path::PathBuf;
 
-#[derive(Args, Clone, PartialEq, Eq, Debug)]
-#[derive(Default)]
+#[derive(Args, Clone, PartialEq, Eq, Debug, Default)]
 pub struct GeneralOptions {
     /// Use verbose output.
     #[arg(long, short)]
@@ -48,7 +47,6 @@ pub struct ProjectOptions {
     #[arg(long, value_name = "PATH", default_value = ".")]
     pub manifest_path: PathBuf,
 }
-
 
 impl Default for ProjectOptions {
     fn default() -> Self {

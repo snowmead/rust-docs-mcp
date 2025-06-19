@@ -44,7 +44,6 @@ impl CrateIdentifier {
     pub fn version(&self) -> &str {
         &self.version
     }
-
 }
 
 impl fmt::Display for CrateIdentifier {
@@ -99,7 +98,6 @@ impl MemberPath {
             member_name,
         })
     }
-
 }
 
 impl fmt::Display for MemberPath {
@@ -121,7 +119,6 @@ impl AsRef<Path> for MemberPath {
         &self.path
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -169,5 +166,4 @@ mod tests {
 
         Ok(())
     }
-
 }

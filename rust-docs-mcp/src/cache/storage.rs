@@ -67,7 +67,6 @@ impl CacheStorage {
             .join(member_name)
     }
 
-
     /// Get the source directory path for a crate
     pub fn source_path(&self, name: &str, version: &str) -> PathBuf {
         self.crate_path(name, version).join("source")
@@ -192,7 +191,6 @@ impl CacheStorage {
         fs::write(metadata_path, json)?;
         Ok(())
     }
-
 
     /// Load metadata for a crate
     pub fn load_metadata(&self, name: &str, version: &str) -> Result<CrateMetadata> {

@@ -150,7 +150,10 @@ impl DocGenerator {
         if let Some(parent) = docs_path.parent() {
             self.storage.ensure_dir(parent)?;
         } else {
-            bail!("Invalid docs path: no parent directory for {}", docs_path.display());
+            bail!(
+                "Invalid docs path: no parent directory for {}",
+                docs_path.display()
+            );
         }
 
         // Copy the JSON file to our cache location
@@ -270,7 +273,10 @@ impl DocGenerator {
         if let Some(parent) = deps_path.parent() {
             self.storage.ensure_dir(parent)?;
         } else {
-            bail!("Invalid deps path: no parent directory for {}", deps_path.display());
+            bail!(
+                "Invalid deps path: no parent directory for {}",
+                deps_path.display()
+            );
         }
 
         // Save the raw metadata output
