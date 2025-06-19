@@ -139,8 +139,32 @@ main() {
         echo -e "${BLUE}Would you like to add rust-docs-mcp to Claude Code as an MCP server?${NC}"
         echo -e "${YELLOW}This will enable you to use Rust documentation features directly in Claude Code.${NC}"
         echo
-        read -p "Add to Claude Code? [y/N] " -n 1 -r
-        echo
+        
+        # Try to read user input - handle both direct execution and piped execution
+        REPLY="n"
+        
+        # Check if script is being piped
+        if [ ! -t 0 ]; then
+            # We're being piped - try to open /dev/tty directly
+            if [ -e /dev/tty ]; then
+                # Use a subshell to read from /dev/tty
+                REPLY=$(bash -c 'read -p "Add to Claude Code? [y/N] " -n 1 -r REPLY < /dev/tty > /dev/tty 2>&1 && echo "$REPLY"') || REPLY="n"
+                echo > /dev/tty
+            else
+                # No terminal available
+                echo -e "${YELLOW}Running in non-interactive mode (piped execution detected).${NC}"
+                echo -e "${YELLOW}To enable interactive prompts, download and run the installer directly:${NC}"
+                echo
+                echo -e "${BLUE}  curl -sSL ${REPO_URL%.git}/raw/main/install.sh -o install.sh${NC}"
+                echo -e "${BLUE}  bash install.sh${NC}"
+                echo
+                REPLY="n"
+            fi
+        else
+            # Direct execution - normal read should work
+            read -p "Add to Claude Code? [y/N] " -n 1 -r REPLY || REPLY="n"
+            echo
+        fi
         
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             info "Adding rust-docs-mcp to Claude Code..."
@@ -185,7 +209,7 @@ main() {
     
     echo
     echo -e "${BLUE}Usage:${NC}"
-    echo -e "  ${GREEN}rust-docs-mcp${NC}                 # Start MCP server"
+    echo -e "  ${GREEN}rust-docs-mcp${NC}                # Start MCP server"
     echo -e "  ${GREEN}rust-docs-mcp install${NC}        # Install/update to PATH"
     echo -e "  ${GREEN}rust-docs-mcp --help${NC}         # Show help"
 }
