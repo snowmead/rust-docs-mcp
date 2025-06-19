@@ -47,9 +47,8 @@ impl<'a> CacheTransaction<'a> {
     /// Commit the transaction by cleaning up the backup
     pub fn commit(mut self) -> Result<()> {
         if let Some(backup_path) = self.backup_path.take() {
-            self.storage
-                .cleanup_backup(&backup_path)
-                .context("Failed to cleanup backup")?;
+            // Cleanup is best-effort - the transaction succeeded even if cleanup fails
+            let _ = self.storage.cleanup_backup(&backup_path);
         }
         Ok(())
     }
@@ -57,13 +56,20 @@ impl<'a> CacheTransaction<'a> {
     /// Rollback the transaction by restoring from backup
     pub fn rollback(&mut self) -> Result<()> {
         if let Some(backup_path) = self.backup_path.take() {
+            // Check if backup exists before trying to restore
+            if !backup_path.exists() {
+                anyhow::bail!(
+                    "Backup path does not exist: {}. Cannot rollback.",
+                    backup_path.display()
+                );
+            }
+            
             self.storage
                 .restore_crate_from_backup(&self.crate_name, &self.version, &backup_path)
                 .context("Failed to restore from backup")?;
 
-            self.storage
-                .cleanup_backup(&backup_path)
-                .context("Failed to cleanup backup after restore")?;
+            // Cleanup is best-effort - don't fail if backup is already gone
+            let _ = self.storage.cleanup_backup(&backup_path);
         }
         Ok(())
     }
@@ -132,10 +138,12 @@ mod tests {
         // Save metadata to make it a valid cached crate
         storage.save_metadata("test-crate", "1.0.0")?;
 
+        // Verify the crate exists before transaction
+        assert!(storage.is_cached("test-crate", "1.0.0"));
+
         // Start transaction
         let mut transaction = CacheTransaction::new(&storage, "test-crate", "1.0.0");
         transaction.begin()?;
-
         // Verify crate was removed
         assert!(!storage.is_cached("test-crate", "1.0.0"));
 

@@ -14,15 +14,6 @@
 //! - [`types`] - Type definitions for improved type safety
 //! - [`utils`] - Common utilities including response formatting
 //! - [`workspace`] - Workspace crate handling
-//!
-//! ## Example Usage
-//!
-//! ```no_run
-//! use mcp_rust_docs::cache::CrateCache;
-//!
-//! let cache = CrateCache::new(None)?;
-//! let docs = cache.ensure_crate_docs("serde", "1.0.0", None).await?;
-//! ```
 
 pub mod docgen;
 pub mod downloader;
