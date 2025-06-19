@@ -11,6 +11,7 @@ An MCP (Model Context Protocol) server that provides comprehensive access to Rus
 The rise of AI agents has revolutionized software development, with new tools and libraries emerging at an unprecedented pace. However, this rapid evolution creates a critical challenge: **agents cannot reliably build with tools they weren't trained on**.
 
 When an agent tries to use a new Rust crate:
+
 - 🚫 **Training data is outdated** — The model hasn't seen recent crates or API changes
 - 🚫 **Documentation scraping is inefficient** — Web scraping GitHub or docs.rs is slow and unreliable
 - 🚫 **Examples aren't enough** — Copy-pasting README examples provides surface-level understanding
@@ -21,6 +22,7 @@ This leads to frustrated developers watching their agents fail repeatedly, guess
 ## The Solution: Deep Crate Intelligence
 
 This MCP server gives agents the tools they need to **truly understand** Rust crates:
+
 - 🔍 **Explore internal structure** — Navigate module hierarchies and type relationships
 - 📖 **Access complete documentation** — Full rustdoc with signatures, fields, and methods
 - 🔗 **Trace dependencies** — Understand what a crate depends on and why
@@ -107,11 +109,13 @@ curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.
 ### Installation Options
 
 #### One-liner (Recommended)
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
 ```
 
 #### Custom install directory
+
 ```bash
 curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
 ```
@@ -140,7 +144,7 @@ cargo build --release
 ### CLI Commands
 
 ```bash
-rust-docs-mcp                    # Start MCP server
+rust-docs-mcp                   # Start MCP server
 rust-docs-mcp install           # Install to ~/.local/bin
 rust-docs-mcp install --force   # Force overwrite existing installation
 rust-docs-mcp --help            # Show help
