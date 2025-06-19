@@ -6,6 +6,29 @@ _Rust is the language of AI_
 
 An MCP (Model Context Protocol) server that provides comprehensive access to Rust crate documentation, source code analysis, dependency trees, and module structure visualization. Built for agents to gain quality insights into Rust projects and build with confidence.
 
+## The Problem: Agents Building in the Dark
+
+The rise of AI agents has revolutionized software development, with new tools and libraries emerging at an unprecedented pace. However, this rapid evolution creates a critical challenge: **agents cannot reliably build with tools they weren't trained on**.
+
+When an agent tries to use a new Rust crate:
+- 🚫 **Training data is outdated** — The model hasn't seen recent crates or API changes
+- 🚫 **Documentation scraping is inefficient** — Web scraping GitHub or docs.rs is slow and unreliable
+- 🚫 **Examples aren't enough** — Copy-pasting README examples provides surface-level understanding
+- 🚫 **Internal structure is opaque** — Agents can't explore how modules, traits, and types interconnect
+
+This leads to frustrated developers watching their agents fail repeatedly, guessing at APIs, and producing broken code.
+
+## The Solution: Deep Crate Intelligence
+
+This MCP server gives agents the tools they need to **truly understand** Rust crates:
+- 🔍 **Explore internal structure** — Navigate module hierarchies and type relationships
+- 📖 **Access complete documentation** — Full rustdoc with signatures, fields, and methods
+- 🔗 **Trace dependencies** — Understand what a crate depends on and why
+- 💾 **Work offline** — Cache crates locally for instant, reliable access
+- 🎯 **Query precisely** — Search by pattern, kind, or path to find exactly what's needed
+
+With these capabilities, agents can build confidently with any Rust crate — even ones released yesterday.
+
 ## Agent Capabilities
 
 - [x] **Multi-source caching** — crates.io, GitHub repositories, local filesystem paths

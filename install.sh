@@ -117,6 +117,19 @@ main() {
         error "Failed to install rust-docs-mcp"
     fi
     
+    # Handle macOS code signing to prevent Gatekeeper from killing the binary
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        info "Signing binary for macOS..."
+        # Remove any quarantine attributes
+        xattr -cr "${INSTALL_DIR}/rust-docs-mcp" 2>/dev/null || true
+        # Ad-hoc sign the binary
+        if codesign --force --deep -s - "${INSTALL_DIR}/rust-docs-mcp" 2>/dev/null; then
+            success "Binary signed successfully"
+        else
+            warn "Could not sign binary - you may need to run: codesign --force --deep -s - ${INSTALL_DIR}/rust-docs-mcp"
+        fi
+    fi
+    
     success "rust-docs-mcp installed successfully!"
     
     # Check if install directory is in PATH
