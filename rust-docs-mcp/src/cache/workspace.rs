@@ -99,6 +99,31 @@ impl WorkspaceHandler {
         Ok(name.to_string())
     }
 
+    /// Get the package version from a Cargo.toml file
+    pub fn get_package_version(cargo_toml_path: &Path) -> Result<String> {
+        let content = fs::read_to_string(cargo_toml_path).with_context(|| {
+            format!("Failed to read Cargo.toml at {}", cargo_toml_path.display())
+        })?;
+
+        let parsed: Value = toml::from_str(&content).with_context(|| {
+            format!(
+                "Failed to parse Cargo.toml at {}",
+                cargo_toml_path.display()
+            )
+        })?;
+
+        let package = parsed
+            .get("package")
+            .ok_or_else(|| anyhow!("No [package] section found in Cargo.toml"))?;
+
+        let version = package
+            .get("version")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow!("No 'version' field found in [package] section"))?;
+
+        Ok(version.to_string())
+    }
+
     /// Extract member name from a member path
     pub fn extract_member_name(member_path: &str) -> &str {
         member_path.split('/').next_back().unwrap_or(member_path)
@@ -118,6 +143,46 @@ mod tests {
             WorkspaceHandler::extract_member_name("path/to/deep/crate"),
             "crate"
         );
+    }
+
+    #[test]
+    fn test_get_package_version() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+
+        // Test regular crate with version
+        let cargo_toml = temp_dir.path().join("Cargo.toml");
+        fs::write(
+            &cargo_toml,
+            r#"
+[package]
+name = "test-crate"
+version = "1.2.3"
+"#,
+        )?;
+
+        let version = WorkspaceHandler::get_package_version(&cargo_toml)?;
+        assert_eq!(version, "1.2.3");
+
+        // Test crate without version field
+        let no_version_toml = temp_dir.path().join("no_version.toml");
+        fs::write(
+            &no_version_toml,
+            r#"
+[package]
+name = "test-crate"
+"#,
+        )?;
+
+        let result = WorkspaceHandler::get_package_version(&no_version_toml);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No 'version' field")
+        );
+
+        Ok(())
     }
 
     #[test]

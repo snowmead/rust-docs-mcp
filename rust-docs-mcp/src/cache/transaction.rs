@@ -63,7 +63,7 @@ impl<'a> CacheTransaction<'a> {
                     backup_path.display()
                 );
             }
-            
+
             self.storage
                 .restore_crate_from_backup(&self.crate_name, &self.version, &backup_path)
                 .context("Failed to restore from backup")?;
