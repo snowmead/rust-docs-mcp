@@ -53,8 +53,10 @@ pub struct CacheCrateFromGitHubParams {
 pub struct CacheCrateFromLocalParams {
     #[schemars(description = "The name of the crate")]
     pub crate_name: String,
-    #[schemars(description = "The version to use for caching (e.g., '0.1.0')")]
-    pub version: String,
+    #[schemars(
+        description = "Optional version to use for caching. If not provided, the version from the local crate's Cargo.toml will be used. If provided, it will be validated against the actual version."
+    )]
+    pub version: Option<String>,
     #[schemars(
         description = "Local file system path. Supports absolute paths (/path), home paths (~/path), and relative paths (./path, ../path)"
     )]

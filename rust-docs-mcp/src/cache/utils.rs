@@ -3,7 +3,7 @@
 //! This module contains shared utilities used across the cache implementation,
 //! including file operations, error handling, and response formatting.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::Path;
 
@@ -15,13 +15,15 @@ pub fn copy_directory_contents(src: &Path, dest: &Path) -> Result<()> {
     if !src.exists() {
         bail!("Source directory does not exist: {}", src.display());
     }
-    
+
     if !dest.exists() {
         fs::create_dir_all(dest)
             .with_context(|| format!("Failed to create directory: {}", dest.display()))?;
     }
 
-    for entry in fs::read_dir(src).with_context(|| format!("Failed to read directory: {}", src.display()))? {
+    for entry in
+        fs::read_dir(src).with_context(|| format!("Failed to read directory: {}", src.display()))?
+    {
         let entry = entry?;
         let path = entry.path();
         let name = entry.file_name();

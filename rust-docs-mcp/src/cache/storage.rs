@@ -307,7 +307,9 @@ impl CacheStorage {
             .join("rust-docs-mcp-backup")
             .join(format!(
                 "{name}-{version}-{}-{}",
-                chrono::Utc::now().timestamp_nanos_opt().unwrap_or_else(|| chrono::Utc::now().timestamp_micros()),
+                chrono::Utc::now()
+                    .timestamp_nanos_opt()
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp_micros()),
                 std::process::id()
             ));
 

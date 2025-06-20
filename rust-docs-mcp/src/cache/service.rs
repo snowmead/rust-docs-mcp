@@ -5,7 +5,7 @@ use crate::cache::transaction::CacheTransaction;
 use crate::cache::utils::CacheResponse;
 use crate::cache::workspace::WorkspaceHandler;
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Service for managing crate caching and documentation generation
 #[derive(Debug, Clone)]
@@ -354,7 +354,10 @@ impl CrateCache {
             }
             CrateSource::LocalPath(params) => (
                 params.crate_name.clone(),
-                params.version.clone(),
+                params
+                    .version
+                    .clone()
+                    .expect("Version should be resolved before extraction"),
                 params.members.clone(),
                 Some(params.path.clone()),
                 params.update.unwrap_or(false),
@@ -542,8 +545,77 @@ impl CrateCache {
         Ok(CacheResponse::success(crate_name, version))
     }
 
+    /// Resolve version for local paths
+    async fn resolve_local_path_version(
+        &self,
+        params: &crate::cache::tools::CacheCrateFromLocalParams,
+    ) -> Result<(String, bool)> {
+        // Expand path to handle ~ and other shell expansions
+        let expanded_path = shellexpand::full(&params.path)
+            .with_context(|| format!("Failed to expand path: {}", params.path))?;
+        let local_path = Path::new(expanded_path.as_ref());
+
+        // Check if path exists
+        if !local_path.exists() {
+            bail!("Local path does not exist: {}", local_path.display());
+        }
+
+        let cargo_toml = local_path.join("Cargo.toml");
+        if !cargo_toml.exists() {
+            bail!("No Cargo.toml found at path: {}", local_path.display());
+        }
+
+        // Get the actual version from Cargo.toml
+        let actual_version = WorkspaceHandler::get_package_version(&cargo_toml)?;
+
+        match &params.version {
+            Some(provided_version) => {
+                // Version was provided, validate it matches
+                if provided_version != &actual_version {
+                    bail!(
+                        "Version mismatch: provided version '{}' does not match actual version '{}' in Cargo.toml",
+                        provided_version,
+                        actual_version
+                    );
+                }
+                Ok((actual_version, false)) // Version was validated, not auto-detected
+            }
+            None => {
+                // No version provided, use the detected one
+                Ok((actual_version, true)) // Version was auto-detected
+            }
+        }
+    }
+
     /// Common method to cache a crate from any source
     pub async fn cache_crate_with_source(&self, source: CrateSource) -> String {
+        // For local paths, resolve version if needed
+        let source = if let CrateSource::LocalPath(mut params) = source {
+            match self.resolve_local_path_version(&params).await {
+                Ok((resolved_version, auto_detected)) => {
+                    // Update params with resolved version
+                    params.version = Some(resolved_version.clone());
+
+                    // Log if version was auto-detected
+                    if auto_detected {
+                        tracing::info!(
+                            "Auto-detected version '{}' from local path for crate '{}'",
+                            resolved_version,
+                            params.crate_name
+                        );
+                    }
+
+                    CrateSource::LocalPath(params)
+                }
+                Err(e) => {
+                    return CacheResponse::error(format!("Failed to resolve local path: {e}"))
+                        .to_json();
+                }
+            }
+        } else {
+            source
+        };
+
         // Extract parameters from source
         let (crate_name, version, members, source_str, update) =
             self.extract_source_params(&source);
