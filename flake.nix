@@ -5,10 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-parts.url = "github:hercules-ci/flake-parts";
     
-    crane = {
-      url = "github:ipetkov/crane";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    crane.url = "github:ipetkov/crane";
     
     fenix = {
       url = "github:nix-community/fenix";
@@ -46,8 +43,14 @@
         # Override crane to use nightly toolchain
         cranelibNightly = craneLib.overrideToolchain rustNightly;
         
+        # Get package info from the actual package Cargo.toml
+        crateInfo = craneLib.crateNameFromCargoToml {
+          cargoToml = ./rust-docs-mcp/Cargo.toml;
+        };
+        
         # Shared build args for all crane builds
         commonArgs = {
+          inherit (crateInfo) pname version;
           src = craneLib.cleanCargoSource (craneLib.path ./.);
           buildInputs = with pkgs; [
             openssl
