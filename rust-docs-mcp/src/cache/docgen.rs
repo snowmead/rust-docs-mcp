@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The pinned nightly toolchain version compatible with rustdoc-types 0.53.0
-const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-16";
+const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-23";
 
 /// Service for generating documentation from Rust crates
 #[derive(Debug, Clone)]
