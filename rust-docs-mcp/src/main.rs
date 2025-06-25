@@ -10,6 +10,7 @@ mod cache;
 mod deps;
 mod docs;
 mod service;
+mod update;
 use service::RustDocsService;
 
 /// MCP server for querying Rust crate documentation with offline caching
@@ -34,6 +35,18 @@ enum Commands {
         /// Force overwrite if file already exists
         #[arg(long)]
         force: bool,
+    },
+    /// Update rust-docs-mcp to the latest version from GitHub
+    Update {
+        /// Target directory to install to (defaults to ~/.local/bin)
+        #[arg(long)]
+        target_dir: Option<PathBuf>,
+        /// GitHub repository URL (defaults to repository from Cargo.toml)
+        #[arg(long)]
+        repo_url: Option<String>,
+        /// Specific branch to use (defaults to main)
+        #[arg(long)]
+        branch: Option<String>,
     },
 }
 
@@ -75,6 +88,11 @@ async fn main() -> Result<()> {
 async fn handle_command(command: Commands) -> Result<()> {
     match command {
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,
+        Commands::Update {
+            target_dir,
+            repo_url,
+            branch,
+        } => update::update_executable(target_dir, repo_url, branch).await,
     }
 }
 

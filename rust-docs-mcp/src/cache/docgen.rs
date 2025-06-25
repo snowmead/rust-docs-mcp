@@ -9,6 +9,9 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+/// The pinned nightly toolchain version compatible with rustdoc-types 0.53.0
+const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-16";
+
 /// Service for generating documentation from Rust crates
 #[derive(Debug, Clone)]
 pub struct DocGenerator {
@@ -21,8 +24,35 @@ impl DocGenerator {
         Self { storage }
     }
 
+    /// Validate that the required toolchain is available
+    async fn validate_toolchain(&self) -> Result<()> {
+        let output = Command::new("rustup")
+            .args(["toolchain", "list"])
+            .output()
+            .context("Failed to run rustup toolchain list")?;
+
+        if !output.status.success() {
+            bail!("Failed to check available toolchains");
+        }
+
+        let toolchains = String::from_utf8_lossy(&output.stdout);
+        if !toolchains.contains(REQUIRED_TOOLCHAIN) {
+            bail!(
+                "Required toolchain {} is not installed. Please run: rustup toolchain install {}",
+                REQUIRED_TOOLCHAIN,
+                REQUIRED_TOOLCHAIN
+            );
+        }
+
+        tracing::debug!("Validated toolchain {} is available", REQUIRED_TOOLCHAIN);
+        Ok(())
+    }
+
     /// Generate JSON documentation for a crate
     pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
+        // Validate toolchain before generating docs
+        self.validate_toolchain().await?;
+
         let source_path = self.storage.source_path(name, version);
         let docs_path = self.storage.docs_path(name, version);
 
@@ -36,10 +66,10 @@ impl DocGenerator {
 
         tracing::info!("Generating documentation for {}-{}", name, version);
 
-        // Run cargo rustdoc with JSON output
+        // Run cargo rustdoc with JSON output using pinned nightly toolchain
         let output = Command::new("cargo")
             .args([
-                "+nightly",
+                &format!("+{}", REQUIRED_TOOLCHAIN),
                 "rustdoc",
                 "--all-features",
                 "--",
@@ -85,6 +115,9 @@ impl DocGenerator {
         version: &str,
         member_path: &str,
     ) -> Result<PathBuf> {
+        // Validate toolchain before generating docs
+        self.validate_toolchain().await?;
+
         let source_path = self.storage.source_path(name, version);
         let member_full_path = source_path.join(member_path);
 
@@ -119,10 +152,10 @@ impl DocGenerator {
             version
         );
 
-        // Run cargo rustdoc with JSON output for the specific package
+        // Run cargo rustdoc with JSON output for the specific package using pinned nightly toolchain
         let output = Command::new("cargo")
             .args([
-                "+nightly",
+                &format!("+{}", REQUIRED_TOOLCHAIN),
                 "rustdoc",
                 "-p",
                 &package_name,
