@@ -20,9 +20,9 @@ pub struct ListItemsParams {
     #[schemars(description = "Optional filter by item kind (e.g., 'function', 'struct', 'enum')")]
     pub kind_filter: Option<String>,
     #[schemars(description = "Maximum number of items to return (default: 100)")]
-    pub limit: Option<usize>,
+    pub limit: Option<i64>,
     #[schemars(description = "Starting position for pagination (default: 0)")]
-    pub offset: Option<usize>,
+    pub offset: Option<i64>,
     #[schemars(
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
@@ -40,9 +40,9 @@ pub struct SearchItemsParams {
     )]
     pub pattern: String,
     #[schemars(description = "Maximum number of items to return (default: 100)")]
-    pub limit: Option<usize>,
+    pub limit: Option<i64>,
     #[schemars(description = "Starting position for pagination (default: 0)")]
-    pub offset: Option<usize>,
+    pub offset: Option<i64>,
     #[schemars(description = "Optional filter by item kind (e.g., 'function', 'struct', 'enum')")]
     pub kind_filter: Option<String>,
     #[schemars(description = "Optional filter by module path prefix")]
@@ -64,9 +64,9 @@ pub struct SearchItemsPreviewParams {
     )]
     pub pattern: String,
     #[schemars(description = "Maximum number of items to return (default: 100)")]
-    pub limit: Option<usize>,
+    pub limit: Option<i64>,
     #[schemars(description = "Starting position for pagination (default: 0)")]
-    pub offset: Option<usize>,
+    pub offset: Option<i64>,
     #[schemars(description = "Optional filter by item kind (e.g., 'function', 'struct', 'enum')")]
     pub kind_filter: Option<String>,
     #[schemars(description = "Optional filter by module path prefix")]
@@ -84,7 +84,7 @@ pub struct GetItemDetailsParams {
     #[schemars(description = "The version of the crate")]
     pub version: String,
     #[schemars(description = "The numeric ID of the item")]
-    pub item_id: u32,
+    pub item_id: i32,
     #[schemars(
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
@@ -98,7 +98,7 @@ pub struct GetItemDocsParams {
     #[schemars(description = "The version of the crate")]
     pub version: String,
     #[schemars(description = "The numeric ID of the item")]
-    pub item_id: u32,
+    pub item_id: i32,
     #[schemars(
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
@@ -112,11 +112,11 @@ pub struct GetItemSourceParams {
     #[schemars(description = "The version of the crate")]
     pub version: String,
     #[schemars(description = "The numeric ID of the item")]
-    pub item_id: u32,
+    pub item_id: i32,
     #[schemars(
         description = "Number of context lines to include before and after the item (default: 3)"
     )]
-    pub context_lines: Option<usize>,
+    pub context_lines: Option<i64>,
     #[schemars(
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
@@ -153,8 +153,8 @@ impl DocsTools {
                 let items = query.list_items(params.kind_filter.as_deref());
 
                 let total_count = items.len();
-                let limit = params.limit.unwrap_or(100);
-                let offset = params.offset.unwrap_or(0);
+                let limit = params.limit.unwrap_or(100).max(0) as usize;
+                let offset = params.offset.unwrap_or(0).max(0) as usize;
 
                 // Apply pagination
                 let paginated_items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
@@ -206,8 +206,8 @@ impl DocsTools {
                 }
 
                 let total_count = items.len();
-                let limit = params.limit.unwrap_or(100);
-                let offset = params.offset.unwrap_or(0);
+                let limit = params.limit.unwrap_or(100).max(0) as usize;
+                let offset = params.offset.unwrap_or(0).max(0) as usize;
 
                 // Apply pagination
                 let mut paginated_items: Vec<_> =
@@ -295,8 +295,8 @@ impl DocsTools {
                 }
 
                 let total_count = items.len();
-                let limit = params.limit.unwrap_or(100);
-                let offset = params.offset.unwrap_or(0);
+                let limit = params.limit.unwrap_or(100).max(0) as usize;
+                let offset = params.offset.unwrap_or(0).max(0) as usize;
 
                 // Apply pagination and create preview items
                 let preview_items: Vec<_> = items
@@ -344,7 +344,7 @@ impl DocsTools {
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
-                match query.get_item_details(params.item_id) {
+                match query.get_item_details(params.item_id.max(0) as u32) {
                     Ok(details) => serde_json::to_string_pretty(&details).unwrap_or_else(|e| {
                         format!(r#"{{"error": "Failed to serialize details: {e}"}}"#)
                     }),
@@ -369,7 +369,7 @@ impl DocsTools {
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
-                match query.get_item_docs(params.item_id) {
+                match query.get_item_docs(params.item_id.max(0) as u32) {
                     Ok(Some(docs)) => serde_json::json!({
                         "documentation": docs
                     })
@@ -402,9 +402,9 @@ impl DocsTools {
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
-                let context_lines = params.context_lines.unwrap_or(3);
+                let context_lines = params.context_lines.unwrap_or(3).max(0) as usize;
 
-                match query.get_item_source(params.item_id, &source_base_path, context_lines) {
+                match query.get_item_source(params.item_id.max(0) as u32, &source_base_path, context_lines) {
                     Ok(source_info) => {
                         serde_json::to_string_pretty(&source_info).unwrap_or_else(|e| {
                             format!(r#"{{"error": "Failed to serialize source info: {e}"}}"#)
