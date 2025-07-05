@@ -1,0 +1,58 @@
+{
+  "version": "0.1.0",
+  "description": "MCP server for comprehensive Rust crate documentation analysis",
+  "homepage": "https://github.com/snowmead/rust-docs-mcp",
+  "license": "MIT",
+  "architecture": {
+    "64bit": {
+      "url": "https://github.com/snowmead/rust-docs-mcp/archive/refs/tags/v0.1.0.zip",
+      "hash": "PLACEHOLDER_SHA256",
+      "extract_dir": "rust-docs-mcp-0.1.0"
+    }
+  },
+  "depends": [
+    "rust",
+    "git"
+  ],
+  "pre_install": [
+    "Write-Host 'Installing required Rust nightly toolchain...'",
+    "rustup toolchain install nightly-2025-06-23",
+    "if ($LASTEXITCODE -ne 0) { throw 'Failed to install Rust nightly toolchain' }"
+  ],
+  "installer": {
+    "script": [
+      "Write-Host 'Building rust-docs-mcp...'",
+      "Set-Location \"$dir\"",
+      "rustup override set nightly-2025-06-23",
+      "cargo build --release -p rust-docs-mcp",
+      "if ($LASTEXITCODE -ne 0) { throw 'Failed to build rust-docs-mcp' }",
+      "Copy-Item 'target/release/rust-docs-mcp.exe' \"$dir/rust-docs-mcp.exe\"",
+      "rustup override unset"
+    ]
+  },
+  "bin": "rust-docs-mcp.exe",
+  "shortcuts": [
+    [
+      "rust-docs-mcp.exe",
+      "Rust Docs MCP"
+    ]
+  ],
+  "checkver": {
+    "github": "https://github.com/snowmead/rust-docs-mcp"
+  },
+  "autoupdate": {
+    "architecture": {
+      "64bit": {
+        "url": "https://github.com/snowmead/rust-docs-mcp/archive/refs/tags/v$version.zip",
+        "extract_dir": "rust-docs-mcp-$version"
+      }
+    }
+  },
+  "notes": [
+    "rust-docs-mcp is an MCP server for Rust documentation analysis.",
+    "To use with Claude Code, add it as an MCP server:",
+    "  claude mcp add rust-docs -s user $env:USERPROFILE\\scoop\\shims\\rust-docs-mcp.exe -t stdio",
+    "",
+    "For more information, see: https://github.com/snowmead/rust-docs-mcp"
+  ]
+}
