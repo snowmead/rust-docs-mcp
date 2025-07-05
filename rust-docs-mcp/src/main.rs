@@ -173,17 +173,7 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
     }
 
     // Run doctor command to verify the installation
-    println!("\n🔍 Running system diagnostics...\n");
-    let results = doctor::run_diagnostics(None).await?;
-    doctor::print_results(&results);
-    
-    let exit_code = doctor::exit_code(&results);
-    if exit_code != 0 {
-        println!("\n⚠️  Some diagnostic checks failed. Please address the issues above.");
-        println!("You can run 'rust-docs-mcp doctor' anytime to check system status.");
-    } else {
-        println!("\n✅ All system checks passed!");
-    }
+    doctor::run_and_print_diagnostics().await?;
 
     Ok(())
 }

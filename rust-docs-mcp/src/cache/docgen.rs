@@ -47,7 +47,7 @@ impl DocGenerator {
         tracing::info!("Generating documentation for {}-{}", name, version);
 
         // Run cargo rustdoc with JSON output using unified function
-        rustdoc::run_cargo_rustdoc_json(&source_path).await?;
+        rustdoc::run_cargo_rustdoc_json(&source_path, None).await?;
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join("target").join("doc");
@@ -115,7 +115,7 @@ impl DocGenerator {
         );
 
         // Run cargo rustdoc with JSON output for the specific package using unified function
-        rustdoc::run_cargo_rustdoc_json_for_package(&source_path, &package_name).await?;
+        rustdoc::run_cargo_rustdoc_json(&source_path, Some(&package_name)).await?;
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join("target").join("doc");

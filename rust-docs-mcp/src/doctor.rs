@@ -499,6 +499,24 @@ pub fn print_results_json(results: &[DiagnosticResult]) -> Result<()> {
     Ok(())
 }
 
+/// Run diagnostics and print results with status message
+/// This is a convenience function used after install/update operations
+pub async fn run_and_print_diagnostics() -> Result<()> {
+    println!("\n🔍 Running system diagnostics...\n");
+    let results = run_diagnostics(None).await?;
+    print_results(&results);
+    
+    let exit_code = exit_code(&results);
+    if exit_code != 0 {
+        println!("\n⚠️  Some diagnostic checks failed. Please address the issues above.");
+        println!("You can run 'rust-docs-mcp doctor' anytime to check system status.");
+    } else {
+        println!("\n✅ All system checks passed!");
+    }
+    
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
