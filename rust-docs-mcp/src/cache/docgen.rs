@@ -5,12 +5,11 @@
 
 use crate::cache::storage::CacheStorage;
 use crate::cache::workspace::WorkspaceHandler;
+use crate::rustdoc;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The pinned nightly toolchain version compatible with rustdoc-types 0.53.0
-const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-23";
 
 /// Service for generating documentation from Rust crates
 #[derive(Debug, Clone)]
@@ -26,26 +25,7 @@ impl DocGenerator {
 
     /// Validate that the required toolchain is available
     async fn validate_toolchain(&self) -> Result<()> {
-        let output = Command::new("rustup")
-            .args(["toolchain", "list"])
-            .output()
-            .context("Failed to run rustup toolchain list")?;
-
-        if !output.status.success() {
-            bail!("Failed to check available toolchains");
-        }
-
-        let toolchains = String::from_utf8_lossy(&output.stdout);
-        if !toolchains.contains(REQUIRED_TOOLCHAIN) {
-            bail!(
-                "Required toolchain {} is not installed. Please run: rustup toolchain install {}",
-                REQUIRED_TOOLCHAIN,
-                REQUIRED_TOOLCHAIN
-            );
-        }
-
-        tracing::debug!("Validated toolchain {} is available", REQUIRED_TOOLCHAIN);
-        Ok(())
+        rustdoc::validate_toolchain().await
     }
 
     /// Generate JSON documentation for a crate
@@ -66,26 +46,8 @@ impl DocGenerator {
 
         tracing::info!("Generating documentation for {}-{}", name, version);
 
-        // Run cargo rustdoc with JSON output using pinned nightly toolchain
-        let output = Command::new("cargo")
-            .args([
-                &format!("+{}", REQUIRED_TOOLCHAIN),
-                "rustdoc",
-                "--all-features",
-                "--",
-                "--output-format",
-                "json",
-                "-Z",
-                "unstable-options",
-            ])
-            .current_dir(&source_path)
-            .output()
-            .context("Failed to run cargo rustdoc")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate documentation: {}", stderr);
-        }
+        // Run cargo rustdoc with JSON output using unified function
+        rustdoc::run_cargo_rustdoc_json(&source_path, None).await?;
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join("target").join("doc");
@@ -152,28 +114,8 @@ impl DocGenerator {
             version
         );
 
-        // Run cargo rustdoc with JSON output for the specific package using pinned nightly toolchain
-        let output = Command::new("cargo")
-            .args([
-                &format!("+{}", REQUIRED_TOOLCHAIN),
-                "rustdoc",
-                "-p",
-                &package_name,
-                "--all-features",
-                "--",
-                "--output-format",
-                "json",
-                "-Z",
-                "unstable-options",
-            ])
-            .current_dir(&source_path)
-            .output()
-            .context("Failed to run cargo rustdoc")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate documentation: {}", stderr);
-        }
+        // Run cargo rustdoc with JSON output for the specific package using unified function
+        rustdoc::run_cargo_rustdoc_json(&source_path, Some(&package_name)).await?;
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join("target").join("doc");

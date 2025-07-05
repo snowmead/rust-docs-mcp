@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use std::process::Command;
+use crate::doctor;
 
 /// Update rust-docs-mcp to the latest version from GitHub
 pub async fn update_executable(
@@ -103,7 +104,11 @@ pub async fn update_executable(
     println!("  rust-docs-mcp                # Start MCP server");
     println!("  rust-docs-mcp install        # Install/update to PATH");
     println!("  rust-docs-mcp update         # Update to latest version");
+    println!("  rust-docs-mcp doctor         # Verify system environment");
     println!("  rust-docs-mcp --help         # Show help");
+
+    // Run doctor command to verify the update
+    doctor::run_and_print_diagnostics().await?;
 
     Ok(())
 }
@@ -198,7 +203,8 @@ fn check_path_and_advise(target_dir: &PathBuf) -> Result<()> {
     use std::env;
 
     if let Ok(path_var) = env::var("PATH") {
-        let paths: Vec<&str> = path_var.split(':').collect();
+        let path_separator = if cfg!(windows) { ';' } else { ':' };
+        let paths: Vec<&str> = path_var.split(path_separator).collect();
         let target_dir_str = target_dir.to_string_lossy();
 
         if !paths.iter().any(|&p| p == target_dir_str) {
