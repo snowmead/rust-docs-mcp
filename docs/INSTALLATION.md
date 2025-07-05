@@ -4,25 +4,17 @@ This guide provides multiple ways to install `rust-docs-mcp` depending on your p
 
 ## Quick Start
 
-### One-line Installation (Recommended)
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
-```
-
-This script will:
-- Install Rust and the required nightly toolchain if not present
-- Download and build `rust-docs-mcp` from source
-- Install the binary to `~/.local/bin`
-- Handle platform-specific setup (including macOS code signing)
-- Optionally configure Claude Code integration
+> **Note**: The one-line installer script is currently under development. Please use one of the alternative installation methods below.
 
 ## Package Manager Installation
+
+> **Note**: Package manager installations currently build from the main branch as official releases are pending.
 
 ### Homebrew (macOS and Linux)
 
 #### Using Official Formula
 ```bash
-# Install directly
+# Install directly (builds from source)
 brew install snowmead/rust-docs-mcp/rust-docs-mcp
 
 # Or add tap first, then install
@@ -44,12 +36,10 @@ brew uninstall rust-docs-mcp
 
 #### Using Official Manifest
 ```powershell
-# Install directly
+# Install directly (builds from source)
 scoop install https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/scoop/rust-docs-mcp.json
 
-# Or add bucket first, then install
-scoop bucket add rust-docs-mcp https://github.com/snowmead/scoop-rust-docs-mcp
-scoop install rust-docs-mcp
+# Note: Bucket installation method is not yet available
 ```
 
 #### Update
@@ -221,8 +211,7 @@ Support for `apt`, `yum`, `pacman`, and other system package managers is planned
 - **Scoop**: `scoop update rust-docs-mcp`
 
 ### Manual Updates
-- Re-run the one-line installer script
-- Or rebuild from source with the latest code
+- Rebuild from source with the latest code
 
 ## Uninstallation
 

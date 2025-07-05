@@ -1,8 +1,8 @@
 class RustDocsMcp < Formula
   desc "MCP server for comprehensive Rust crate documentation analysis"
   homepage "https://github.com/snowmead/rust-docs-mcp"
-  url "https://github.com/snowmead/rust-docs-mcp/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "PLACEHOLDER_SHA256"
+  url "https://github.com/snowmead/rust-docs-mcp.git", branch: "main"
+  version "0.1.0-dev"
   license "MIT"
   head "https://github.com/snowmead/rust-docs-mcp.git", branch: "main"
 
@@ -43,9 +43,13 @@ class RustDocsMcp < Formula
   end
 
   test do
-    assert_match version.to_s, shell_output("#{bin}/rust-docs-mcp --version")
+    assert_match "rust-docs-mcp", shell_output("#{bin}/rust-docs-mcp --version")
     
     # Test that the binary can start (will exit quickly without MCP client)
-    system "timeout", "5", "#{bin}/rust-docs-mcp", "||", "true"
+    # Using a more portable approach since timeout command may not be available
+    pid = fork { exec "#{bin}/rust-docs-mcp" }
+    sleep 2
+    Process.kill("TERM", pid) rescue nil
+    Process.wait(pid) rescue nil
   end
 end
