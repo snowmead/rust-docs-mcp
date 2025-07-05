@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 use anyhow::Result;
@@ -19,6 +20,7 @@ use crate::cache::{
 };
 use crate::deps::tools::DepsTools;
 use crate::docs::tools::DocsTools;
+use crate::metrics::MetricsServer;
 
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
@@ -26,18 +28,20 @@ pub struct RustDocsService {
     docs_tools: DocsTools,
     deps_tools: DepsTools,
     analysis_tools: AnalysisTools,
+    metrics: Option<Arc<MetricsServer>>,
 }
 
 #[tool(tool_box)]
 impl RustDocsService {
-    pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
-        let cache = Arc::new(Mutex::new(CrateCache::new(cache_dir)?));
+    pub fn new(cache_dir: Option<PathBuf>, metrics: Option<Arc<MetricsServer>>) -> Result<Self> {
+        let cache = Arc::new(Mutex::new(CrateCache::new_with_metrics(cache_dir, metrics.clone())?));
 
         Ok(Self {
             cache_tools: CacheTools::new(cache.clone()),
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
             analysis_tools: AnalysisTools::new(cache),
+            metrics,
         })
     }
 
@@ -51,7 +55,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: CacheCrateFromCratesIOParams,
     ) -> String {
-        self.cache_tools.cache_crate_from_cratesio(params).await
+        let start = Instant::now();
+        let result = self.cache_tools.cache_crate_from_cratesio(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "crate_from_cratesio", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -61,7 +73,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: CacheCrateFromGitHubParams,
     ) -> String {
-        self.cache_tools.cache_crate_from_github(params).await
+        let start = Instant::now();
+        let result = self.cache_tools.cache_crate_from_github(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "crate_from_github", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -71,7 +91,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: CacheCrateFromLocalParams,
     ) -> String {
-        self.cache_tools.cache_crate_from_local(params).await
+        let start = Instant::now();
+        let result = self.cache_tools.cache_crate_from_local(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "crate_from_local", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -86,14 +114,30 @@ impl RustDocsService {
         #[schemars(description = "The version of the crate")]
         version: String,
     ) -> String {
-        self.cache_tools.remove_crate(crate_name, version).await
+        let start = Instant::now();
+        let result = self.cache_tools.remove_crate(crate_name, version).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "remove_crate", duration);
+        }
+        
+        result
     }
 
     #[tool(
         description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
     )]
     pub async fn list_cached_crates(&self) -> String {
-        self.cache_tools.list_cached_crates().await
+        let start = Instant::now();
+        let result = self.cache_tools.list_cached_crates().await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "list_cached_crates", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -105,7 +149,15 @@ impl RustDocsService {
         #[schemars(description = "The name of the crate")]
         crate_name: String,
     ) -> String {
-        self.cache_tools.list_crate_versions(crate_name).await
+        let start = Instant::now();
+        let result = self.cache_tools.list_crate_versions(crate_name).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "list_crate_versions", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -115,7 +167,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::cache::tools::GetCratesMetadataParams,
     ) -> String {
-        self.cache_tools.get_crates_metadata(params).await
+        let start = Instant::now();
+        let result = self.cache_tools.get_crates_metadata(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("cache", "get_crates_metadata", duration);
+        }
+        
+        result
     }
 
     // Docs tools
@@ -126,7 +186,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::ListItemsParams,
     ) -> String {
-        self.docs_tools.list_crate_items(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.list_crate_items(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "list_crate_items", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -136,7 +204,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::SearchItemsParams,
     ) -> String {
-        self.docs_tools.search_items(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.search_items(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "search_items", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -146,7 +222,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::SearchItemsPreviewParams,
     ) -> String {
-        self.docs_tools.search_items_preview(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.search_items_preview(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "search_items_preview", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -156,7 +240,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::GetItemDetailsParams,
     ) -> String {
-        self.docs_tools.get_item_details(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.get_item_details(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "get_item_details", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -166,7 +258,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::GetItemDocsParams,
     ) -> String {
-        self.docs_tools.get_item_docs(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.get_item_docs(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "get_item_docs", duration);
+        }
+        
+        result
     }
 
     #[tool(
@@ -176,7 +276,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::docs::tools::GetItemSourceParams,
     ) -> String {
-        self.docs_tools.get_item_source(params).await
+        let start = Instant::now();
+        let result = self.docs_tools.get_item_source(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("docs", "get_item_source", duration);
+        }
+        
+        result
     }
 
     // Deps tools
@@ -187,7 +295,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::deps::tools::GetDependenciesParams,
     ) -> String {
-        self.deps_tools.get_dependencies(params).await
+        let start = Instant::now();
+        let result = self.deps_tools.get_dependencies(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("deps", "get_dependencies", duration);
+        }
+        
+        result
     }
 
     // Analysis tools
@@ -198,7 +314,15 @@ impl RustDocsService {
         &self,
         #[tool(aggr)] params: crate::analysis::tools::AnalyzeCrateStructureParams,
     ) -> String {
-        self.analysis_tools.structure(params).await
+        let start = Instant::now();
+        let result = self.analysis_tools.structure(params).await;
+        
+        if let Some(metrics) = &self.metrics {
+            let duration = start.elapsed();
+            metrics.record_query_duration("analysis", "structure", duration);
+        }
+        
+        result
     }
 }
 
@@ -221,3 +345,7 @@ impl ServerHandler for RustDocsService {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "service_metrics_tests.rs"]
+mod tests;
