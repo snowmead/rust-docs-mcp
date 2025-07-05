@@ -4,6 +4,7 @@ use std::path::Path;
 use std::fs;
 use reqwest;
 use dirs;
+use tempfile;
 
 pub struct DiagnosticResult {
     pub name: String,
@@ -151,12 +152,22 @@ async fn check_rustdoc_json() -> DiagnosticResult {
             }
             
             // Try to generate JSON documentation
+            let test_file_str = match test_file.to_str() {
+                Some(path) => path,
+                None => return DiagnosticResult::new(
+                    "Rustdoc JSON".to_string(),
+                    false,
+                    "Test file path contains invalid UTF-8".to_string(),
+                    false,
+                ),
+            };
+            
             match Command::new("rustdoc")
                 .args(&[
                     "+nightly",
                     "--output-format", "json",
                     "--crate-name", "test",
-                    test_file.to_str().unwrap(),
+                    test_file_str,
                 ])
                 .output() {
                 Ok(json_output) if json_output.status.success() => {
@@ -420,5 +431,107 @@ pub fn exit_code(results: &[DiagnosticResult]) -> i32 {
         1 // One or more checks failed
     } else {
         0 // All checks passed
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_diagnostic_result_creation() {
+        let result = DiagnosticResult::new(
+            "Test".to_string(),
+            true,
+            "Test passed".to_string(),
+            false,
+        );
+        assert_eq!(result.name, "Test");
+        assert!(result.success);
+        assert_eq!(result.message, "Test passed");
+        assert!(!result.critical);
+    }
+
+    #[test]
+    fn test_exit_code_all_success() {
+        let results = vec![
+            DiagnosticResult::new("Test 1".to_string(), true, "Success".to_string(), false),
+            DiagnosticResult::new("Test 2".to_string(), true, "Success".to_string(), true),
+        ];
+        assert_eq!(exit_code(&results), 0);
+    }
+
+    #[test]
+    fn test_exit_code_non_critical_failure() {
+        let results = vec![
+            DiagnosticResult::new("Test 1".to_string(), true, "Success".to_string(), false),
+            DiagnosticResult::new("Test 2".to_string(), false, "Failed".to_string(), false),
+        ];
+        assert_eq!(exit_code(&results), 1);
+    }
+
+    #[test]
+    fn test_exit_code_critical_failure() {
+        let results = vec![
+            DiagnosticResult::new("Test 1".to_string(), false, "Failed".to_string(), true),
+            DiagnosticResult::new("Test 2".to_string(), false, "Failed".to_string(), false),
+        ];
+        assert_eq!(exit_code(&results), 2);
+    }
+
+    #[tokio::test]
+    async fn test_check_rust_toolchain() {
+        // This test will pass if rustc is installed
+        let result = check_rust_toolchain().await;
+        assert_eq!(result.name, "Rust toolchain");
+        // We can't guarantee the success state in all environments
+        // but we can verify it returns a valid DiagnosticResult
+        assert!(result.critical);
+    }
+
+    #[tokio::test]
+    async fn test_check_git_installation() {
+        // This test will pass if git is installed
+        let result = check_git_installation().await;
+        assert_eq!(result.name, "Git");
+        assert!(result.critical);
+    }
+
+    #[tokio::test]
+    async fn test_cache_directory_with_none() {
+        let result = check_cache_directory(None).await;
+        assert_eq!(result.name, "Cache directory");
+        // The success depends on whether the directory can be created
+        // but we can verify it returns a valid DiagnosticResult
+        assert!(!result.critical);
+    }
+
+    #[tokio::test]
+    async fn test_cache_directory_with_temp_dir() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let result = check_cache_directory(Some(temp_dir.path().to_path_buf())).await;
+        assert_eq!(result.name, "Cache directory");
+        assert!(result.success);
+        assert!(!result.critical);
+    }
+
+    #[tokio::test]
+    async fn test_optional_dependencies() {
+        let result = check_optional_dependencies().await;
+        assert_eq!(result.name, "Optional dependencies");
+        // Optional dependencies should always return success
+        assert!(result.success);
+        assert!(!result.critical);
+    }
+
+    #[test]
+    fn test_print_results_output() {
+        // This is a simple test to ensure print_results doesn't panic
+        let results = vec![
+            DiagnosticResult::new("Test 1".to_string(), true, "Success".to_string(), false),
+            DiagnosticResult::new("Test 2".to_string(), false, "Failed".to_string(), true),
+        ];
+        // This will print to stdout, but we're mainly testing it doesn't panic
+        print_results(&results);
     }
 }

@@ -152,7 +152,8 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
 
     // Check if target directory is in PATH
     if let Ok(path_var) = env::var("PATH") {
-        let paths: Vec<&str> = path_var.split(':').collect();
+        let path_separator = if cfg!(windows) { ';' } else { ':' };
+        let paths: Vec<&str> = path_var.split(path_separator).collect();
         let target_dir_str = target_dir.to_string_lossy();
 
         if !paths.iter().any(|&p| p == target_dir_str) {
