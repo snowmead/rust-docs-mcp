@@ -51,7 +51,11 @@ enum Commands {
         branch: Option<String>,
     },
     /// Verify system environment and dependencies
-    Doctor,
+    Doctor {
+        /// Output results in JSON format for programmatic consumption
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -97,7 +101,7 @@ async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result
             repo_url,
             branch,
         } => update::update_executable(target_dir, repo_url, branch).await,
-        Commands::Doctor => handle_doctor_command(cache_dir).await,
+        Commands::Doctor { json } => handle_doctor_command(cache_dir, json).await,
     }
 }
 
@@ -171,8 +175,14 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
     Ok(())
 }
 
-async fn handle_doctor_command(cache_dir: Option<PathBuf>) -> Result<()> {
+async fn handle_doctor_command(cache_dir: Option<PathBuf>, json_output: bool) -> Result<()> {
     let results = doctor::run_diagnostics(cache_dir).await?;
-    doctor::print_results(&results);
+    
+    if json_output {
+        doctor::print_results_json(&results)?;
+    } else {
+        doctor::print_results(&results);
+    }
+    
     process::exit(doctor::exit_code(&results));
 }

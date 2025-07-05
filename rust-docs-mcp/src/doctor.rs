@@ -4,8 +4,10 @@ use std::fs;
 use reqwest;
 use dirs;
 use fs2;
+use serde::Serialize;
 use crate::rustdoc;
 
+#[derive(Serialize)]
 pub struct DiagnosticResult {
     pub name: String,
     pub success: bool,
@@ -479,6 +481,22 @@ pub fn exit_code(results: &[DiagnosticResult]) -> i32 {
     } else {
         0 // All checks passed
     }
+}
+
+pub fn print_results_json(results: &[DiagnosticResult]) -> Result<()> {
+    let json_output = serde_json::json!({
+        "results": results,
+        "summary": {
+            "total_checks": results.len(),
+            "passed": results.iter().filter(|r| r.success).count(),
+            "failed": results.iter().filter(|r| !r.success).count(),
+            "critical_failures": results.iter().filter(|r| !r.success && r.critical).count(),
+        },
+        "exit_code": exit_code(results),
+    });
+    
+    println!("{}", serde_json::to_string_pretty(&json_output)?);
+    Ok(())
 }
 
 #[cfg(test)]
