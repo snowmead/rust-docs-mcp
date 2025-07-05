@@ -3,6 +3,7 @@ use std::process::Command;
 use std::fs;
 use reqwest;
 use dirs;
+use fs2;
 use crate::rustdoc;
 
 pub struct DiagnosticResult {
@@ -311,10 +312,30 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
             let _ = fs::remove_file(&test_file);
             
             // Check available disk space
-            match fs::metadata(&cache_path) {
-                Ok(_) => {
-                    // We can't easily get disk space in a cross-platform way without additional dependencies
-                    // For now, just confirm it's writable
+            match fs2::available_space(&cache_path) {
+                Ok(available_bytes) => {
+                    let available_formatted = format_bytes(available_bytes);
+                    // Warn if less than 1GB available
+                    if available_bytes < 1_073_741_824 {
+                        DiagnosticResult::new(
+                            "Cache directory".to_string(),
+                            false,
+                            format!("{} (writable, but only {} available - at least 1GB recommended)", 
+                                cache_path.display(), available_formatted),
+                            false,
+                        )
+                    } else {
+                        DiagnosticResult::new(
+                            "Cache directory".to_string(),
+                            true,
+                            format!("{} (writable, {} available)", cache_path.display(), available_formatted),
+                            false,
+                        )
+                    }
+                }
+                Err(e) => {
+                    // If disk space check fails, just report that it's writable
+                    tracing::debug!("Failed to check disk space: {}", e);
                     DiagnosticResult::new(
                         "Cache directory".to_string(),
                         true,
@@ -322,12 +343,6 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
                         false,
                     )
                 }
-                Err(_) => DiagnosticResult::new(
-                    "Cache directory".to_string(),
-                    true,
-                    format!("{} (writable)", cache_path.display()),
-                    false,
-                ),
             }
         }
         Err(e) => DiagnosticResult::new(
@@ -366,6 +381,23 @@ async fn check_optional_dependencies() -> DiagnosticResult {
         messages.join(", "),
         false,
     )
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit_index = 0;
+    
+    while size >= 1024.0 && unit_index < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_index += 1;
+    }
+    
+    if unit_index == 0 {
+        format!("{} {}", size as u64, UNITS[unit_index])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_index])
+    }
 }
 
 pub fn print_results(results: &[DiagnosticResult]) {
@@ -412,6 +444,9 @@ pub fn print_results(results: &[DiagnosticResult]) {
                     }
                     "Cache directory" => {
                         println!("\nCache directory issues detected. Check file permissions and disk space.");
+                        if result.message.contains("available") && result.message.contains("recommended") {
+                            println!("Consider freeing up disk space. At least 1GB is recommended for caching documentation.");
+                        }
                     }
                     _ => {}
                 }
@@ -545,5 +580,17 @@ mod tests {
         ];
         // This will print to stdout, but we're mainly testing it doesn't panic
         print_results(&results);
+    }
+    
+    #[test]
+    fn test_format_bytes() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1.00 KB");
+        assert_eq!(format_bytes(1536), "1.50 KB");
+        assert_eq!(format_bytes(1048576), "1.00 MB");
+        assert_eq!(format_bytes(1073741824), "1.00 GB");
+        assert_eq!(format_bytes(1099511627776), "1.00 TB");
+        assert_eq!(format_bytes(2147483648), "2.00 GB");
     }
 }
