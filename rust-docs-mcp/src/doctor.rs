@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use std::process::Command;
-use std::path::Path;
 use std::fs;
 use reqwest;
 use dirs;
-use tempfile;
+use crate::rustdoc;
 
 pub struct DiagnosticResult {
     pub name: String,
@@ -126,72 +125,29 @@ async fn check_nightly_toolchain() -> DiagnosticResult {
 
 async fn check_rustdoc_json() -> DiagnosticResult {
     // First check if rustdoc is available
-    match Command::new("rustdoc").arg("--version").output() {
-        Ok(output) if output.status.success() => {
-            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            
-            // Try to create a simple test for JSON generation
-            let temp_dir = match tempfile::tempdir() {
-                Ok(dir) => dir,
-                Err(_) => return DiagnosticResult::new(
-                    "Rustdoc JSON".to_string(),
-                    false,
-                    "Failed to create temporary directory for testing".to_string(),
-                    false,
-                ),
-            };
-            
-            let test_file = temp_dir.path().join("lib.rs");
-            if let Err(_) = fs::write(&test_file, "//! Test crate\npub fn test() {}") {
-                return DiagnosticResult::new(
-                    "Rustdoc JSON".to_string(),
-                    false,
-                    "Failed to create test file".to_string(),
-                    false,
-                );
-            }
-            
-            // Try to generate JSON documentation
-            let test_file_str = match test_file.to_str() {
-                Some(path) => path,
-                None => return DiagnosticResult::new(
-                    "Rustdoc JSON".to_string(),
-                    false,
-                    "Test file path contains invalid UTF-8".to_string(),
-                    false,
-                ),
-            };
-            
-            match Command::new("rustdoc")
-                .args(&[
-                    "+nightly",
-                    "--output-format", "json",
-                    "--crate-name", "test",
-                    test_file_str,
-                ])
-                .output() {
-                Ok(json_output) if json_output.status.success() => {
+    match rustdoc::get_rustdoc_version().await {
+        Ok(version) => {
+            // Try to test JSON generation using the unified function
+            match rustdoc::test_rustdoc_json().await {
+                Ok(_) => {
                     DiagnosticResult::new(
                         "Rustdoc JSON".to_string(),
                         true,
-                        format!("{} with JSON support", version),
+                        format!("{} with JSON support (toolchain: {})", version, rustdoc::REQUIRED_TOOLCHAIN),
                         false,
                     )
                 }
-                _ => DiagnosticResult::new(
-                    "Rustdoc JSON".to_string(),
-                    false,
-                    "JSON generation failed - ensure nightly toolchain is installed".to_string(),
-                    false,
-                ),
+                Err(e) => {
+                    tracing::debug!("Rustdoc JSON test failed: {}", e);
+                    DiagnosticResult::new(
+                        "Rustdoc JSON".to_string(),
+                        false,
+                        format!("JSON generation failed: {}", e),
+                        false,
+                    )
+                }
             }
         }
-        Ok(_) => DiagnosticResult::new(
-            "Rustdoc JSON".to_string(),
-            false,
-            "rustdoc command failed".to_string(),
-            false,
-        ),
         Err(_) => DiagnosticResult::new(
             "Rustdoc JSON".to_string(),
             false,
@@ -228,38 +184,94 @@ async fn check_git_installation() -> DiagnosticResult {
 }
 
 async fn check_network_connectivity() -> DiagnosticResult {
-    let client = reqwest::Client::builder()
+    let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .unwrap();
-    
-    // Test crates.io API
-    match client.get("https://crates.io/api/v1/crates/serde").send().await {
-        Ok(response) if response.status().is_success() => {
-            // Also test GitHub connectivity
-            match client.get("https://api.github.com").send().await {
-                Ok(gh_response) if gh_response.status().is_success() => {
-                    DiagnosticResult::new(
-                        "Network".to_string(),
-                        true,
-                        "crates.io and GitHub reachable".to_string(),
-                        false,
-                    )
-                }
-                _ => DiagnosticResult::new(
-                    "Network".to_string(),
-                    false,
-                    "crates.io reachable but GitHub unreachable".to_string(),
-                    false,
-                ),
-            }
-        }
-        _ => DiagnosticResult::new(
+        .user_agent("rust-docs-mcp-doctor/1.0")
+        .build() {
+        Ok(client) => client,
+        Err(e) => return DiagnosticResult::new(
             "Network".to_string(),
             false,
-            "Unable to reach crates.io - check network connection".to_string(),
+            format!("Failed to create HTTP client: {}", e),
             false,
         ),
+    };
+    
+    // Test crates.io API
+    tracing::debug!("Testing crates.io connectivity...");
+    match client.get("https://crates.io/api/v1/crates/serde").send().await {
+        Ok(response) => {
+            let status = response.status();
+            tracing::debug!("crates.io response status: {}", status);
+            
+            if status.is_success() {
+                // Try to read a small portion of the response to ensure it's valid
+                match response.text().await {
+                    Ok(body) => {
+                        tracing::debug!("crates.io response body length: {}", body.len());
+                        
+                        // Also test GitHub connectivity
+                        tracing::debug!("Testing GitHub connectivity...");
+                        match client.get("https://api.github.com").send().await {
+                            Ok(gh_response) => {
+                                let gh_status = gh_response.status();
+                                tracing::debug!("GitHub response status: {}", gh_status);
+                                
+                                if gh_status.is_success() {
+                                    DiagnosticResult::new(
+                                        "Network".to_string(),
+                                        true,
+                                        format!("crates.io ({}) and GitHub ({}) reachable", status, gh_status),
+                                        false,
+                                    )
+                                } else {
+                                    DiagnosticResult::new(
+                                        "Network".to_string(),
+                                        false,
+                                        format!("crates.io reachable ({}) but GitHub unreachable ({})", status, gh_status),
+                                        false,
+                                    )
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("DEBUG: GitHub request error: {}", e);
+                                DiagnosticResult::new(
+                                    "Network".to_string(),
+                                    false,
+                                    format!("crates.io reachable ({}) but GitHub error: {}", status, e),
+                                    false,
+                                )
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("DEBUG: Failed to read crates.io response body: {}", e);
+                        DiagnosticResult::new(
+                            "Network".to_string(),
+                            false,
+                            format!("crates.io responded ({}) but failed to read response: {}", status, e),
+                            false,
+                        )
+                    }
+                }
+            } else {
+                DiagnosticResult::new(
+                    "Network".to_string(),
+                    false,
+                    format!("crates.io returned error status: {}", status),
+                    false,
+                )
+            }
+        }
+        Err(e) => {
+            eprintln!("DEBUG: crates.io request error: {}", e);
+            DiagnosticResult::new(
+                "Network".to_string(),
+                false,
+                format!("Unable to reach crates.io: {}", e),
+                false,
+            )
+        }
     }
 }
 

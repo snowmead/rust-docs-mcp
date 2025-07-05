@@ -10,6 +10,7 @@ mod cache;
 mod deps;
 mod docs;
 mod doctor;
+mod rustdoc;
 mod service;
 mod update;
 use service::RustDocsService;
