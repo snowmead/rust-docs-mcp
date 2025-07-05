@@ -43,7 +43,12 @@ tokio = { version = "1", features = [
     "rt-multi-thread",
     "io-std",
     "signal",
+    "net",
 ] }
+axum = "0.7"
+axum-prometheus = "0.4"
+prometheus = "0.13"
+tower = "0.4"
 toml = "0.8"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [

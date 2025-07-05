@@ -9,6 +9,8 @@ mod analysis;
 mod cache;
 mod deps;
 mod docs;
+mod health;
+mod metrics;
 mod service;
 mod update;
 use service::RustDocsService;
@@ -20,6 +22,14 @@ struct Args {
     /// Custom cache directory path (defaults to ~/.rust-docs-mcp/cache)
     #[arg(long, env = "RUST_DOCS_MCP_CACHE_DIR")]
     cache_dir: Option<PathBuf>,
+
+    /// Enable HTTP metrics server
+    #[arg(long, default_value = "false")]
+    enable_metrics: bool,
+
+    /// Metrics server bind address
+    #[arg(long, default_value = "127.0.0.1:9090")]
+    metrics_addr: String,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -72,8 +82,42 @@ async fn main() -> Result<()> {
         tracing::info!("Using custom cache directory: {}", cache_dir.display());
     }
 
-    // Create the service with optional cache directory
-    let rust_docs_service = RustDocsService::new(args.cache_dir)?;
+    // Create optional metrics server
+    let metrics_server = if args.enable_metrics {
+        let metrics = std::sync::Arc::new(metrics::MetricsServer::new()?);
+        let metrics_addr = args.metrics_addr.clone();
+        
+        // Start metrics server in background
+        let metrics_handle = {
+            let metrics_server = metrics.clone();
+            tokio::spawn(async move {
+                if let Err(e) = metrics_server.start_server(&metrics_addr).await {
+                    tracing::error!("Metrics server error: {:?}", e);
+                }
+            })
+        };
+        
+        // Start health check updates
+        let health_status = metrics.get_health_status();
+        let cache_dir = args.cache_dir.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                let mut health = health_status.write().await;
+                if let Err(e) = health.update_health_checks(cache_dir.as_deref()).await {
+                    tracing::warn!("Health check update error: {:?}", e);
+                }
+            }
+        });
+        
+        Some((metrics, metrics_handle))
+    } else {
+        None
+    };
+
+    // Create the service with optional cache directory and metrics
+    let rust_docs_service = RustDocsService::new(args.cache_dir, metrics_server.as_ref().map(|(m, _)| m.clone()))?;
 
     // Serve using stdio transport
     let service = rust_docs_service.serve(stdio()).await.inspect_err(|e| {
