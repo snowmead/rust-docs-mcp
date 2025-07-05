@@ -4,7 +4,29 @@ This guide provides multiple ways to install `rust-docs-mcp` depending on your p
 
 ## Quick Start
 
-> **Note**: The one-line installer script is currently under development. Please use one of the alternative installation methods below.
+### Bash Script Installation
+
+The easiest way to install rust-docs-mcp is using our installation script:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
+```
+
+#### Custom Installation Directory
+
+You can specify a custom installation directory:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
+```
+
+The script will:
+- Check for and install required dependencies (Rust, git)
+- Install the Rust nightly toolchain if needed
+- Build rust-docs-mcp in release mode
+- Install the binary to `~/.local/bin` (or your specified directory)
+- Handle macOS code signing automatically
+- Offer to configure Claude Code integration if detected
 
 ## Package Manager Installation
 
@@ -15,10 +37,10 @@ This guide provides multiple ways to install `rust-docs-mcp` depending on your p
 #### Using Official Formula
 ```bash
 # Install directly (builds from source)
-brew install snowmead/rust-docs-mcp/rust-docs-mcp
+brew install snowmead/rust-docs-mcp
 
 # Or add tap first, then install
-brew tap snowmead/rust-docs-mcp
+brew tap snowmead
 brew install rust-docs-mcp
 ```
 

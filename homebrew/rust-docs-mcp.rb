@@ -31,15 +31,74 @@ class RustDocsMcp < Formula
     system "rustup", "override", "unset"
   end
 
+  def post_install
+    # Check if Claude Code is installed and offer to set up integration
+    if system("which claude >/dev/null 2>&1")
+      ohai "Claude Code detected!"
+      
+      # Check if rust-docs is already configured
+      if !system("claude mcp list 2>/dev/null | grep -q rust-docs")
+        ohai "Adding rust-docs-mcp to Claude Code..."
+        if system("claude mcp add rust-docs -s user #{bin}/rust-docs-mcp -t stdio")
+          ohai "Successfully added rust-docs-mcp to Claude Code!"
+          
+          # Display the tool allow list
+          ohai "To enable all rust-docs tools, add these to your Claude settings allow list:"
+          puts "(~/.claude/settings.json or your project/local settings)"
+          puts ""
+          puts "  \"mcp__rust-docs__cache_crate_from_cratesio\","
+          puts "  \"mcp__rust-docs__cache_crate_from_github\","
+          puts "  \"mcp__rust-docs__cache_crate_from_local\","
+          puts "  \"mcp__rust-docs__remove_crate\","
+          puts "  \"mcp__rust-docs__list_cached_crates\","
+          puts "  \"mcp__rust-docs__list_crate_versions\","
+          puts "  \"mcp__rust-docs__get_crates_metadata\","
+          puts "  \"mcp__rust-docs__list_crate_items\","
+          puts "  \"mcp__rust-docs__search_items\","
+          puts "  \"mcp__rust-docs__search_items_preview\","
+          puts "  \"mcp__rust-docs__get_item_details\","
+          puts "  \"mcp__rust-docs__get_item_docs\","
+          puts "  \"mcp__rust-docs__get_item_source\","
+          puts "  \"mcp__rust-docs__get_dependencies\","
+          puts "  \"mcp__rust-docs__structure\""
+        else
+          opoo "Could not automatically add rust-docs-mcp to Claude Code"
+          opoo "You can add it manually with:"
+          puts "  claude mcp add rust-docs -s user #{bin}/rust-docs-mcp -t stdio"
+        end
+      else
+        ohai "rust-docs-mcp is already configured in Claude Code"
+      end
+    end
+  end
+
   def caveats
-    <<~EOS
+    s = <<~EOS
       rust-docs-mcp is an MCP server for Rust documentation analysis.
       
-      To use with Claude Code, add it as an MCP server:
-        claude mcp add rust-docs -s user #{bin}/rust-docs-mcp -t stdio
-      
-      For more information, see: #{homepage}
     EOS
+    
+    # Only show manual Claude Code setup if it wasn't done automatically
+    if !system("which claude >/dev/null 2>&1")
+      s += <<~EOS
+        To use with Claude Code (when installed), add it as an MCP server:
+          claude mcp add rust-docs -s user #{bin}/rust-docs-mcp -t stdio
+        
+      EOS
+    elsif !system("claude mcp list 2>/dev/null | grep -q rust-docs")
+      s += <<~EOS
+        To use with Claude Code, add it as an MCP server:
+          claude mcp add rust-docs -s user #{bin}/rust-docs-mcp -t stdio
+        
+      EOS
+    end
+    
+    s += <<~EOS
+      For more information and detailed tool configuration, see:
+        #{homepage}
+    EOS
+    
+    s
   end
 
   test do
