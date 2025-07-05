@@ -47,6 +47,11 @@ impl CacheStorage {
         Ok(Self { cache_dir })
     }
 
+    /// Get the cache directory path
+    pub fn cache_dir(&self) -> &Path {
+        &self.cache_dir
+    }
+
     /// Get the path for a specific crate version
     pub fn crate_path(&self, name: &str, version: &str) -> PathBuf {
         self.crate_path_for_id(&CrateIdentifier::new(name, version).unwrap())
