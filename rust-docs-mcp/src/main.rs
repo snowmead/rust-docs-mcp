@@ -9,6 +9,7 @@ mod analysis;
 mod cache;
 mod deps;
 mod docs;
+mod doctor;
 mod service;
 mod update;
 use service::RustDocsService;
@@ -48,6 +49,8 @@ enum Commands {
         #[arg(long)]
         branch: Option<String>,
     },
+    /// Verify system environment and dependencies
+    Doctor,
 }
 
 #[tokio::main]
@@ -57,7 +60,7 @@ async fn main() -> Result<()> {
 
     // Handle subcommands
     if let Some(command) = args.command {
-        return handle_command(command).await;
+        return handle_command(command, args.cache_dir).await;
     }
 
     // Initialize tracing to stderr to avoid conflicts with stdio transport
@@ -85,7 +88,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle_command(command: Commands) -> Result<()> {
+async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result<()> {
     match command {
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,
         Commands::Update {
@@ -93,6 +96,7 @@ async fn handle_command(command: Commands) -> Result<()> {
             repo_url,
             branch,
         } => update::update_executable(target_dir, repo_url, branch).await,
+        Commands::Doctor => handle_doctor_command(cache_dir).await,
     }
 }
 
@@ -163,4 +167,10 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
     }
 
     Ok(())
+}
+
+async fn handle_doctor_command(cache_dir: Option<PathBuf>) -> Result<()> {
+    let results = doctor::run_diagnostics(cache_dir).await?;
+    doctor::print_results(&results);
+    process::exit(doctor::exit_code(&results));
 }
