@@ -80,7 +80,12 @@ impl SearchIndexer {
     /// Get or create an IndexWriter with proper buffer size
     fn get_writer(&mut self) -> Result<&mut IndexWriter> {
         if self.writer.is_none() {
-            let writer = self.index.writer(50_000_000)?; // 50MB buffer
+            // Use a configurable buffer size with a reasonable default
+            const DEFAULT_BUFFER_SIZE: usize = 50_000_000; // 50MB
+            const MAX_BUFFER_SIZE: usize = 200_000_000; // 200MB max
+            
+            let buffer_size = std::cmp::min(DEFAULT_BUFFER_SIZE, MAX_BUFFER_SIZE);
+            let writer = self.index.writer(buffer_size)?;
             self.writer = Some(writer);
         }
         Ok(self.writer.as_mut().unwrap())
@@ -88,8 +93,19 @@ impl SearchIndexer {
     
     /// Add crate items to the search index
     pub fn add_crate_items(&mut self, crate_name: &str, version: &str, crate_data: &Crate) -> Result<()> {
+        // Validate crate name to prevent path traversal
+        if crate_name.contains(&['/', '\', '..'][..]) {
+            return Err(anyhow::anyhow!("Invalid crate name"));
+        }
+        
         let query = DocQuery::new(crate_data.clone());
         let items = query.list_items(None); // Get all items without filtering
+        
+        // Limit number of items to prevent resource exhaustion
+        const MAX_ITEMS_PER_CRATE: usize = 100_000;
+        if items.len() > MAX_ITEMS_PER_CRATE {
+            return Err(anyhow::anyhow!("Crate has too many items ({}), max allowed: {}", items.len(), MAX_ITEMS_PER_CRATE));
+        }
         
         self.add_items_to_index(crate_name, version, &items)?;
         Ok(())
@@ -155,12 +171,18 @@ impl SearchIndexer {
     pub fn remove_crate(&mut self, crate_name: &str, version: &str) -> Result<()> {
         let writer = self.get_writer()?;
         
-        // Delete documents matching the crate name and version
+        // Create a query that matches documents with both crate name AND version
         let crate_term = Term::from_field_text(self.fields.crate_name, crate_name);
         let version_term = Term::from_field_text(self.fields.version, version);
         
-        writer.delete_term(crate_term);
-        writer.delete_term(version_term);
+        let crate_query = tantivy::query::TermQuery::new(crate_term, tantivy::schema::IndexRecordOption::Basic);
+        let version_query = tantivy::query::TermQuery::new(version_term, tantivy::schema::IndexRecordOption::Basic);
+        
+        let mut boolean_query = tantivy::query::BooleanQuery::new();
+        boolean_query.add_clause(crate_query.into(), tantivy::query::Occur::Must);
+        boolean_query.add_clause(version_query.into(), tantivy::query::Occur::Must);
+        
+        writer.delete_query(Box::new(boolean_query))?;
         writer.commit()?;
         
         Ok(())
@@ -230,5 +252,52 @@ impl SearchIndexer {
         let writer = self.get_writer()?;
         writer.wait_merging_threads()?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+    
+    #[test]
+    fn test_create_indexer() {
+        let temp_dir = TempDir::new().unwrap();
+        let indexer = SearchIndexer::new(temp_dir.path()).unwrap();
+        assert!(indexer.get_index().searchable_segment_ids().unwrap().is_empty());
+    }
+    
+    #[test]
+    fn test_crate_name_validation() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut indexer = SearchIndexer::new(temp_dir.path()).unwrap();
+        let crate_data = Crate::default();
+        
+        // Test invalid crate names
+        assert!(indexer.add_crate_items("../evil", "1.0.0", &crate_data).is_err());
+        assert!(indexer.add_crate_items("crate/name", "1.0.0", &crate_data).is_err());
+        assert!(indexer.add_crate_items("crate\\name", "1.0.0", &crate_data).is_err());
+        
+        // Test valid crate name
+        assert!(indexer.add_crate_items("valid-crate", "1.0.0", &crate_data).is_ok());
+    }
+    
+    #[test]
+    fn test_is_crate_indexed() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut indexer = SearchIndexer::new(temp_dir.path()).unwrap();
+        let crate_data = Crate::default();
+        
+        // Should not be indexed initially
+        assert!(!indexer.is_crate_indexed("test-crate", "1.0.0").unwrap());
+        
+        // Add the crate
+        indexer.add_crate_items("test-crate", "1.0.0", &crate_data).unwrap();
+        
+        // Should now be indexed
+        assert!(indexer.is_crate_indexed("test-crate", "1.0.0").unwrap());
+        
+        // Different version should not be indexed
+        assert!(!indexer.is_crate_indexed("test-crate", "2.0.0").unwrap());
     }
 }

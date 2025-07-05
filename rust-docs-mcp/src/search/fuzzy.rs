@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result};
 use tantivy::{
     Index, Term,
@@ -108,14 +108,22 @@ impl FuzzySearcher {
     
     /// Perform fuzzy search with the given query and options
     pub fn search(&self, query: &str, options: &FuzzySearchOptions) -> Result<Vec<SearchResult>> {
+        // Validate query length
+        if query.len() > 1000 {
+            return Err(anyhow::anyhow!("Query too long (max 1000 characters)"));
+        }
+        
+        // Sanitize query to escape special characters
+        let sanitized_query = Self::sanitize_query(query);
+        
         let reader = self.index.reader()?;
         let searcher = reader.searcher();
         
         // Build the query based on options
         let search_query = if options.fuzzy_enabled {
-            self.build_fuzzy_query(query, options)?
+            self.build_fuzzy_query(&sanitized_query, options)?
         } else {
-            self.build_standard_query(query, options)?
+            self.build_standard_query(&sanitized_query, options)?
         };
         
         // Execute search
@@ -232,12 +240,27 @@ impl FuzzySearcher {
         true
     }
     
+    /// Sanitize query to escape special Tantivy syntax characters
+    fn sanitize_query(query: &str) -> String {
+        // Escape special characters that have meaning in Tantivy query syntax
+        // These include: + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+        query
+            .chars()
+            .map(|c| match c {
+                '+' | '-' | '!' | '(' | ')' | '{' | '}' | '[' | ']' | '^' | '"' | '~' | 
+                '*' | '?' | ':' | '\\' | '/' => format!("\\{}", c),
+                _ => c.to_string(),
+            })
+            .collect()
+    }
+    
     /// Get search suggestions based on a partial query
     pub fn get_suggestions(&self, partial_query: &str, limit: usize) -> Result<Vec<String>> {
         let reader = self.index.reader()?;
         let searcher = reader.searcher();
         
         // Use fuzzy search to find similar terms
+        let mut seen_suggestions = HashSet::new();
         let mut suggestions = Vec::new();
         let fuzzy_query = FuzzyTermQuery::new(
             Term::from_field_text(self.fields.name, partial_query),
@@ -250,11 +273,12 @@ impl FuzzySearcher {
         for (_, doc_address) in top_docs {
             let doc = searcher.doc(doc_address)?;
             if let Some(name) = doc.get_first(self.fields.name).and_then(|v| v.as_text()) {
-                if !suggestions.contains(&name.to_string()) {
-                    suggestions.push(name.to_string());
-                }
-                if suggestions.len() >= limit {
-                    break;
+                let name_string = name.to_string();
+                if seen_suggestions.insert(name_string.clone()) {
+                    suggestions.push(name_string);
+                    if suggestions.len() >= limit {
+                        break;
+                    }
                 }
             }
         }
@@ -275,5 +299,58 @@ impl FuzzySearcher {
         stats.insert("segment_count".to_string(), serde_json::Value::Number(segment_readers.len().into()));
         
         Ok(stats)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::search::indexer::SearchIndexer;
+    use tempfile::TempDir;
+    
+    #[test]
+    fn test_sanitize_query() {
+        assert_eq!(FuzzySearcher::sanitize_query("hello world"), "hello world");
+        assert_eq!(FuzzySearcher::sanitize_query("test+query"), "test\\+query");
+        assert_eq!(FuzzySearcher::sanitize_query("(test)"), "\\(test\\)");
+        assert_eq!(FuzzySearcher::sanitize_query("wild*card?"), "wild\\*card\\?");
+        assert_eq!(FuzzySearcher::sanitize_query("path/to/file"), "path\\/to\\/file");
+    }
+    
+    #[test]
+    fn test_fuzzy_search_options_default() {
+        let options = FuzzySearchOptions::default();
+        assert!(options.fuzzy_enabled);
+        assert_eq!(options.fuzzy_distance, 1);
+        assert_eq!(options.limit, 50);
+        assert!(options.kind_filter.is_none());
+        assert!(options.crate_filter.is_none());
+    }
+    
+    #[test]
+    fn test_search_query_validation() {
+        let temp_dir = TempDir::new().unwrap();
+        let indexer = SearchIndexer::new(temp_dir.path()).unwrap();
+        let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer).unwrap();
+        
+        // Test query length validation
+        let long_query = "a".repeat(1001);
+        let options = FuzzySearchOptions::default();
+        let result = fuzzy_searcher.search(&long_query, &options);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Query too long"));
+    }
+    
+    #[test]
+    fn test_get_suggestions_deduplication() {
+        // This test would require a populated index, which is complex to set up
+        // in a unit test. In a real scenario, this would be an integration test.
+        // For now, we're just testing that the method compiles and runs.
+        let temp_dir = TempDir::new().unwrap();
+        let indexer = SearchIndexer::new(temp_dir.path()).unwrap();
+        let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer).unwrap();
+        
+        let suggestions = fuzzy_searcher.get_suggestions("test", 10).unwrap();
+        assert!(suggestions.is_empty()); // Empty index returns empty suggestions
     }
 }

@@ -50,7 +50,7 @@ pub struct SearchSuggestionsParams {
 #[derive(Debug, Clone)]
 pub struct SearchTools {
     cache: Arc<Mutex<CrateCache>>,
-    indexer: Arc<Mutex<Option<SearchIndexer>>>,
+    indexer: Arc<Mutex<Option<Arc<Mutex<SearchIndexer>>>>>,
 }
 
 impl SearchTools {
@@ -62,40 +62,55 @@ impl SearchTools {
     }
     
     /// Get or create the search indexer
-    async fn get_indexer(&self) -> Result<SearchIndexer> {
+    async fn get_indexer(&self) -> Result<Arc<Mutex<SearchIndexer>>> {
+        // First check without holding the lock
+        {
+            let indexer_guard = self.indexer.lock().await;
+            if let Some(ref indexer) = *indexer_guard {
+                return Ok(indexer.clone());
+            }
+        }
+        
+        // Need to create indexer - acquire lock again and double-check
         let mut indexer_guard = self.indexer.lock().await;
         
+        // Double-check pattern to prevent race condition
         if indexer_guard.is_none() {
             let cache = self.cache.lock().await;
             let cache_dir = cache.storage.cache_dir();
-            let indexer = SearchIndexer::new(cache_dir)?;
-            *indexer_guard = Some(indexer);
+            drop(cache); // Release cache lock before creating indexer
+            
+            let indexer = SearchIndexer::new(&cache_dir)?;
+            *indexer_guard = Some(Arc::new(Mutex::new(indexer)));
         }
         
-        // Clone the indexer to return it
-        // Note: This is not ideal as it creates a new indexer each time
-        // In a real implementation, we'd want to share the indexer properly
-        let cache = self.cache.lock().await;
-        let cache_dir = cache.storage.cache_dir();
-        SearchIndexer::new(cache_dir)
+        // Return a clone of the Arc (cheap operation)
+        Ok(indexer_guard.as_ref().unwrap().clone())
     }
     
     /// Ensure a crate is indexed for search
     async fn ensure_crate_indexed(&self, crate_name: &str, version: &str, member: Option<&str>) -> Result<()> {
-        let mut indexer = self.get_indexer().await?;
+        let indexer = self.get_indexer().await?;
         
         // Check if already indexed
-        if indexer.is_crate_indexed(crate_name, version)? {
-            return Ok(());
+        {
+            let indexer_lock = indexer.lock().await;
+            if indexer_lock.is_crate_indexed(crate_name, version)? {
+                return Ok(());
+            }
         }
         
         // Get the crate documentation
-        let cache = self.cache.lock().await;
-        let crate_data = cache.ensure_crate_or_member_docs(crate_name, version, member).await?;
-        drop(cache); // Release the lock
+        let crate_data = {
+            let cache = self.cache.lock().await;
+            cache.ensure_crate_or_member_docs(crate_name, version, member).await?
+        };
         
         // Index the crate
-        indexer.add_crate_items(crate_name, version, &crate_data)?;
+        {
+            let mut indexer_lock = indexer.lock().await;
+            indexer_lock.add_crate_items(crate_name, version, &crate_data)?;
+        }
         
         Ok(())
     }
@@ -108,13 +123,28 @@ impl SearchTools {
             
             // Create fuzzy searcher
             let indexer = self.get_indexer().await?;
-            let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
+            let fuzzy_searcher = {
+                let indexer_lock = indexer.lock().await;
+                FuzzySearcher::from_indexer(&*indexer_lock)?
+            };
+            
+            // Validate fuzzy distance
+            let fuzzy_distance = params.fuzzy_distance.unwrap_or(1);
+            if fuzzy_distance > 2 {
+                return Err(anyhow::anyhow!("Fuzzy distance must be between 0 and 2"));
+            }
+            
+            // Validate limit
+            let limit = params.limit.unwrap_or(50);
+            if limit > 1000 {
+                return Err(anyhow::anyhow!("Limit must not exceed 1000"));
+            }
             
             // Build search options
             let options = FuzzySearchOptions {
                 fuzzy_enabled: params.fuzzy_enabled.unwrap_or(true),
-                fuzzy_distance: params.fuzzy_distance.unwrap_or(1),
-                limit: params.limit.unwrap_or(50),
+                fuzzy_distance,
+                limit,
                 kind_filter: params.kind_filter.clone(),
                 crate_filter: Some(params.crate_name.clone()),
             };
@@ -153,10 +183,18 @@ impl SearchTools {
             
             // Create fuzzy searcher
             let indexer = self.get_indexer().await?;
-            let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
+            let fuzzy_searcher = {
+                let indexer_lock = indexer.lock().await;
+                FuzzySearcher::from_indexer(&*indexer_lock)?
+            };
+            
+            // Validate limit
+            let limit = params.limit.unwrap_or(10);
+            if limit > 100 {
+                return Err(anyhow::anyhow!("Limit must not exceed 100 for suggestions"));
+            }
             
             // Get suggestions
-            let limit = params.limit.unwrap_or(10);
             let suggestions = fuzzy_searcher.get_suggestions(&params.partial_query, limit)?;
             
             Ok::<Vec<String>, anyhow::Error>(suggestions)
@@ -184,10 +222,13 @@ impl SearchTools {
     pub async fn get_search_stats(&self, crate_name: String, version: String) -> String {
         let result = async {
             let indexer = self.get_indexer().await?;
-            let stats = indexer.get_stats()?;
-            
-            let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
-            let search_stats = fuzzy_searcher.get_search_stats()?;
+            let (stats, search_stats) = {
+                let indexer_lock = indexer.lock().await;
+                let stats = indexer_lock.get_stats()?;
+                let fuzzy_searcher = FuzzySearcher::from_indexer(&*indexer_lock)?;
+                let search_stats = fuzzy_searcher.get_search_stats()?;
+                (stats, search_stats)
+            };
             
             Ok::<(std::collections::HashMap<String, serde_json::Value>, std::collections::HashMap<String, serde_json::Value>), anyhow::Error>((stats, search_stats))
         }.await;
