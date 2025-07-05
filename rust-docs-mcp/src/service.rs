@@ -19,6 +19,7 @@ use crate::cache::{
 };
 use crate::deps::tools::DepsTools;
 use crate::docs::tools::DocsTools;
+use crate::search::tools::SearchTools;
 
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
@@ -26,6 +27,7 @@ pub struct RustDocsService {
     docs_tools: DocsTools,
     deps_tools: DepsTools,
     analysis_tools: AnalysisTools,
+    search_tools: SearchTools,
 }
 
 #[tool(tool_box)]
@@ -37,7 +39,8 @@ impl RustDocsService {
             cache_tools: CacheTools::new(cache.clone()),
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
-            analysis_tools: AnalysisTools::new(cache),
+            analysis_tools: AnalysisTools::new(cache.clone()),
+            search_tools: SearchTools::new(cache),
         })
     }
 
@@ -199,6 +202,17 @@ impl RustDocsService {
         #[tool(aggr)] params: crate::analysis::tools::AnalyzeCrateStructureParams,
     ) -> String {
         self.analysis_tools.structure(params).await
+    }
+
+    // Search tools
+    #[tool(
+        description = "Perform fuzzy search on crate items with typo tolerance and semantic similarity. This provides more flexible searching compared to exact pattern matching, allowing you to find items even with typos or partial matches. The search indexes item names, documentation, and metadata using Tantivy full-text search engine. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
+    )]
+    pub async fn search_items_fuzzy(
+        &self,
+        #[tool(aggr)] params: crate::search::tools::SearchItemsFuzzyParams,
+    ) -> String {
+        self.search_tools.search_items_fuzzy(params).await
     }
 }
 
