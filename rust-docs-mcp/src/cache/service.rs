@@ -4,20 +4,28 @@ use crate::cache::storage::CacheStorage;
 use crate::cache::transaction::CacheTransaction;
 use crate::cache::utils::CacheResponse;
 use crate::cache::workspace::WorkspaceHandler;
+use crate::metrics::MetricsServer;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Service for managing crate caching and documentation generation
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CrateCache {
     pub(crate) storage: CacheStorage,
     downloader: CrateDownloader,
     doc_generator: DocGenerator,
+    metrics: Option<Arc<MetricsServer>>,
 }
 
 impl CrateCache {
     /// Create a new crate cache instance
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
+        Self::new_with_metrics(cache_dir, None)
+    }
+    
+    /// Create a new crate cache instance with metrics
+    pub fn new_with_metrics(cache_dir: Option<PathBuf>, metrics: Option<Arc<MetricsServer>>) -> Result<Self> {
         let storage = CacheStorage::new(cache_dir)?;
         let downloader = CrateDownloader::new(storage.clone());
         let doc_generator = DocGenerator::new(storage.clone());
@@ -26,6 +34,7 @@ impl CrateCache {
             storage,
             downloader,
             doc_generator,
+            metrics,
         })
     }
 
@@ -38,7 +47,16 @@ impl CrateCache {
     ) -> Result<rustdoc_types::Crate> {
         // Check if docs already exist
         if self.storage.has_docs(name, version) {
+            // Record cache hit
+            if let Some(metrics) = &self.metrics {
+                metrics.record_cache_hit(name);
+            }
             return self.load_docs(name, version).await;
+        }
+        
+        // Record cache miss
+        if let Some(metrics) = &self.metrics {
+            metrics.record_cache_miss(name);
         }
 
         // Check if crate is downloaded but docs not generated
@@ -48,6 +66,9 @@ impl CrateCache {
 
         // Generate documentation
         self.generate_docs(name, version).await?;
+        
+        // Update cache metrics after successful caching
+        let _ = self.update_cache_metrics().await;
 
         // Load and return the generated docs
         self.load_docs(name, version).await
@@ -192,7 +213,12 @@ impl CrateCache {
 
     /// Remove a cached crate version
     pub async fn remove_crate(&self, name: &str, version: &str) -> Result<()> {
-        self.storage.remove_crate(name, version)
+        self.storage.remove_crate(name, version)?;
+        
+        // Update cache metrics after removal
+        let _ = self.update_cache_metrics().await;
+        
+        Ok(())
     }
 
     /// Get the source path for a crate
@@ -678,5 +704,26 @@ impl CrateCache {
             Ok(response) => response.to_json(),
             Err(e) => CacheResponse::error(format!("Failed to cache crate: {e}")).to_json(),
         }
+    }
+    
+    /// Update cache metrics (size and entry count)
+    pub async fn update_cache_metrics(&self) -> Result<()> {
+        if let Some(metrics) = &self.metrics {
+            // Get all cached crates
+            let cached_crates = self.storage.list_cached_crates()?;
+            
+            // Calculate total size and count
+            let total_size_bytes: u64 = cached_crates.iter().map(|c| c.size_bytes).sum();
+            let total_entries = cached_crates.len() as f64;
+            
+            // Update metrics
+            metrics.set_cache_size_bytes(total_size_bytes as f64);
+            metrics.set_cache_entries_total(total_entries);
+            
+            // Also update health status if available
+            let mut health = metrics.get_health_status().write().await;
+            health.set_cache_metrics(total_entries as u64, total_size_bytes / 1_048_576); // Convert to MB
+        }
+        Ok(())
     }
 }

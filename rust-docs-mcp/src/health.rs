@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -11,7 +11,8 @@ use serde_json::Value;
 pub struct HealthStatus {
     pub checks: HashMap<String, HealthCheck>,
     pub metrics: HashMap<String, Value>,
-    pub start_time: Instant,
+    #[serde(skip)]
+    pub start_time: SystemTime,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +27,7 @@ impl HealthStatus {
         Self {
             checks: HashMap::new(),
             metrics: HashMap::new(),
-            start_time: Instant::now(),
+            start_time: SystemTime::now(),
         }
     }
     
@@ -69,8 +70,13 @@ impl HealthStatus {
         match fs::metadata(&cache_path) {
             Ok(metadata) => {
                 if metadata.is_dir() {
-                    // Check if writable by trying to create a temporary file
-                    let temp_file = cache_path.join(".health_check_temp");
+                    // Check if writable by trying to create a temporary file with unique name
+                    use std::time::UNIX_EPOCH;
+                    let timestamp = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    let temp_file = cache_path.join(format!(".health_check_temp_{}", timestamp));
                     match fs::write(&temp_file, "test") {
                         Ok(()) => {
                             let _ = fs::remove_file(&temp_file);
@@ -195,7 +201,10 @@ impl HealthStatus {
     
     async fn update_metrics(&mut self) -> Result<()> {
         // Update uptime
-        let uptime = self.start_time.elapsed().as_secs();
+        let uptime = SystemTime::now()
+            .duration_since(self.start_time)
+            .unwrap_or(Duration::from_secs(0))
+            .as_secs();
         self.metrics.insert("uptime_seconds".to_string(), Value::Number(serde_json::Number::from(uptime)));
         
         // These will be updated by the metrics server and cache operations
@@ -217,13 +226,16 @@ impl HealthStatus {
 }
 
 fn get_available_space(path: &Path) -> Result<u64> {
-    use std::fs;
+    use fs2::available_space;
     
-    // Simple implementation - in production you might want to use platform-specific APIs
-    // For now, we'll return a reasonable default
-    match fs::metadata(path) {
-        Ok(_) => Ok(15360), // 15GB in MB as default
-        Err(_) => Ok(0),
+    // Get the available space in bytes and convert to MB
+    match available_space(path) {
+        Ok(bytes) => Ok(bytes / 1_048_576), // Convert bytes to MB
+        Err(e) => {
+            tracing::warn!("Failed to get available disk space: {}", e);
+            // Return 0 to indicate unable to determine space
+            Ok(0)
+        }
     }
 }
 
@@ -232,3 +244,7 @@ impl Default for HealthStatus {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[path = "health_tests.rs"]
+mod tests;

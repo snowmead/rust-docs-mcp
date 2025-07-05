@@ -4,6 +4,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
+use tokio::sync::oneshot;
 
 mod analysis;
 mod cache;
@@ -82,42 +83,75 @@ async fn main() -> Result<()> {
         tracing::info!("Using custom cache directory: {}", cache_dir.display());
     }
 
-    // Create optional metrics server
-    let metrics_server = if args.enable_metrics {
+    // Create optional metrics server with shutdown channel
+    let (metrics_server, shutdown_tx) = if args.enable_metrics {
         let metrics = std::sync::Arc::new(metrics::MetricsServer::new()?);
         let metrics_addr = args.metrics_addr.clone();
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
         
-        // Start metrics server in background
+        // Start metrics server in background with shutdown support
         let metrics_handle = {
             let metrics_server = metrics.clone();
             tokio::spawn(async move {
-                if let Err(e) = metrics_server.start_server(&metrics_addr).await {
-                    tracing::error!("Metrics server error: {:?}", e);
+                tokio::select! {
+                    result = metrics_server.start_server(&metrics_addr) => {
+                        if let Err(e) = result {
+                            tracing::error!("Metrics server error: {:?}", e);
+                        }
+                    }
+                    _ = shutdown_rx => {
+                        tracing::info!("Metrics server shutting down gracefully");
+                    }
                 }
             })
         };
         
-        // Start health check updates
+        // Start health check updates with shutdown support
         let health_status = metrics.get_health_status();
         let cache_dir = args.cache_dir.clone();
-        tokio::spawn(async move {
+        let (health_shutdown_tx, mut health_shutdown_rx) = oneshot::channel();
+        let health_handle = tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
             loop {
-                interval.tick().await;
-                let mut health = health_status.write().await;
-                if let Err(e) = health.update_health_checks(cache_dir.as_deref()).await {
-                    tracing::warn!("Health check update error: {:?}", e);
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let mut health = health_status.write().await;
+                        if let Err(e) = health.update_health_checks(cache_dir.as_deref()).await {
+                            tracing::warn!("Health check update error: {:?}", e);
+                        }
+                    }
+                    _ = &mut health_shutdown_rx => {
+                        tracing::info!("Health check updates shutting down");
+                        break;
+                    }
                 }
             }
         });
         
-        Some((metrics, metrics_handle))
+        (Some((metrics, vec![metrics_handle, health_handle], health_shutdown_tx)), Some(shutdown_tx))
     } else {
-        None
+        (None, None)
     };
 
     // Create the service with optional cache directory and metrics
-    let rust_docs_service = RustDocsService::new(args.cache_dir, metrics_server.as_ref().map(|(m, _)| m.clone()))?;
+    let rust_docs_service = RustDocsService::new(args.cache_dir, metrics_server.as_ref().map(|(m, _, _)| m.clone()))?;
+
+    // Set up shutdown handler
+    let (metrics_for_shutdown, health_shutdown_tx) = if let Some((m, h, htx)) = &metrics_server {
+        (Some(m.clone()), Some(htx))
+    } else {
+        (None, None)
+    };
+    
+    let shutdown_handler = tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.expect("Failed to listen for ctrl+c");
+        tracing::info!("Received shutdown signal, shutting down gracefully...");
+        
+        // Send shutdown signals
+        if let Some(tx) = shutdown_tx {
+            let _ = tx.send(());
+        }
+    });
 
     // Serve using stdio transport
     let service = rust_docs_service.serve(stdio()).await.inspect_err(|e| {
@@ -125,7 +159,23 @@ async fn main() -> Result<()> {
     })?;
 
     // Wait for the service to complete
-    service.waiting().await?;
+    let result = service.waiting().await;
+    
+    // Clean shutdown
+    shutdown_handler.abort();
+    if let Some((_, handles, _)) = metrics_server {
+        // Wait for background tasks to complete with timeout
+        let timeout = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            futures::future::join_all(handles)
+        ).await;
+        
+        if timeout.is_err() {
+            tracing::warn!("Some background tasks did not shut down within timeout");
+        }
+    }
+    
+    result?;
     Ok(())
 }
 

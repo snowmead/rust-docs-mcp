@@ -191,3 +191,7 @@ async fn health_check(
         Err(StatusCode::SERVICE_UNAVAILABLE)
     }
 }
+
+#[cfg(test)]
+#[path = "metrics_tests.rs"]
+mod tests;
