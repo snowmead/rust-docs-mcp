@@ -69,7 +69,7 @@ impl DocGenerator {
         // Run cargo rustdoc with JSON output using pinned nightly toolchain
         let output = Command::new("cargo")
             .args([
-                &format!("+{}", REQUIRED_TOOLCHAIN),
+                &format!("+{REQUIRED_TOOLCHAIN}"),
                 "rustdoc",
                 "--all-features",
                 "--",
@@ -155,7 +155,7 @@ impl DocGenerator {
         // Run cargo rustdoc with JSON output for the specific package using pinned nightly toolchain
         let output = Command::new("cargo")
             .args([
-                &format!("+{}", REQUIRED_TOOLCHAIN),
+                &format!("+{REQUIRED_TOOLCHAIN}"),
                 "rustdoc",
                 "-p",
                 &package_name,

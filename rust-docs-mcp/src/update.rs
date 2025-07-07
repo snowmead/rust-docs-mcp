@@ -4,7 +4,7 @@
 //! from GitHub, similar to the install.sh script but built into the application.
 
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Update rust-docs-mcp to the latest version from GitHub
@@ -155,7 +155,7 @@ fn check_nightly_toolchain() -> Result<()> {
 
 /// Handle macOS-specific binary signing
 #[cfg(target_os = "macos")]
-fn handle_macos_signing(target_dir: &PathBuf) -> Result<()> {
+fn handle_macos_signing(target_dir: &Path) -> Result<()> {
     let binary_path = target_dir.join("rust-docs-mcp");
 
     println!("🔐 Signing binary for macOS...");
@@ -194,7 +194,7 @@ fn handle_macos_signing(_target_dir: &PathBuf) -> Result<()> {
 }
 
 /// Check if target directory is in PATH and provide advice
-fn check_path_and_advise(target_dir: &PathBuf) -> Result<()> {
+fn check_path_and_advise(target_dir: &Path) -> Result<()> {
     use std::env;
 
     if let Ok(path_var) = env::var("PATH") {

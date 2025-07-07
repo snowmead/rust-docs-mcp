@@ -5,14 +5,8 @@ use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
-mod analysis;
-mod cache;
-mod deps;
-mod docs;
-mod search;
-mod service;
 mod update;
-use service::RustDocsService;
+use rust_docs_mcp::RustDocsService;
 
 /// MCP server for querying Rust crate documentation with offline caching
 #[derive(Parser, Debug)]
