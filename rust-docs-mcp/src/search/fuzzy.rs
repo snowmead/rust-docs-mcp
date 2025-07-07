@@ -11,10 +11,11 @@
 //! ```no_run
 //! # use rust_docs_mcp::search::fuzzy::{FuzzySearcher, FuzzySearchOptions};
 //! # use rust_docs_mcp::search::indexer::SearchIndexer;
-//! # use std::path::Path;
+//! # use rust_docs_mcp::cache::storage::CacheStorage;
 //! # use anyhow::Result;
 //! # fn main() -> Result<()> {
-//! let indexer = SearchIndexer::new(Path::new("/tmp/cache"))?;
+//! let storage = CacheStorage::new(None)?;
+//! let indexer = SearchIndexer::new_for_crate("tokio", "1.35.0", &storage, None)?;
 //! let searcher = FuzzySearcher::from_indexer(&indexer)?;
 //! let options = FuzzySearchOptions {
 //!     fuzzy_enabled: true,
@@ -337,8 +338,9 @@ mod tests {
     #[test]
     fn test_search_query_validation() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
-        let indexer =
-            SearchIndexer::new(temp_dir.path()).expect("Failed to create search indexer for test");
+        let index_path = temp_dir.path().join("test_index");
+        let indexer = SearchIndexer::new_at_path(&index_path)
+            .expect("Failed to create search indexer for test");
         let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)
             .expect("Failed to create fuzzy searcher for test");
 

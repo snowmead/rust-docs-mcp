@@ -37,9 +37,8 @@
 //! # }
 //! ```
 
-use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OnceCell};
+use tokio::sync::Mutex;
 
 use rmcp::schemars;
 use schemars::JsonSchema;
@@ -76,97 +75,86 @@ pub struct SearchItemsFuzzyParams {
 #[derive(Debug, Clone)]
 pub struct SearchTools {
     cache: Arc<Mutex<CrateCache>>,
-    indexer: Arc<OnceCell<Arc<Mutex<SearchIndexer>>>>,
 }
 
 impl SearchTools {
     pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
-        Self {
-            cache,
-            indexer: Arc::new(OnceCell::new()),
-        }
+        Self { cache }
     }
 
-    /// Get or create the search indexer
-    async fn get_indexer(&self) -> Result<Arc<Mutex<SearchIndexer>>> {
-        self.indexer
-            .get_or_try_init(|| async {
-                // Create new indexer
-                let cache_dir = {
-                    let cache = self.cache.lock().await;
-                    cache.storage.cache_dir().to_path_buf()
-                };
-
-                let indexer = SearchIndexer::new(&cache_dir)?;
-                Ok::<_, anyhow::Error>(Arc::new(Mutex::new(indexer)))
-            })
-            .await
-            .cloned()
-    }
-
-    /// Check if a crate is already indexed
-    async fn is_crate_indexed(&self, crate_name: &str, version: &str) -> Result<bool> {
-        let indexer = self.get_indexer().await?;
-        let indexer_lock = indexer.lock().await;
-        indexer_lock.is_crate_indexed(crate_name, version)
-    }
-
-    /// Index a crate's documentation
-    async fn index_crate(
+    /// Check if a crate has a search index
+    async fn has_search_index(
         &self,
         crate_name: &str,
         version: &str,
         member: Option<&str>,
-    ) -> Result<()> {
-        // Get the crate documentation
-        let crate_data = {
-            let cache = self.cache.lock().await;
-            cache
-                .ensure_crate_or_member_docs(crate_name, version, member)
-                .await?
-        };
-
-        // Index the crate
-        let indexer = self.get_indexer().await?;
-        let mut indexer_lock = indexer.lock().await;
-        indexer_lock.add_crate_items(crate_name, version, &crate_data)?;
-
-        Ok(())
-    }
-
-    /// Ensure a crate is indexed for search
-    async fn ensure_crate_indexed(
-        &self,
-        crate_name: &str,
-        version: &str,
-        member: Option<&str>,
-    ) -> Result<()> {
-        // Check if already indexed
-        if self.is_crate_indexed(crate_name, version).await? {
-            return Ok(());
+    ) -> bool {
+        let cache = self.cache.lock().await;
+        match member {
+            Some(member_name) => {
+                cache
+                    .storage
+                    .has_member_search_index(crate_name, version, member_name)
+            }
+            None => cache.storage.has_search_index(crate_name, version),
         }
-
-        // Index the crate
-        self.index_crate(crate_name, version, member).await
     }
 
     /// Perform fuzzy search on crate items
     pub async fn search_items_fuzzy(&self, params: SearchItemsFuzzyParams) -> String {
         let result = async {
-            // Ensure crate is indexed
-            self.ensure_crate_indexed(
+            // Check if crate has a search index
+            if !self
+                .has_search_index(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+            {
+                // Ensure documentation exists (which will create the index)
+                let cache = self.cache.lock().await;
+                cache
+                    .ensure_crate_or_member_docs(
+                        &params.crate_name,
+                        &params.version,
+                        params.member.as_deref(),
+                    )
+                    .await?;
+
+                // Check again after ensuring docs
+                if !self
+                    .has_search_index(
+                        &params.crate_name,
+                        &params.version,
+                        params.member.as_deref(),
+                    )
+                    .await
+                {
+                    return Err(anyhow::anyhow!(
+                        "Search index not available for {}-{}",
+                        params.crate_name,
+                        params.version
+                    ));
+                }
+            }
+
+            // Get storage to access index path
+            let storage = {
+                let cache = self.cache.lock().await;
+                cache.storage.clone()
+            };
+
+            // Create indexer for the specific crate
+            let indexer = SearchIndexer::new_for_crate(
                 &params.crate_name,
                 &params.version,
+                &storage,
                 params.member.as_deref(),
-            )
-            .await?;
+            )?;
 
             // Create fuzzy searcher
-            let indexer = self.get_indexer().await?;
-            let fuzzy_searcher = {
-                let indexer_lock = indexer.lock().await;
-                FuzzySearcher::from_indexer(&indexer_lock)?
-            };
+            let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
 
             // Validate fuzzy distance
             let fuzzy_distance = params.fuzzy_distance.unwrap_or(DEFAULT_FUZZY_DISTANCE);

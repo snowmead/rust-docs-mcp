@@ -115,6 +115,22 @@ impl CacheStorage {
             .join("dependencies.json")
     }
 
+    /// Get the search index path for a crate
+    pub fn search_index_path(&self, name: &str, version: &str) -> PathBuf {
+        self.crate_path(name, version).join("search_index")
+    }
+
+    /// Get the search index path for a workspace member
+    pub fn member_search_index_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> PathBuf {
+        self.member_path(name, version, member_name)
+            .join("search_index")
+    }
+
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
         self.crate_path(name, version).exists()
@@ -133,6 +149,17 @@ impl CacheStorage {
     /// Check if documentation is generated for a workspace member
     pub fn has_member_docs(&self, name: &str, version: &str, member_name: &str) -> bool {
         self.member_docs_path(name, version, member_name).exists()
+    }
+
+    /// Check if a search index exists for a crate
+    pub fn has_search_index(&self, name: &str, version: &str) -> bool {
+        self.search_index_path(name, version).exists()
+    }
+
+    /// Check if a search index exists for a workspace member
+    pub fn has_member_search_index(&self, name: &str, version: &str, member_name: &str) -> bool {
+        self.member_search_index_path(name, version, member_name)
+            .exists()
     }
 
     /// Ensure a directory exists

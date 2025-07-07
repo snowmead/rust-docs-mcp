@@ -5,6 +5,7 @@
 
 use crate::cache::storage::CacheStorage;
 use crate::cache::workspace::WorkspaceHandler;
+use crate::search::indexer::SearchIndexer;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -99,6 +100,11 @@ impl DocGenerator {
 
         // Update metadata to reflect that docs are now generated
         self.storage.save_metadata(name, version)?;
+
+        // Create search index for the crate
+        self.create_search_index(name, version)
+            .await
+            .context("Failed to create search index")?;
 
         tracing::info!(
             "Successfully generated documentation for {}-{}",
@@ -196,6 +202,17 @@ impl DocGenerator {
         // Generate and save dependency information for the member
         self.generate_workspace_member_dependencies(name, version, member_path)
             .await?;
+
+        // Extract member name from path
+        let member_name = member_path
+            .split('/')
+            .last()
+            .ok_or_else(|| anyhow::anyhow!("Invalid member path: {}", member_path))?;
+
+        // Create search index for the workspace member
+        self.create_search_index_for_member(name, version, member_name)
+            .await
+            .context("Failed to create search index for workspace member")?;
 
         tracing::info!(
             "Successfully generated documentation for workspace member {} in {}-{}",
@@ -382,6 +399,68 @@ impl DocGenerator {
             .context("Failed to parse member documentation JSON")?;
 
         Ok(docs)
+    }
+
+    /// Create search index for a crate
+    async fn create_search_index(&self, name: &str, version: &str) -> Result<()> {
+        tracing::info!("Creating search index for {}-{}", name, version);
+
+        // Load the generated documentation
+        let docs_path = self.storage.docs_path(name, version);
+        let docs_json = tokio::fs::read_to_string(&docs_path)
+            .await
+            .context("Failed to read documentation for indexing")?;
+
+        let crate_data: rustdoc_types::Crate = serde_json::from_str(&docs_json)
+            .context("Failed to parse documentation JSON for indexing")?;
+
+        // Create the search indexer for this crate
+        let mut indexer = SearchIndexer::new_for_crate(name, version, &self.storage, None)?;
+
+        // Add all crate items to the index
+        indexer.add_crate_items(name, version, &crate_data)?;
+
+        tracing::info!("Successfully created search index for {}-{}", name, version);
+        Ok(())
+    }
+
+    /// Create search index for a workspace member
+    async fn create_search_index_for_member(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> Result<()> {
+        tracing::info!(
+            "Creating search index for workspace member {} in {}-{}",
+            member_name,
+            name,
+            version
+        );
+
+        // Load the generated documentation
+        let docs_path = self.storage.member_docs_path(name, version, member_name);
+        let docs_json = tokio::fs::read_to_string(&docs_path)
+            .await
+            .context("Failed to read member documentation for indexing")?;
+
+        let crate_data: rustdoc_types::Crate = serde_json::from_str(&docs_json)
+            .context("Failed to parse member documentation JSON for indexing")?;
+
+        // Create the search indexer for this workspace member
+        let mut indexer =
+            SearchIndexer::new_for_crate(name, version, &self.storage, Some(member_name))?;
+
+        // Add all crate items to the index
+        indexer.add_crate_items(name, version, &crate_data)?;
+
+        tracing::info!(
+            "Successfully created search index for workspace member {} in {}-{}",
+            member_name,
+            name,
+            version
+        );
+        Ok(())
     }
 }
 

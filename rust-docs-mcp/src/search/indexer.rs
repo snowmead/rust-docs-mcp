@@ -11,21 +11,23 @@
 //! # use std::path::Path;
 //! # use anyhow::Result;
 //! # use rust_docs_mcp::search::indexer::SearchIndexer;
+//! # use rust_docs_mcp::cache::storage::CacheStorage;
 //! # fn main() -> Result<()> {
-//! let cache_dir = Path::new("/tmp/cache");
-//! let mut indexer = SearchIndexer::new(cache_dir)?;
+//! let storage = CacheStorage::new(None)?;
+//! let mut indexer = SearchIndexer::new_for_crate("tokio", "1.35.0", &storage, None)?;
 //! // Add crate items to index
 //! # Ok(())
 //! # }
 //! ```
 
+use crate::cache::storage::CacheStorage;
 use crate::docs::query::{DocQuery, ItemInfo};
 use crate::search::config::{DEFAULT_BUFFER_SIZE, MAX_BUFFER_SIZE, MAX_ITEMS_PER_CRATE};
 use anyhow::{Context, Result};
 use rustdoc_types::Crate;
 use std::path::{Path, PathBuf};
 use tantivy::{
-    Index, IndexWriter, TantivyDocument, Term, doc,
+    Index, IndexWriter, TantivyDocument, doc,
     schema::{FAST, Field, STORED, Schema, TEXT},
 };
 
@@ -34,7 +36,7 @@ pub struct SearchIndexer {
     index: Index,
     fields: IndexFields,
     writer: Option<IndexWriter>,
-    cache_dir: PathBuf,
+    index_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -50,8 +52,23 @@ pub struct IndexFields {
 }
 
 impl SearchIndexer {
-    /// Create a new search indexer instance
-    pub fn new(cache_dir: &Path) -> Result<Self> {
+    /// Create a new search indexer instance for a specific crate
+    pub fn new_for_crate(
+        crate_name: &str,
+        version: &str,
+        storage: &CacheStorage,
+        member: Option<&str>,
+    ) -> Result<Self> {
+        let index_path = match member {
+            Some(member_name) => storage.member_search_index_path(crate_name, version, member_name),
+            None => storage.search_index_path(crate_name, version),
+        };
+
+        Self::new_at_path(&index_path)
+    }
+
+    /// Create a new search indexer instance at a specific path
+    pub fn new_at_path(index_path: &Path) -> Result<Self> {
         let mut schema_builder = Schema::builder();
 
         // Searchable fields
@@ -79,8 +96,7 @@ impl SearchIndexer {
             visibility: visibility_field,
         };
 
-        // Create index in cache directory
-        let index_path = cache_dir.join("search_index");
+        // Create index directory
         std::fs::create_dir_all(&index_path).with_context(|| {
             format!(
                 "Failed to create search index directory: {}",
@@ -99,7 +115,7 @@ impl SearchIndexer {
             index,
             fields,
             writer: None,
-            cache_dir: cache_dir.to_path_buf(),
+            index_path: index_path.to_path_buf(),
         })
     }
 
@@ -191,35 +207,12 @@ impl SearchIndexer {
         Ok(doc)
     }
 
-    /// Check if a crate is indexed
-    pub fn is_crate_indexed(&self, crate_name: &str, version: &str) -> Result<bool> {
+    /// Check if the index has any documents
+    pub fn has_documents(&self) -> Result<bool> {
         let reader = self.index.reader()?;
         let searcher = reader.searcher();
-
-        // Search for any document with this crate name and version
-        let crate_term = Term::from_field_text(self.fields.crate_name, crate_name);
-        let version_term = Term::from_field_text(self.fields.version, version);
-
-        let crate_query =
-            tantivy::query::TermQuery::new(crate_term, tantivy::schema::IndexRecordOption::Basic);
-        let version_query =
-            tantivy::query::TermQuery::new(version_term, tantivy::schema::IndexRecordOption::Basic);
-
-        let boolean_query = tantivy::query::BooleanQuery::new(vec![
-            (
-                tantivy::query::Occur::Must,
-                Box::new(crate_query) as Box<dyn tantivy::query::Query>,
-            ),
-            (
-                tantivy::query::Occur::Must,
-                Box::new(version_query) as Box<dyn tantivy::query::Query>,
-            ),
-        ]);
-
-        let top_docs =
-            searcher.search(&boolean_query, &tantivy::collector::TopDocs::with_limit(1))?;
-
-        Ok(!top_docs.is_empty())
+        let count = searcher.num_docs();
+        Ok(count > 0)
     }
 
     /// Get the underlying Tantivy index
@@ -267,7 +260,7 @@ impl std::fmt::Debug for SearchIndexer {
             .field("index", &"<Index>")
             .field("fields", &self.fields)
             .field("writer", &self.writer.is_some())
-            .field("cache_dir", &self.cache_dir)
+            .field("index_path", &self.index_path)
             .finish()
     }
 }
@@ -280,8 +273,9 @@ mod tests {
     #[test]
     fn test_create_indexer() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
-        let indexer =
-            SearchIndexer::new(temp_dir.path()).expect("Failed to create search indexer for test");
+        let index_path = temp_dir.path().join("test_index");
+        let indexer = SearchIndexer::new_at_path(&index_path)
+            .expect("Failed to create search indexer for test");
         assert!(
             indexer
                 .get_index()
@@ -294,8 +288,10 @@ mod tests {
     #[test]
     fn test_crate_name_validation() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
-        let indexer =
-            SearchIndexer::new(temp_dir.path()).expect("Failed to create search indexer for test");
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf()))
+            .expect("Failed to create storage");
+        let indexer = SearchIndexer::new_for_crate("test-crate", "1.0.0", &storage, None)
+            .expect("Failed to create search indexer for test");
 
         // The add_crate_items method is tested integration-wise since it requires a real Crate
         // Here we just test that the indexer can be created successfully
