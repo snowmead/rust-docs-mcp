@@ -9,6 +9,7 @@ mod analysis;
 mod cache;
 mod deps;
 mod docs;
+mod search;
 mod service;
 mod update;
 use service::RustDocsService;

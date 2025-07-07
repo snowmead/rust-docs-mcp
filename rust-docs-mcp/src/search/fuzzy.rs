@@ -1,10 +1,9 @@
-use std::collections::{HashMap, HashSet};
 use anyhow::{Context, Result};
 use tantivy::{
     Index, Term,
     query::{FuzzyTermQuery, BooleanQuery, Query, QueryParser, Occur, TermQuery},
     collector::TopDocs,
-    schema::Field,
+    schema::{Field, Value},
     TantivyDocument,
 };
 use rmcp::schemars;
@@ -149,13 +148,14 @@ impl FuzzySearcher {
     
     /// Build fuzzy query with typo tolerance
     fn build_fuzzy_query(&self, query: &str, options: &FuzzySearchOptions) -> Result<Box<dyn Query>> {
-        let mut boolean_query = BooleanQuery::new();
-        
         // Split query into terms
         let terms: Vec<&str> = query.split_whitespace().collect();
         
+        let mut main_clauses = Vec::new();
+        
         for term in terms {
-            let mut term_query = BooleanQuery::new();
+            // Build fuzzy queries for this term across all searchable fields
+            let mut term_clauses = Vec::new();
             
             // Add fuzzy queries for searchable fields
             for field in &[self.fields.name, self.fields.docs, self.fields.path] {
@@ -164,57 +164,61 @@ impl FuzzySearcher {
                     options.fuzzy_distance,
                     true, // transpose_cost_one
                 );
-                term_query.add_clause(fuzzy_query.into(), Occur::Should);
+                term_clauses.push((Occur::Should, Box::new(fuzzy_query) as Box<dyn Query>));
             }
             
-            boolean_query.add_clause(term_query.into(), Occur::Should);
+            // Create a boolean query for this term
+            let term_query = BooleanQuery::new(term_clauses);
+            main_clauses.push((Occur::Should, Box::new(term_query) as Box<dyn Query>));
         }
         
         // Add crate filter if specified
         if let Some(crate_name) = &options.crate_filter {
             let crate_term = Term::from_field_text(self.fields.crate_name, crate_name);
             let crate_query = TermQuery::new(crate_term, tantivy::schema::IndexRecordOption::Basic);
-            boolean_query.add_clause(crate_query.into(), Occur::Must);
+            main_clauses.push((Occur::Must, Box::new(crate_query) as Box<dyn Query>));
         }
         
+        let boolean_query = BooleanQuery::new(main_clauses);
         Ok(Box::new(boolean_query))
     }
     
     /// Build standard query without fuzzy matching
     fn build_standard_query(&self, query: &str, options: &FuzzySearchOptions) -> Result<Box<dyn Query>> {
-        let mut boolean_query = BooleanQuery::new();
+        let mut clauses = Vec::new();
         
         // Parse the query using the query parser
         let parsed_query = self.query_parser.parse_query(query)
             .with_context(|| format!("Failed to parse query: {}", query))?;
-        boolean_query.add_clause(parsed_query, Occur::Must);
+        clauses.push((Occur::Must, parsed_query));
         
         // Add crate filter if specified
         if let Some(crate_name) = &options.crate_filter {
             let crate_term = Term::from_field_text(self.fields.crate_name, crate_name);
             let crate_query = TermQuery::new(crate_term, tantivy::schema::IndexRecordOption::Basic);
-            boolean_query.add_clause(crate_query.into(), Occur::Must);
+            clauses.push((Occur::Must, Box::new(crate_query) as Box<dyn Query>));
         }
         
+        let boolean_query = BooleanQuery::new(clauses);
         Ok(Box::new(boolean_query))
     }
     
     /// Convert Tantivy document to SearchResult
     fn doc_to_search_result(&self, doc: &TantivyDocument, score: f32) -> Result<Option<SearchResult>> {
         let get_text_field = |field: Field| -> Option<String> {
-            doc.get_first(field)?.as_text().map(|s| s.to_string())
+            doc.get_first(field)?.as_str().map(|s| s.to_string())
         };
         
         let get_u64_field = |field: Field| -> Option<u64> {
             doc.get_first(field)?.as_u64()
         };
         
-        let item_id = get_u64_field(self.fields.item_id)? as u32;
-        let name = get_text_field(self.fields.name)?;
-        let path = get_text_field(self.fields.path)?;
-        let kind = get_text_field(self.fields.kind)?;
-        let crate_name = get_text_field(self.fields.crate_name)?;
-        let version = get_text_field(self.fields.version)?;
+        let item_id = get_u64_field(self.fields.item_id).ok_or_else(|| anyhow::anyhow!("Missing item_id"))? as u32;
+        let name = get_text_field(self.fields.name).ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+        let path = get_text_field(self.fields.path).ok_or_else(|| anyhow::anyhow!("Missing path"))?;
+        let kind = get_text_field(self.fields.kind).ok_or_else(|| anyhow::anyhow!("Missing kind"))?;
+        let crate_name = get_text_field(self.fields.crate_name).ok_or_else(|| anyhow::anyhow!("Missing crate_name"))?;
+        let version = get_text_field(self.fields.version).ok_or_else(|| anyhow::anyhow!("Missing version"))?;
         let visibility = get_text_field(self.fields.visibility).unwrap_or_default();
         
         Ok(Some(SearchResult {
@@ -252,53 +256,6 @@ impl FuzzySearcher {
                 _ => c.to_string(),
             })
             .collect()
-    }
-    
-    /// Get search suggestions based on a partial query
-    pub fn get_suggestions(&self, partial_query: &str, limit: usize) -> Result<Vec<String>> {
-        let reader = self.index.reader()?;
-        let searcher = reader.searcher();
-        
-        // Use fuzzy search to find similar terms
-        let mut seen_suggestions = HashSet::new();
-        let mut suggestions = Vec::new();
-        let fuzzy_query = FuzzyTermQuery::new(
-            Term::from_field_text(self.fields.name, partial_query),
-            1, // Low edit distance for suggestions
-            true,
-        );
-        
-        let top_docs = searcher.search(&fuzzy_query, &TopDocs::with_limit(limit * 2))?;
-        
-        for (_, doc_address) in top_docs {
-            let doc = searcher.doc(doc_address)?;
-            if let Some(name) = doc.get_first(self.fields.name).and_then(|v| v.as_text()) {
-                let name_string = name.to_string();
-                if seen_suggestions.insert(name_string.clone()) {
-                    suggestions.push(name_string);
-                    if suggestions.len() >= limit {
-                        break;
-                    }
-                }
-            }
-        }
-        
-        Ok(suggestions)
-    }
-    
-    /// Get search statistics
-    pub fn get_search_stats(&self) -> Result<HashMap<String, serde_json::Value>> {
-        let reader = self.index.reader()?;
-        let searcher = reader.searcher();
-        
-        let segment_readers = searcher.segment_readers();
-        let total_docs: u64 = segment_readers.iter().map(|r| r.num_docs() as u64).sum();
-        
-        let mut stats = HashMap::new();
-        stats.insert("total_indexed_items".to_string(), serde_json::Value::Number(total_docs.into()));
-        stats.insert("segment_count".to_string(), serde_json::Value::Number(segment_readers.len().into()));
-        
-        Ok(stats)
     }
 }
 
@@ -339,18 +296,5 @@ mod tests {
         let result = fuzzy_searcher.search(&long_query, &options);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Query too long"));
-    }
-    
-    #[test]
-    fn test_get_suggestions_deduplication() {
-        // This test would require a populated index, which is complex to set up
-        // in a unit test. In a real scenario, this would be an integration test.
-        // For now, we're just testing that the method compiles and runs.
-        let temp_dir = TempDir::new().unwrap();
-        let indexer = SearchIndexer::new(temp_dir.path()).unwrap();
-        let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer).unwrap();
-        
-        let suggestions = fuzzy_searcher.get_suggestions("test", 10).unwrap();
-        assert!(suggestions.is_empty()); // Empty index returns empty suggestions
     }
 }
