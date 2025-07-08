@@ -103,7 +103,20 @@ impl SearchTools {
     /// Perform fuzzy search on crate items
     pub async fn search_items_fuzzy(&self, params: SearchItemsFuzzyParams) -> String {
         let result = async {
-            // Check if crate has a search index
+            // Ensure documentation exists (which will create the index if needed)
+            let cache = self.cache.lock().await;
+            cache
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await?;
+
+            let storage = cache.storage.clone();
+            drop(cache);
+
+            // Check if search index exists after ensuring docs
             if !self
                 .has_search_index(
                     &params.crate_name,
@@ -112,38 +125,12 @@ impl SearchTools {
                 )
                 .await
             {
-                // Ensure documentation exists (which will create the index)
-                let cache = self.cache.lock().await;
-                cache
-                    .ensure_crate_or_member_docs(
-                        &params.crate_name,
-                        &params.version,
-                        params.member.as_deref(),
-                    )
-                    .await?;
-
-                // Check again after ensuring docs
-                if !self
-                    .has_search_index(
-                        &params.crate_name,
-                        &params.version,
-                        params.member.as_deref(),
-                    )
-                    .await
-                {
-                    return Err(anyhow::anyhow!(
-                        "Search index not available for {}-{}",
-                        params.crate_name,
-                        params.version
-                    ));
-                }
+                return Err(anyhow::anyhow!(
+                    "Search index not available for {}-{}",
+                    params.crate_name,
+                    params.version
+                ));
             }
-
-            // Get storage to access index path
-            let storage = {
-                let cache = self.cache.lock().await;
-                cache.storage.clone()
-            };
 
             // Create indexer for the specific crate
             let indexer = SearchIndexer::new_for_crate(
