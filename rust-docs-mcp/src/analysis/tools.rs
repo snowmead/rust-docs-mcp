@@ -75,7 +75,7 @@ pub struct AnalyzeCrateStructureParams {
     #[schemars(
         description = "The maximum depth of the generated graph relative to the crate's root node, or nodes selected by 'focus_on'"
     )]
-    pub max_depth: Option<usize>,
+    pub max_depth: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
