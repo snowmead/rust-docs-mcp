@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
@@ -80,16 +80,16 @@ pub struct AnalyzeCrateStructureParams {
 
 #[derive(Debug, Clone)]
 pub struct AnalysisTools {
-    cache: Arc<Mutex<CrateCache>>,
+    cache: Arc<RwLock<CrateCache>>,
 }
 
 impl AnalysisTools {
-    pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
+    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
     }
 
     pub async fn structure(&self, params: AnalyzeCrateStructureParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
 
         // Ensure the crate source is available (without requiring docs)
         match cache

@@ -195,6 +195,45 @@ impl CrateCache {
         self.storage.remove_crate(name, version)
     }
 
+    /// Check if docs exist without ensuring they're generated
+    pub fn has_docs(&self, crate_name: &str, version: &str) -> bool {
+        self.storage.has_docs(crate_name, version)
+    }
+
+    /// Check if member docs exist without ensuring they're generated
+    pub fn has_member_docs(&self, crate_name: &str, version: &str, member: &str) -> bool {
+        self.storage.has_member_docs(crate_name, version, member)
+    }
+
+    /// Try to load existing docs without generating
+    pub async fn try_load_docs(
+        &self,
+        crate_name: &str,
+        version: &str,
+    ) -> Result<Option<rustdoc_types::Crate>> {
+        if self.has_docs(crate_name, version) {
+            Ok(Some(self.load_docs(crate_name, version).await?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Try to load existing member docs without generating
+    pub async fn try_load_member_docs(
+        &self,
+        crate_name: &str,
+        version: &str,
+        member: &str,
+    ) -> Result<Option<rustdoc_types::Crate>> {
+        if self.has_member_docs(crate_name, version, member) {
+            Ok(Some(
+                self.load_member_docs(crate_name, version, member).await?,
+            ))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get the source path for a crate
     pub fn get_source_path(&self, name: &str, version: &str) -> PathBuf {
         self.storage.source_path(name, version)

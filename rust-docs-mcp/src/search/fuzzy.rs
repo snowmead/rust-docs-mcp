@@ -27,7 +27,9 @@
 //! # }
 //! ```
 
-use crate::search::config::{DEFAULT_FUZZY_DISTANCE, DEFAULT_SEARCH_LIMIT, MAX_QUERY_LENGTH};
+use crate::search::config::{
+    DEFAULT_FUZZY_DISTANCE, DEFAULT_SEARCH_LIMIT, FUZZY_TRANSPOSE_COST_ONE, MAX_QUERY_LENGTH,
+};
 use crate::search::indexer::SearchIndexer;
 use anyhow::{Context, Result};
 use rmcp::schemars;
@@ -193,7 +195,7 @@ impl FuzzySearcher {
                 let fuzzy_query = FuzzyTermQuery::new(
                     Term::from_field_text(*field, term),
                     options.fuzzy_distance,
-                    true, // transpose_cost_one
+                    FUZZY_TRANSPOSE_COST_ONE,
                 );
                 term_clauses.push((Occur::Should, Box::new(fuzzy_query) as Box<dyn Query>));
             }

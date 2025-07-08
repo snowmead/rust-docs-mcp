@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use anyhow::Result;
 use rmcp::{
@@ -33,7 +33,7 @@ pub struct RustDocsService {
 #[tool(tool_box)]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
-        let cache = Arc::new(Mutex::new(CrateCache::new(cache_dir)?));
+        let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
 
         Ok(Self {
             cache_tools: CacheTools::new(cache.clone()),

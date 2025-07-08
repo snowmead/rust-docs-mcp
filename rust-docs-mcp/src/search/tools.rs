@@ -14,11 +14,11 @@
 //! ## Example
 //! ```no_run
 //! # use std::sync::Arc;
-//! # use tokio::sync::Mutex;
+//! # use tokio::sync::RwLock;
 //! # use rust_docs_mcp::cache::CrateCache;
 //! # use rust_docs_mcp::search::tools::{SearchTools, SearchItemsFuzzyParams};
 //! # async fn example() -> anyhow::Result<()> {
-//! let cache = Arc::new(Mutex::new(CrateCache::new(None)?));
+//! let cache = Arc::new(RwLock::new(CrateCache::new(None)?));
 //! let tools = SearchTools::new(cache);
 //!
 //! let params = SearchItemsFuzzyParams {
@@ -38,13 +38,13 @@
 //! ```
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use rmcp::schemars;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::cache::CrateCache;
+use crate::cache::{CrateCache, storage::CacheStorage};
 use crate::search::config::{
     DEFAULT_FUZZY_DISTANCE, DEFAULT_SEARCH_LIMIT, MAX_FUZZY_DISTANCE, MAX_SEARCH_LIMIT,
 };
@@ -74,11 +74,11 @@ pub struct SearchItemsFuzzyParams {
 
 #[derive(Debug, Clone)]
 pub struct SearchTools {
-    cache: Arc<Mutex<CrateCache>>,
+    cache: Arc<RwLock<CrateCache>>,
 }
 
 impl SearchTools {
-    pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
+    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
     }
 
@@ -89,7 +89,7 @@ impl SearchTools {
         version: &str,
         member: Option<&str>,
     ) -> bool {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.read().await;
         match member {
             Some(member_name) => {
                 cache
@@ -100,19 +100,112 @@ impl SearchTools {
         }
     }
 
+    /// Perform the actual search without holding any locks
+    async fn perform_search(
+        &self,
+        params: SearchItemsFuzzyParams,
+        storage: CacheStorage,
+    ) -> Result<Vec<SearchResult>, anyhow::Error> {
+        // Create indexer for the specific crate
+        let indexer = SearchIndexer::new_for_crate(
+            &params.crate_name,
+            &params.version,
+            &storage,
+            params.member.as_deref(),
+        )?;
+
+        // Create fuzzy searcher
+        let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
+
+        // Validate fuzzy distance
+        let fuzzy_distance = params.fuzzy_distance.unwrap_or(DEFAULT_FUZZY_DISTANCE);
+        if fuzzy_distance > MAX_FUZZY_DISTANCE {
+            return Err(anyhow::anyhow!(
+                "Fuzzy distance must be between 0 and {}",
+                MAX_FUZZY_DISTANCE
+            ));
+        }
+
+        // Validate limit
+        let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
+        if limit > MAX_SEARCH_LIMIT {
+            return Err(anyhow::anyhow!(
+                "Limit must not exceed {}",
+                MAX_SEARCH_LIMIT
+            ));
+        }
+
+        // Build search options
+        let options = FuzzySearchOptions {
+            fuzzy_enabled: params.fuzzy_enabled.unwrap_or(true),
+            fuzzy_distance,
+            limit,
+            kind_filter: params.kind_filter.clone(),
+            crate_filter: Some(params.crate_name.clone()),
+        };
+
+        // Perform search
+        fuzzy_searcher.search(&params.query, &options)
+    }
+
     /// Perform fuzzy search on crate items
     pub async fn search_items_fuzzy(&self, params: SearchItemsFuzzyParams) -> String {
+        let query = params.query.clone();
+        let fuzzy_enabled = params.fuzzy_enabled.unwrap_or(true);
+        let crate_name = params.crate_name.clone();
+        let version = params.version.clone();
         let result = async {
-            // Ensure documentation exists (which will create the index if needed)
-            let cache = self.cache.lock().await;
-            cache
-                .ensure_crate_or_member_docs(
-                    &params.crate_name,
-                    &params.version,
-                    params.member.as_deref(),
-                )
-                .await?;
+            // First check with read lock if docs already exist
+            {
+                let cache = self.cache.read().await;
+                let has_docs = match params.member.as_deref() {
+                    Some(member) => {
+                        cache.has_member_docs(&params.crate_name, &params.version, member)
+                    }
+                    None => cache.has_docs(&params.crate_name, &params.version),
+                };
 
+                if has_docs
+                    && self
+                        .has_search_index(
+                            &params.crate_name,
+                            &params.version,
+                            params.member.as_deref(),
+                        )
+                        .await
+                {
+                    // Docs and index exist, proceed with search using read lock only
+                    let storage = cache.storage.clone();
+                    drop(cache); // Release read lock early
+
+                    return self.perform_search(params, storage).await;
+                }
+            }
+
+            // Need to generate docs/index, acquire write lock
+            {
+                let cache = self.cache.write().await;
+                // Double-check in case another task generated it
+                let has_docs = match params.member.as_deref() {
+                    Some(member) => {
+                        cache.has_member_docs(&params.crate_name, &params.version, member)
+                    }
+                    None => cache.has_docs(&params.crate_name, &params.version),
+                };
+
+                if !has_docs {
+                    cache
+                        .ensure_crate_or_member_docs(
+                            &params.crate_name,
+                            &params.version,
+                            params.member.as_deref(),
+                        )
+                        .await?;
+                }
+            }
+
+            // Now perform search with read lock
+            let cache = self.cache.read().await;
             let storage = cache.storage.clone();
             drop(cache);
 
@@ -132,48 +225,7 @@ impl SearchTools {
                 ));
             }
 
-            // Create indexer for the specific crate
-            let indexer = SearchIndexer::new_for_crate(
-                &params.crate_name,
-                &params.version,
-                &storage,
-                params.member.as_deref(),
-            )?;
-
-            // Create fuzzy searcher
-            let fuzzy_searcher = FuzzySearcher::from_indexer(&indexer)?;
-
-            // Validate fuzzy distance
-            let fuzzy_distance = params.fuzzy_distance.unwrap_or(DEFAULT_FUZZY_DISTANCE);
-            if fuzzy_distance > MAX_FUZZY_DISTANCE {
-                return Err(anyhow::anyhow!(
-                    "Fuzzy distance must be between 0 and {}",
-                    MAX_FUZZY_DISTANCE
-                ));
-            }
-
-            // Validate limit
-            let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
-            if limit > MAX_SEARCH_LIMIT {
-                return Err(anyhow::anyhow!(
-                    "Limit must not exceed {}",
-                    MAX_SEARCH_LIMIT
-                ));
-            }
-
-            // Build search options
-            let options = FuzzySearchOptions {
-                fuzzy_enabled: params.fuzzy_enabled.unwrap_or(true),
-                fuzzy_distance,
-                limit,
-                kind_filter: params.kind_filter.clone(),
-                crate_filter: Some(params.crate_name.clone()),
-            };
-
-            // Perform search
-            let results = fuzzy_searcher.search(&params.query, &options)?;
-
-            Ok::<Vec<SearchResult>, anyhow::Error>(results)
+            self.perform_search(params, storage).await
         }
         .await;
 
@@ -181,11 +233,11 @@ impl SearchTools {
             Ok(results) => {
                 let response = serde_json::json!({
                     "results": results,
-                    "query": params.query,
+                    "query": query,
                     "total_results": results.len(),
-                    "fuzzy_enabled": params.fuzzy_enabled.unwrap_or(true),
-                    "crate_name": params.crate_name,
-                    "version": params.version
+                    "fuzzy_enabled": fuzzy_enabled,
+                    "crate_name": crate_name,
+                    "version": version
                 });
 
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {

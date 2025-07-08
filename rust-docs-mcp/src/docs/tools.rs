@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use rmcp::schemars;
 use schemars::JsonSchema;
@@ -125,11 +125,11 @@ pub struct GetItemSourceParams {
 
 #[derive(Debug, Clone)]
 pub struct DocsTools {
-    cache: Arc<Mutex<CrateCache>>,
+    cache: Arc<RwLock<CrateCache>>,
 }
 
 impl DocsTools {
-    pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
+    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
     }
 
@@ -139,7 +139,7 @@ impl DocsTools {
     }
 
     pub async fn list_crate_items(&self, params: ListItemsParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
@@ -179,7 +179,7 @@ impl DocsTools {
     }
 
     pub async fn search_items(&self, params: SearchItemsParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
@@ -268,7 +268,7 @@ impl DocsTools {
     }
 
     pub async fn search_items_preview(&self, params: SearchItemsPreviewParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
@@ -333,7 +333,7 @@ impl DocsTools {
     }
 
     pub async fn get_item_details(&self, params: GetItemDetailsParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
@@ -358,7 +358,7 @@ impl DocsTools {
     }
 
     pub async fn get_item_docs(&self, params: GetItemDocsParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
@@ -389,7 +389,7 @@ impl DocsTools {
     }
 
     pub async fn get_item_source(&self, params: GetItemSourceParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         let source_base_path = cache.get_source_path(&params.crate_name, &params.version);
 
         match cache
@@ -404,7 +404,11 @@ impl DocsTools {
                 let query = DocQuery::new(crate_data);
                 let context_lines = params.context_lines.unwrap_or(3).max(0) as usize;
 
-                match query.get_item_source(params.item_id.max(0) as u32, &source_base_path, context_lines) {
+                match query.get_item_source(
+                    params.item_id.max(0) as u32,
+                    &source_base_path,
+                    context_lines,
+                ) {
                     Ok(source_info) => {
                         serde_json::to_string_pretty(&source_info).unwrap_or_else(|e| {
                             format!(r#"{{"error": "Failed to serialize source info: {e}"}}"#)

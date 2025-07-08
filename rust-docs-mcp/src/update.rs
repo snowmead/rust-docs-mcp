@@ -3,10 +3,10 @@
 //! This module provides functionality to update rust-docs-mcp to the latest version
 //! from GitHub, similar to the install.sh script but built into the application.
 
+use crate::doctor;
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use crate::doctor;
 
 /// Update rust-docs-mcp to the latest version from GitHub
 pub async fn update_executable(

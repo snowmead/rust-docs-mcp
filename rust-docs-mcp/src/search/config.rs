@@ -28,3 +28,7 @@ pub const DEFAULT_FUZZY_DISTANCE: u8 = 1;
 
 /// Maximum fuzzy distance allowed
 pub const MAX_FUZZY_DISTANCE: u8 = 2;
+
+/// Whether transpositions cost 1 edit instead of 2 in fuzzy matching
+/// This makes fuzzy search more forgiving for common typos like "teh" -> "the"
+pub const FUZZY_TRANSPOSE_COST_ONE: bool = true;

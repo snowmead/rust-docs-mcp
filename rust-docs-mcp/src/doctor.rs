@@ -1,11 +1,11 @@
 use anyhow::Result;
-use std::process::Command;
-use std::fs;
-use reqwest;
 use dirs;
 use fs2;
-use serde::Serialize;
+use reqwest;
 use rust_docs_mcp::rustdoc;
+use serde::Serialize;
+use std::fs;
+use std::process::Command;
 
 #[derive(Serialize)]
 pub struct DiagnosticResult {
@@ -26,30 +26,32 @@ impl DiagnosticResult {
     }
 }
 
-pub async fn run_diagnostics(cache_dir: Option<std::path::PathBuf>) -> Result<Vec<DiagnosticResult>> {
+pub async fn run_diagnostics(
+    cache_dir: Option<std::path::PathBuf>,
+) -> Result<Vec<DiagnosticResult>> {
     let mut results = Vec::new();
-    
+
     // Check Rust toolchain
     results.push(check_rust_toolchain().await);
-    
+
     // Check nightly toolchain
     results.push(check_nightly_toolchain().await);
-    
+
     // Check rustdoc JSON capability
     results.push(check_rustdoc_json().await);
-    
+
     // Check Git installation
     results.push(check_git_installation().await);
-    
+
     // Check network connectivity
     results.push(check_network_connectivity().await);
-    
+
     // Check cache directory
     results.push(check_cache_directory(cache_dir).await);
-    
+
     // Check optional dependencies
     results.push(check_optional_dependencies().await);
-    
+
     Ok(results)
 }
 
@@ -57,12 +59,7 @@ async fn check_rust_toolchain() -> DiagnosticResult {
     match Command::new("rustc").arg("--version").output() {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            DiagnosticResult::new(
-                "Rust toolchain".to_string(),
-                true,
-                version,
-                true,
-            )
+            DiagnosticResult::new("Rust toolchain".to_string(), true, version, true)
         }
         Ok(_) => DiagnosticResult::new(
             "Rust toolchain".to_string(),
@@ -85,15 +82,15 @@ async fn check_nightly_toolchain() -> DiagnosticResult {
             let toolchains = String::from_utf8_lossy(&output.stdout);
             if toolchains.contains("nightly") {
                 // Try to get nightly version
-                match Command::new("rustc").args(&["+nightly", "--version"]).output() {
+                match Command::new("rustc")
+                    .args(&["+nightly", "--version"])
+                    .output()
+                {
                     Ok(nightly_output) if nightly_output.status.success() => {
-                        let version = String::from_utf8_lossy(&nightly_output.stdout).trim().to_string();
-                        DiagnosticResult::new(
-                            "Nightly toolchain".to_string(),
-                            true,
-                            version,
-                            true,
-                        )
+                        let version = String::from_utf8_lossy(&nightly_output.stdout)
+                            .trim()
+                            .to_string();
+                        DiagnosticResult::new("Nightly toolchain".to_string(), true, version, true)
                     }
                     _ => DiagnosticResult::new(
                         "Nightly toolchain".to_string(),
@@ -132,14 +129,16 @@ async fn check_rustdoc_json() -> DiagnosticResult {
         Ok(version) => {
             // Try to test JSON generation using the unified function
             match rustdoc::test_rustdoc_json().await {
-                Ok(_) => {
-                    DiagnosticResult::new(
-                        "Rustdoc JSON".to_string(),
-                        true,
-                        format!("{} with JSON support (toolchain: {})", version, rustdoc::REQUIRED_TOOLCHAIN),
-                        false,
-                    )
-                }
+                Ok(_) => DiagnosticResult::new(
+                    "Rustdoc JSON".to_string(),
+                    true,
+                    format!(
+                        "{} with JSON support (toolchain: {})",
+                        version,
+                        rustdoc::REQUIRED_TOOLCHAIN
+                    ),
+                    false,
+                ),
                 Err(e) => {
                     tracing::debug!("Rustdoc JSON test failed: {}", e);
                     DiagnosticResult::new(
@@ -164,12 +163,7 @@ async fn check_git_installation() -> DiagnosticResult {
     match Command::new("git").arg("--version").output() {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            DiagnosticResult::new(
-                "Git".to_string(),
-                true,
-                version,
-                true,
-            )
+            DiagnosticResult::new("Git".to_string(), true, version, true)
         }
         Ok(_) => DiagnosticResult::new(
             "Git".to_string(),
@@ -190,48 +184,61 @@ async fn check_network_connectivity() -> DiagnosticResult {
     let client = match reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .user_agent("rust-docs-mcp-doctor/1.0")
-        .build() {
+        .build()
+    {
         Ok(client) => client,
-        Err(e) => return DiagnosticResult::new(
-            "Network".to_string(),
-            false,
-            format!("Failed to create HTTP client: {}", e),
-            false,
-        ),
+        Err(e) => {
+            return DiagnosticResult::new(
+                "Network".to_string(),
+                false,
+                format!("Failed to create HTTP client: {}", e),
+                false,
+            );
+        }
     };
-    
+
     // Test crates.io API
     tracing::debug!("Testing crates.io connectivity...");
-    match client.get("https://crates.io/api/v1/crates/serde").send().await {
+    match client
+        .get("https://crates.io/api/v1/crates/serde")
+        .send()
+        .await
+    {
         Ok(response) => {
             let status = response.status();
             tracing::debug!("crates.io response status: {}", status);
-            
+
             if status.is_success() {
                 // Try to read a small portion of the response to ensure it's valid
                 match response.text().await {
                     Ok(body) => {
                         tracing::debug!("crates.io response body length: {}", body.len());
-                        
+
                         // Also test GitHub connectivity
                         tracing::debug!("Testing GitHub connectivity...");
                         match client.get("https://api.github.com").send().await {
                             Ok(gh_response) => {
                                 let gh_status = gh_response.status();
                                 tracing::debug!("GitHub response status: {}", gh_status);
-                                
+
                                 if gh_status.is_success() {
                                     DiagnosticResult::new(
                                         "Network".to_string(),
                                         true,
-                                        format!("crates.io ({}) and GitHub ({}) reachable", status, gh_status),
+                                        format!(
+                                            "crates.io ({}) and GitHub ({}) reachable",
+                                            status, gh_status
+                                        ),
                                         false,
                                     )
                                 } else {
                                     DiagnosticResult::new(
                                         "Network".to_string(),
                                         false,
-                                        format!("crates.io reachable ({}) but GitHub unreachable ({})", status, gh_status),
+                                        format!(
+                                            "crates.io reachable ({}) but GitHub unreachable ({})",
+                                            status, gh_status
+                                        ),
                                         false,
                                     )
                                 }
@@ -241,7 +248,10 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                 DiagnosticResult::new(
                                     "Network".to_string(),
                                     false,
-                                    format!("crates.io reachable ({}) but GitHub error: {}", status, e),
+                                    format!(
+                                        "crates.io reachable ({}) but GitHub error: {}",
+                                        status, e
+                                    ),
                                     false,
                                 )
                             }
@@ -252,7 +262,10 @@ async fn check_network_connectivity() -> DiagnosticResult {
                         DiagnosticResult::new(
                             "Network".to_string(),
                             false,
-                            format!("crates.io responded ({}) but failed to read response: {}", status, e),
+                            format!(
+                                "crates.io responded ({}) but failed to read response: {}",
+                                status, e
+                            ),
                             false,
                         )
                     }
@@ -281,38 +294,40 @@ async fn check_network_connectivity() -> DiagnosticResult {
 async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> DiagnosticResult {
     let cache_path = match cache_dir {
         Some(dir) => dir,
-        None => {
-            match dirs::home_dir() {
-                Some(home) => home.join(".rust-docs-mcp").join("cache"),
-                None => return DiagnosticResult::new(
+        None => match dirs::home_dir() {
+            Some(home) => home.join(".rust-docs-mcp").join("cache"),
+            None => {
+                return DiagnosticResult::new(
                     "Cache directory".to_string(),
                     false,
                     "Unable to determine home directory".to_string(),
                     false,
-                ),
+                );
             }
-        }
+        },
     };
-    
+
     // Check if directory exists or can be created
     if !cache_path.exists() {
         match fs::create_dir_all(&cache_path) {
-            Ok(_) => {},
-            Err(e) => return DiagnosticResult::new(
-                "Cache directory".to_string(),
-                false,
-                format!("Cannot create cache directory: {}", e),
-                false,
-            ),
+            Ok(_) => {}
+            Err(e) => {
+                return DiagnosticResult::new(
+                    "Cache directory".to_string(),
+                    false,
+                    format!("Cannot create cache directory: {}", e),
+                    false,
+                );
+            }
         }
     }
-    
+
     // Test write permissions
     let test_file = cache_path.join(".test_write");
     match fs::write(&test_file, "test") {
         Ok(_) => {
             let _ = fs::remove_file(&test_file);
-            
+
             // Check available disk space
             match fs2::available_space(&cache_path) {
                 Ok(available_bytes) => {
@@ -322,15 +337,22 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
                         DiagnosticResult::new(
                             "Cache directory".to_string(),
                             false,
-                            format!("{} (writable, but only {} available - at least 1GB recommended)", 
-                                cache_path.display(), available_formatted),
+                            format!(
+                                "{} (writable, but only {} available - at least 1GB recommended)",
+                                cache_path.display(),
+                                available_formatted
+                            ),
                             false,
                         )
                     } else {
                         DiagnosticResult::new(
                             "Cache directory".to_string(),
                             true,
-                            format!("{} (writable, {} available)", cache_path.display(), available_formatted),
+                            format!(
+                                "{} (writable, {} available)",
+                                cache_path.display(),
+                                available_formatted
+                            ),
                             false,
                         )
                     }
@@ -358,7 +380,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
 
 async fn check_optional_dependencies() -> DiagnosticResult {
     let mut messages = Vec::new();
-    
+
     // Check for codesign on macOS
     #[cfg(target_os = "macos")]
     {
@@ -371,12 +393,12 @@ async fn check_optional_dependencies() -> DiagnosticResult {
             }
         }
     }
-    
+
     // If no optional dependencies to check, return success
     if messages.is_empty() {
         messages.push("No optional dependencies to check".to_string());
     }
-    
+
     DiagnosticResult::new(
         "Optional dependencies".to_string(),
         true,
@@ -389,12 +411,12 @@ fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
     let mut size = bytes as f64;
     let mut unit_index = 0;
-    
+
     while size >= 1024.0 && unit_index < UNITS.len() - 1 {
         size /= 1024.0;
         unit_index += 1;
     }
-    
+
     if unit_index == 0 {
         format!("{} {}", size as u64, UNITS[unit_index])
     } else {
@@ -404,53 +426,73 @@ fn format_bytes(bytes: u64) -> String {
 
 pub fn print_results(results: &[DiagnosticResult]) {
     println!("🔍 rust-docs-mcp doctor\n");
-    
+
     let mut failed_count = 0;
-    
+
     for result in results {
         let icon = if result.success { "✅" } else { "❌" };
         println!("{} {}: {}", icon, result.name, result.message);
-        
+
         if !result.success {
             failed_count += 1;
         }
     }
-    
+
     if failed_count > 0 {
-        println!("\n[ERROR] Doctor found {} issue{}.", failed_count, if failed_count == 1 { "" } else { "s" });
-        
+        println!(
+            "\n[ERROR] Doctor found {} issue{}.",
+            failed_count,
+            if failed_count == 1 { "" } else { "s" }
+        );
+
         // Print specific error messages and suggestions
         for result in results {
             if !result.success {
                 match result.name.as_str() {
                     "Rust toolchain" => {
-                        println!("\nRust toolchain is required. Please install Rust from https://rustup.rs/");
+                        println!(
+                            "\nRust toolchain is required. Please install Rust from https://rustup.rs/"
+                        );
                     }
                     "Nightly toolchain" => {
-                        println!("\nNightly toolchain is required for rustdoc JSON generation. Install with:");
+                        println!(
+                            "\nNightly toolchain is required for rustdoc JSON generation. Install with:"
+                        );
                         println!("  rustup toolchain install nightly");
                     }
                     "Git" => {
-                        println!("\nGit is required for repository operations. Please install Git from https://git-scm.com/");
+                        println!(
+                            "\nGit is required for repository operations. Please install Git from https://git-scm.com/"
+                        );
                     }
                     "Rustdoc JSON" => {
-                        println!("\nRustdoc JSON generation failed. Ensure nightly toolchain is properly installed:");
+                        println!(
+                            "\nRustdoc JSON generation failed. Ensure nightly toolchain is properly installed:"
+                        );
                         println!("  rustup toolchain install nightly");
                     }
                     "Network" => {
-                        println!("\nNetwork connectivity issues detected. Check your internet connection.");
+                        println!(
+                            "\nNetwork connectivity issues detected. Check your internet connection."
+                        );
                     }
                     "Cache directory" => {
-                        println!("\nCache directory issues detected. Check file permissions and disk space.");
-                        if result.message.contains("available") && result.message.contains("recommended") {
-                            println!("Consider freeing up disk space. At least 1GB is recommended for caching documentation.");
+                        println!(
+                            "\nCache directory issues detected. Check file permissions and disk space."
+                        );
+                        if result.message.contains("available")
+                            && result.message.contains("recommended")
+                        {
+                            println!(
+                                "Consider freeing up disk space. At least 1GB is recommended for caching documentation."
+                            );
                         }
                     }
                     _ => {}
                 }
             }
         }
-        
+
         println!("\nPlease fix the above errors before using rust-docs-mcp.");
     } else {
         println!("\n✅ All checks passed! rust-docs-mcp is ready to use.");
@@ -460,7 +502,7 @@ pub fn print_results(results: &[DiagnosticResult]) {
 pub fn exit_code(results: &[DiagnosticResult]) -> i32 {
     let mut has_failures = false;
     let mut has_critical_failures = false;
-    
+
     for result in results {
         if !result.success {
             has_failures = true;
@@ -469,7 +511,7 @@ pub fn exit_code(results: &[DiagnosticResult]) -> i32 {
             }
         }
     }
-    
+
     if has_critical_failures {
         2 // Critical system dependency missing
     } else if has_failures {
@@ -490,7 +532,7 @@ pub fn print_results_json(results: &[DiagnosticResult]) -> Result<()> {
         },
         "exit_code": exit_code(results),
     });
-    
+
     println!("{}", serde_json::to_string_pretty(&json_output)?);
     Ok(())
 }
@@ -501,7 +543,7 @@ pub async fn run_and_print_diagnostics() -> Result<()> {
     println!("\n🔍 Running system diagnostics...\n");
     let results = run_diagnostics(None).await?;
     print_results(&results);
-    
+
     let exit_code = exit_code(&results);
     if exit_code != 0 {
         println!("\n⚠️  Some diagnostic checks failed. Please address the issues above.");
@@ -509,7 +551,7 @@ pub async fn run_and_print_diagnostics() -> Result<()> {
     } else {
         println!("\n✅ All system checks passed!");
     }
-    
+
     Ok(())
 }
 
@@ -519,12 +561,8 @@ mod tests {
 
     #[test]
     fn test_diagnostic_result_creation() {
-        let result = DiagnosticResult::new(
-            "Test".to_string(),
-            true,
-            "Test passed".to_string(),
-            false,
-        );
+        let result =
+            DiagnosticResult::new("Test".to_string(), true, "Test passed".to_string(), false);
         assert_eq!(result.name, "Test");
         assert!(result.success);
         assert_eq!(result.message, "Test passed");
@@ -613,7 +651,7 @@ mod tests {
         // This will print to stdout, but we're mainly testing it doesn't panic
         print_results(&results);
     }
-    
+
     #[test]
     fn test_format_bytes() {
         assert_eq!(format_bytes(0), "0 B");
