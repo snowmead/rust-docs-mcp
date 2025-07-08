@@ -147,8 +147,29 @@ cargo build --release
 rust-docs-mcp                   # Start MCP server
 rust-docs-mcp install           # Install to ~/.local/bin
 rust-docs-mcp install --force   # Force overwrite existing installation
+rust-docs-mcp doctor            # Verify system environment and dependencies
+rust-docs-mcp doctor --json     # Output diagnostic results in JSON format
+rust-docs-mcp update            # Update to latest version from GitHub
 rust-docs-mcp --help            # Show help
 ```
+
+### Troubleshooting
+
+If you encounter issues during installation or runtime, run the doctor command to diagnose common problems:
+
+```bash
+rust-docs-mcp doctor
+```
+
+The doctor command checks:
+- Rust toolchain availability (stable + nightly)
+- Git installation
+- Network connectivity to crates.io and GitHub
+- Cache directory permissions and disk space
+- Rustdoc JSON generation capability
+- Optional dependencies (e.g., codesign on macOS)
+
+For programmatic integration, use `--json` flag to get structured output.
 
 ### MCP Configuration
 

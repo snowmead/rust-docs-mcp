@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
+mod doctor;
 mod update;
 use rust_docs_mcp::RustDocsService;
 
@@ -43,6 +44,12 @@ enum Commands {
         #[arg(long)]
         branch: Option<String>,
     },
+    /// Verify system environment and dependencies
+    Doctor {
+        /// Output results in JSON format for programmatic consumption
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[tokio::main]
@@ -52,7 +59,7 @@ async fn main() -> Result<()> {
 
     // Handle subcommands
     if let Some(command) = args.command {
-        return handle_command(command).await;
+        return handle_command(command, args.cache_dir).await;
     }
 
     // Initialize tracing to stderr to avoid conflicts with stdio transport
@@ -80,7 +87,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn handle_command(command: Commands) -> Result<()> {
+async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result<()> {
     match command {
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,
         Commands::Update {
@@ -88,6 +95,7 @@ async fn handle_command(command: Commands) -> Result<()> {
             repo_url,
             branch,
         } => update::update_executable(target_dir, repo_url, branch).await,
+        Commands::Doctor { json } => handle_doctor_command(cache_dir, json).await,
     }
 }
 
@@ -143,7 +151,8 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
 
     // Check if target directory is in PATH
     if let Ok(path_var) = env::var("PATH") {
-        let paths: Vec<&str> = path_var.split(':').collect();
+        let path_separator = if cfg!(windows) { ';' } else { ':' };
+        let paths: Vec<&str> = path_var.split(path_separator).collect();
         let target_dir_str = target_dir.to_string_lossy();
 
         if !paths.iter().any(|&p| p == target_dir_str) {
@@ -157,5 +166,20 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
         }
     }
 
+    // Run doctor command to verify the installation
+    doctor::run_and_print_diagnostics().await?;
+
     Ok(())
+}
+
+async fn handle_doctor_command(cache_dir: Option<PathBuf>, json_output: bool) -> Result<()> {
+    let results = doctor::run_diagnostics(cache_dir).await?;
+
+    if json_output {
+        doctor::print_results_json(&results)?;
+    } else {
+        doctor::print_results(&results);
+    }
+
+    process::exit(doctor::exit_code(&results));
 }
