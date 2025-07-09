@@ -30,8 +30,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
-          # For PRs from forks, checkout the PR head ref
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Always checkout the default branch to avoid executing untrusted code
+          # The claude-code-action will handle PR context automatically
 
       - name: Run Claude Code
         id: claude
