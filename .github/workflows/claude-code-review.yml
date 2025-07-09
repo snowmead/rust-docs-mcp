@@ -27,6 +27,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          # Always checkout the default branch to avoid executing untrusted code
+          # The claude-code-action will handle PR context automatically
 
       - name: Run Claude Code Review
         id: claude-review
