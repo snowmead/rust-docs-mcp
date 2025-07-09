@@ -59,6 +59,7 @@ struct FuzzySearchFields {
     version: Field,
     item_id: Field,
     visibility: Field,
+    member: Field,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -105,6 +106,8 @@ pub struct SearchResult {
     pub version: String,
     #[schemars(description = "Item visibility")]
     pub visibility: String,
+    #[schemars(description = "Workspace member name (if applicable)")]
+    pub member: Option<String>,
 }
 
 impl FuzzySearcher {
@@ -121,6 +124,7 @@ impl FuzzySearcher {
             version: indexer.get_version_field(),
             item_id: indexer.get_item_id_field(),
             visibility: indexer.get_visibility_field(),
+            member: indexer.get_member_field(),
         };
 
         // Create query parser for multiple fields
@@ -267,6 +271,7 @@ impl FuzzySearcher {
         let version = get_text_field(self.fields.version)
             .ok_or_else(|| anyhow::anyhow!("Missing version"))?;
         let visibility = get_text_field(self.fields.visibility).unwrap_or_default();
+        let member = get_text_field(self.fields.member);
 
         Ok(Some(SearchResult {
             score,
@@ -277,6 +282,7 @@ impl FuzzySearcher {
             crate_name,
             version,
             visibility,
+            member,
         }))
     }
 

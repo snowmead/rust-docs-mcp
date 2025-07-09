@@ -37,6 +37,7 @@ pub struct SearchIndexer {
     fields: IndexFields,
     writer: Option<IndexWriter>,
     index_path: PathBuf,
+    member: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ pub struct IndexFields {
     version: Field,
     item_id: Field,
     visibility: Field,
+    member: Field,
 }
 
 impl SearchIndexer {
@@ -66,7 +68,9 @@ impl SearchIndexer {
             None => storage.search_index_path(crate_name, version)?,
         };
 
-        Self::new_at_path(&index_path)
+        let mut indexer = Self::new_at_path(&index_path)?;
+        indexer.member = member.map(|s| s.to_string());
+        Ok(indexer)
     }
 
     /// Create a new search indexer instance at a specific path
@@ -84,6 +88,7 @@ impl SearchIndexer {
         let version_field = schema_builder.add_text_field("version", TEXT | STORED);
         let item_id_field = schema_builder.add_u64_field("item_id", FAST | STORED);
         let visibility_field = schema_builder.add_text_field("visibility", TEXT | STORED);
+        let member_field = schema_builder.add_text_field("member", TEXT | STORED);
 
         let schema = schema_builder.build();
 
@@ -96,6 +101,7 @@ impl SearchIndexer {
             version: version_field,
             item_id: item_id_field,
             visibility: visibility_field,
+            member: member_field,
         };
 
         // Create index directory
@@ -118,6 +124,7 @@ impl SearchIndexer {
             fields,
             writer: None,
             index_path: index_path.to_path_buf(),
+            member: None,
         })
     }
 
@@ -195,7 +202,7 @@ impl SearchIndexer {
         let path_str = item.path.join("::");
         let docs_str = item.docs.clone().unwrap_or_default();
 
-        let doc = doc!(
+        let mut doc = doc!(
             self.fields.name => item.name.clone(),
             self.fields.docs => docs_str,
             self.fields.path => path_str,
@@ -205,6 +212,11 @@ impl SearchIndexer {
             self.fields.item_id => item_id,
             self.fields.visibility => item.visibility.clone(),
         );
+
+        // Add member field if present
+        if let Some(member_name) = &self.member {
+            doc.add_text(self.fields.member, member_name.clone());
+        }
 
         Ok(doc)
     }
@@ -254,6 +266,10 @@ impl SearchIndexer {
     pub fn get_visibility_field(&self) -> Field {
         self.fields.visibility
     }
+
+    pub fn get_member_field(&self) -> Field {
+        self.fields.member
+    }
 }
 
 impl std::fmt::Debug for SearchIndexer {
@@ -263,6 +279,7 @@ impl std::fmt::Debug for SearchIndexer {
             .field("fields", &self.fields)
             .field("writer", &self.writer.is_some())
             .field("index_path", &self.index_path)
+            .field("member", &self.member)
             .finish()
     }
 }

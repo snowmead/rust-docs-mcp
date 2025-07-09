@@ -343,7 +343,7 @@ impl DocGenerator {
     }
 
     /// Create search index for a crate
-    async fn create_search_index(&self, name: &str, version: &str) -> Result<()> {
+    pub async fn create_search_index(&self, name: &str, version: &str) -> Result<()> {
         tracing::info!("Creating search index for {}-{}", name, version);
 
         // Load the generated documentation
@@ -366,7 +366,7 @@ impl DocGenerator {
     }
 
     /// Create search index for a workspace member
-    async fn create_search_index_for_member(
+    pub async fn create_search_index_for_member(
         &self,
         name: &str,
         version: &str,

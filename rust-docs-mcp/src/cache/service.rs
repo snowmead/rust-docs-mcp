@@ -718,4 +718,21 @@ impl CrateCache {
             Err(e) => CacheResponse::error(format!("Failed to cache crate: {e}")).to_json(),
         }
     }
+
+    /// Create search index for a crate (exposed for search module)
+    pub async fn create_search_index(&self, name: &str, version: &str) -> Result<()> {
+        self.doc_generator.create_search_index(name, version).await
+    }
+
+    /// Create search index for a workspace member (exposed for search module)
+    pub async fn create_search_index_for_member(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> Result<()> {
+        self.doc_generator
+            .create_search_index_for_member(name, version, member_name)
+            .await
+    }
 }

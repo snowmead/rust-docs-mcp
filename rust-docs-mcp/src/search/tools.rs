@@ -154,6 +154,7 @@ impl SearchTools {
         let fuzzy_enabled = params.fuzzy_enabled.unwrap_or(true);
         let crate_name = params.crate_name.clone();
         let version = params.version.clone();
+        let member = params.member.clone();
         let result = async {
             // First check with read lock if docs already exist
             {
@@ -218,11 +219,24 @@ impl SearchTools {
                 )
                 .await
             {
-                return Err(anyhow::anyhow!(
-                    "Search index not available for {}-{}",
-                    params.crate_name,
-                    params.version
-                ));
+                // Docs exist but search index is missing - regenerate it
+                let cache = self.cache.write().await;
+                match params.member.as_deref() {
+                    Some(member) => {
+                        cache
+                            .create_search_index_for_member(
+                                &params.crate_name,
+                                &params.version,
+                                member,
+                            )
+                            .await?;
+                    }
+                    None => {
+                        cache
+                            .create_search_index(&params.crate_name, &params.version)
+                            .await?;
+                    }
+                }
             }
 
             self.perform_search(params, storage).await
@@ -237,7 +251,8 @@ impl SearchTools {
                     "total_results": results.len(),
                     "fuzzy_enabled": fuzzy_enabled,
                     "crate_name": crate_name,
-                    "version": version
+                    "version": version,
+                    "member": member
                 });
 
                 serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
