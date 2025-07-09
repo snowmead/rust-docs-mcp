@@ -58,8 +58,8 @@ pub async fn test_rustdoc_json() -> Result<()> {
 
     // Try to generate JSON documentation using the pinned toolchain
     let output = Command::new("rustdoc")
-        .args(&[
-            &format!("+{}", REQUIRED_TOOLCHAIN),
+        .args([
+            &format!("+{REQUIRED_TOOLCHAIN}"),
             "-Z",
             "unstable-options",
             "--output-format",

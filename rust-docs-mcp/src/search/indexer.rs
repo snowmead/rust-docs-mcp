@@ -60,8 +60,10 @@ impl SearchIndexer {
         member: Option<&str>,
     ) -> Result<Self> {
         let index_path = match member {
-            Some(member_name) => storage.member_search_index_path(crate_name, version, member_name),
-            None => storage.search_index_path(crate_name, version),
+            Some(member_name) => {
+                storage.member_search_index_path(crate_name, version, member_name)?
+            }
+            None => storage.search_index_path(crate_name, version)?,
         };
 
         Self::new_at_path(&index_path)
@@ -97,16 +99,16 @@ impl SearchIndexer {
         };
 
         // Create index directory
-        std::fs::create_dir_all(&index_path).with_context(|| {
+        std::fs::create_dir_all(index_path).with_context(|| {
             format!(
                 "Failed to create search index directory: {}",
                 index_path.display()
             )
         })?;
 
-        let index = match Index::open_in_dir(&index_path) {
+        let index = match Index::open_in_dir(index_path) {
             Ok(index) => index,
-            Err(_) => Index::create_in_dir(&index_path, schema.clone()).with_context(|| {
+            Err(_) => Index::create_in_dir(index_path, schema.clone()).with_context(|| {
                 format!("Failed to create search index at: {}", index_path.display())
             })?,
         };

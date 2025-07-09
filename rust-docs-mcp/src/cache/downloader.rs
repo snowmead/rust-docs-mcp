@@ -106,7 +106,7 @@ impl CrateDownloader {
         }
 
         // Extract the crate
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         let tar_gz = File::open(&temp_file_path).context("Failed to open downloaded file")?;
@@ -215,7 +215,7 @@ impl CrateDownloader {
         }
 
         // Copy to cache location
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         copy_directory_contents(&repo_source_path, &source_path)
@@ -273,7 +273,7 @@ impl CrateDownloader {
         }
 
         // Copy to cache location
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         copy_directory_contents(source_path_input, &source_path)

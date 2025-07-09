@@ -97,7 +97,7 @@ impl CrateCache {
 
         // Check if crate is already downloaded
         if self.storage.is_cached(name, version) {
-            let source_path = self.storage.source_path(name, version);
+            let source_path = self.storage.source_path(name, version)?;
             let cargo_toml_path = source_path.join("Cargo.toml");
 
             // Check if it's a workspace
@@ -235,7 +235,7 @@ impl CrateCache {
     }
 
     /// Get the source path for a crate
-    pub fn get_source_path(&self, name: &str, version: &str) -> PathBuf {
+    pub fn get_source_path(&self, name: &str, version: &str) -> Result<PathBuf> {
         self.storage.source_path(name, version)
     }
 
@@ -251,7 +251,7 @@ impl CrateCache {
             self.download_or_copy_crate(name, version, source).await?;
         }
 
-        Ok(self.storage.source_path(name, version))
+        self.storage.source_path(name, version)
     }
 
     /// Ensure source is available for a crate or workspace member

@@ -177,6 +177,38 @@ mod tests {
     }
 
     #[test]
+    fn test_crate_identifier_security_validation() -> Result<()> {
+        // Test path traversal attempts
+        assert!(CrateIdentifier::new("../../../etc/passwd", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate/../../../etc", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("..", "1.0.0").is_err());
+        assert!(CrateIdentifier::new(".", "1.0.0").is_err());
+
+        // Test path separators
+        assert!(CrateIdentifier::new("crate/subcrate", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\\subcrate", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("/absolute/path", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("\\absolute\\path", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("C:\\windows", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("C:/windows", "1.0.0").is_err());
+
+        // Test invalid characters
+        assert!(CrateIdentifier::new("crate$name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate@name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\nname", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\0name", "1.0.0").is_err());
+
+        // Test valid names
+        assert!(CrateIdentifier::new("valid_crate", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("valid-crate", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("Valid123", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("a", "1.0.0").is_ok());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_crate_identifier_from_str() -> Result<()> {
         let id: CrateIdentifier = "serde-1.0.0".parse()?;
         assert_eq!(id.name(), "serde");

@@ -33,8 +33,8 @@ impl DocGenerator {
         // Validate toolchain before generating docs
         self.validate_toolchain().await?;
 
-        let source_path = self.storage.source_path(name, version);
-        let docs_path = self.storage.docs_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
+        let docs_path = self.storage.docs_path(name, version)?;
 
         if !source_path.exists() {
             bail!(
@@ -85,7 +85,7 @@ impl DocGenerator {
         // Validate toolchain before generating docs
         self.validate_toolchain().await?;
 
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         let member_full_path = source_path.join(member_path);
 
         if !source_path.exists() {
@@ -109,7 +109,7 @@ impl DocGenerator {
 
         // Extract the member name from the path (last directory)
         let member_name = WorkspaceHandler::extract_member_name(member_path);
-        let docs_path = self.storage.member_docs_path(name, version, member_name);
+        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
 
         tracing::info!(
             "Generating documentation for workspace member {} (package: {}) in {}-{}",
@@ -147,7 +147,7 @@ impl DocGenerator {
         // Extract member name from path
         let member_name = member_path
             .split('/')
-            .last()
+            .next_back()
             .ok_or_else(|| anyhow::anyhow!("Invalid member path: {}", member_path))?;
 
         // Create search index for the workspace member
@@ -195,8 +195,8 @@ impl DocGenerator {
 
     /// Generate and save dependency information for a crate
     async fn generate_dependencies(&self, name: &str, version: &str) -> Result<()> {
-        let source_path = self.storage.source_path(name, version);
-        let deps_path = self.storage.dependencies_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
+        let deps_path = self.storage.dependencies_path(name, version)?;
 
         tracing::info!("Generating dependency information for {}-{}", name, version);
 
@@ -227,11 +227,11 @@ impl DocGenerator {
         version: &str,
         member_path: &str,
     ) -> Result<()> {
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         let member_name = WorkspaceHandler::extract_member_name(member_path);
         let deps_path = self
             .storage
-            .member_dependencies_path(name, version, member_name);
+            .member_dependencies_path(name, version, member_name)?;
 
         tracing::info!(
             "Generating dependency information for workspace member {} in {}-{}",
@@ -280,7 +280,7 @@ impl DocGenerator {
 
     /// Load dependency information from cache
     pub async fn load_dependencies(&self, name: &str, version: &str) -> Result<serde_json::Value> {
-        let deps_path = self.storage.dependencies_path(name, version);
+        let deps_path = self.storage.dependencies_path(name, version)?;
 
         if !deps_path.exists() {
             bail!("Dependencies not found for {}-{}", name, version);
@@ -298,7 +298,7 @@ impl DocGenerator {
 
     /// Load documentation from cache
     pub async fn load_docs(&self, name: &str, version: &str) -> Result<serde_json::Value> {
-        let docs_path = self.storage.docs_path(name, version);
+        let docs_path = self.storage.docs_path(name, version)?;
 
         if !docs_path.exists() {
             bail!("Documentation not found for {}-{}", name, version);
@@ -321,7 +321,7 @@ impl DocGenerator {
         version: &str,
         member_name: &str,
     ) -> Result<serde_json::Value> {
-        let docs_path = self.storage.member_docs_path(name, version, member_name);
+        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
 
         if !docs_path.exists() {
             bail!(
@@ -347,7 +347,7 @@ impl DocGenerator {
         tracing::info!("Creating search index for {}-{}", name, version);
 
         // Load the generated documentation
-        let docs_path = self.storage.docs_path(name, version);
+        let docs_path = self.storage.docs_path(name, version)?;
         let docs_json = tokio::fs::read_to_string(&docs_path)
             .await
             .context("Failed to read documentation for indexing")?;
@@ -380,7 +380,7 @@ impl DocGenerator {
         );
 
         // Load the generated documentation
-        let docs_path = self.storage.member_docs_path(name, version, member_name);
+        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
         let docs_json = tokio::fs::read_to_string(&docs_path)
             .await
             .context("Failed to read member documentation for indexing")?;

@@ -390,7 +390,10 @@ impl DocsTools {
 
     pub async fn get_item_source(&self, params: GetItemSourceParams) -> String {
         let cache = self.cache.write().await;
-        let source_base_path = cache.get_source_path(&params.crate_name, &params.version);
+        let source_base_path = match cache.get_source_path(&params.crate_name, &params.version) {
+            Ok(path) => path,
+            Err(e) => return format!(r#"{{"error": "Failed to get source path: {e}"}}"#),
+        };
 
         match cache
             .ensure_crate_or_member_docs(

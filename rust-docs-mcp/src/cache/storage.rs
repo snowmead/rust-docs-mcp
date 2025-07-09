@@ -53,8 +53,9 @@ impl CacheStorage {
     }
 
     /// Get the path for a specific crate version
-    pub fn crate_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path_for_id(&CrateIdentifier::new(name, version).unwrap())
+    pub fn crate_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        let crate_id = CrateIdentifier::new(name, version)?;
+        Ok(self.crate_path_for_id(&crate_id))
     }
 
     /// Get the path for a specific crate using CrateIdentifier
@@ -66,42 +67,62 @@ impl CacheStorage {
     }
 
     /// Get the path for a specific workspace member
-    pub fn member_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
-        self.crate_path(name, version)
+    pub fn member_path(&self, name: &str, version: &str, member_name: &str) -> Result<PathBuf> {
+        // Validate member_name to prevent path traversal
+        if member_name.contains("..") || member_name.contains("/") || member_name.contains("\\") {
+            bail!(
+                "Invalid member name '{}': contains path separators or traversal sequences",
+                member_name
+            );
+        }
+        Ok(self
+            .crate_path(name, version)?
             .join("members")
-            .join(member_name)
+            .join(member_name))
     }
 
     /// Get the source directory path for a crate
-    pub fn source_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path(name, version).join("source")
+    pub fn source_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        Ok(self.crate_path(name, version)?.join("source"))
     }
 
     /// Get the documentation JSON path for a crate
-    pub fn docs_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path(name, version).join("docs.json")
+    pub fn docs_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        Ok(self.crate_path(name, version)?.join("docs.json"))
     }
 
     /// Get the documentation JSON path for a workspace member
-    pub fn member_docs_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
-        self.member_path(name, version, member_name)
-            .join("docs.json")
+    pub fn member_docs_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> Result<PathBuf> {
+        Ok(self
+            .member_path(name, version, member_name)?
+            .join("docs.json"))
     }
 
     /// Get the metadata path for a crate
-    pub fn metadata_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path(name, version).join("metadata.json")
+    pub fn metadata_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        Ok(self.crate_path(name, version)?.join("metadata.json"))
     }
 
     /// Get the metadata path for a workspace member
-    pub fn member_metadata_path(&self, name: &str, version: &str, member_name: &str) -> PathBuf {
-        self.member_path(name, version, member_name)
-            .join("metadata.json")
+    pub fn member_metadata_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: &str,
+    ) -> Result<PathBuf> {
+        Ok(self
+            .member_path(name, version, member_name)?
+            .join("metadata.json"))
     }
 
     /// Get the dependencies path for a crate
-    pub fn dependencies_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path(name, version).join("dependencies.json")
+    pub fn dependencies_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        Ok(self.crate_path(name, version)?.join("dependencies.json"))
     }
 
     /// Get the dependencies path for a workspace member
@@ -110,14 +131,15 @@ impl CacheStorage {
         name: &str,
         version: &str,
         member_name: &str,
-    ) -> PathBuf {
-        self.member_path(name, version, member_name)
-            .join("dependencies.json")
+    ) -> Result<PathBuf> {
+        Ok(self
+            .member_path(name, version, member_name)?
+            .join("dependencies.json"))
     }
 
     /// Get the search index path for a crate
-    pub fn search_index_path(&self, name: &str, version: &str) -> PathBuf {
-        self.crate_path(name, version).join("search_index")
+    pub fn search_index_path(&self, name: &str, version: &str) -> Result<PathBuf> {
+        Ok(self.crate_path(name, version)?.join("search_index"))
     }
 
     /// Get the search index path for a workspace member
@@ -126,40 +148,52 @@ impl CacheStorage {
         name: &str,
         version: &str,
         member_name: &str,
-    ) -> PathBuf {
-        self.member_path(name, version, member_name)
-            .join("search_index")
+    ) -> Result<PathBuf> {
+        Ok(self
+            .member_path(name, version, member_name)?
+            .join("search_index"))
     }
 
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
-        self.crate_path(name, version).exists()
+        self.crate_path(name, version)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Check if documentation is generated for a crate
     pub fn has_docs(&self, name: &str, version: &str) -> bool {
-        self.docs_path(name, version).exists()
+        self.docs_path(name, version)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Check if a workspace member is cached
     pub fn is_member_cached(&self, name: &str, version: &str, member_name: &str) -> bool {
-        self.member_path(name, version, member_name).exists()
+        self.member_path(name, version, member_name)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Check if documentation is generated for a workspace member
     pub fn has_member_docs(&self, name: &str, version: &str, member_name: &str) -> bool {
-        self.member_docs_path(name, version, member_name).exists()
+        self.member_docs_path(name, version, member_name)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Check if a search index exists for a crate
     pub fn has_search_index(&self, name: &str, version: &str) -> bool {
-        self.search_index_path(name, version).exists()
+        self.search_index_path(name, version)
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Check if a search index exists for a workspace member
     pub fn has_member_search_index(&self, name: &str, version: &str, member_name: &str) -> bool {
         self.member_search_index_path(name, version, member_name)
-            .exists()
+            .map(|p| p.exists())
+            .unwrap_or(false)
     }
 
     /// Ensure a directory exists
@@ -205,7 +239,7 @@ impl CacheStorage {
         source: &str,
         source_path: Option<&str>,
     ) -> Result<()> {
-        let crate_path = self.crate_path(name, version);
+        let crate_path = self.crate_path(name, version)?;
         let size_bytes = self.calculate_dir_size(&crate_path)?;
 
         let metadata = CrateMetadata {
@@ -218,7 +252,7 @@ impl CacheStorage {
             source_path: source_path.map(String::from),
         };
 
-        let metadata_path = self.metadata_path(name, version);
+        let metadata_path = self.metadata_path(name, version)?;
         let json = serde_json::to_string_pretty(&metadata)?;
         fs::write(metadata_path, json)?;
         Ok(())
@@ -226,7 +260,7 @@ impl CacheStorage {
 
     /// Load metadata for a crate
     pub fn load_metadata(&self, name: &str, version: &str) -> Result<CrateMetadata> {
-        let metadata_path = self.metadata_path(name, version);
+        let metadata_path = self.metadata_path(name, version)?;
         let json = fs::read_to_string(metadata_path)?;
         let metadata: CrateMetadata = serde_json::from_str(&json)?;
         Ok(metadata)
@@ -239,7 +273,7 @@ impl CacheStorage {
         version: &str,
         member_name: &str,
     ) -> Result<CrateMetadata> {
-        let metadata_path = self.member_metadata_path(name, version, member_name);
+        let metadata_path = self.member_metadata_path(name, version, member_name)?;
         let json = fs::read_to_string(metadata_path)?;
         let metadata: CrateMetadata = serde_json::from_str(&json)?;
         Ok(metadata)
@@ -300,7 +334,7 @@ impl CacheStorage {
 
     /// Get all workspace members for a cached crate
     pub fn list_workspace_members(&self, name: &str, version: &str) -> Result<Vec<String>> {
-        let members_dir = self.crate_path(name, version).join("members");
+        let members_dir = self.crate_path(name, version)?.join("members");
         let mut members = Vec::new();
 
         if !members_dir.exists() {
@@ -320,7 +354,7 @@ impl CacheStorage {
 
     /// Remove a cached crate version
     pub fn remove_crate(&self, name: &str, version: &str) -> Result<()> {
-        let path = self.crate_path(name, version);
+        let path = self.crate_path(name, version)?;
         if path.exists() {
             fs::remove_dir_all(&path)
                 .with_context(|| format!("Failed to remove crate cache: {name}/{version}"))?;
@@ -330,7 +364,7 @@ impl CacheStorage {
 
     /// Copy a crate to a temporary backup location
     pub fn backup_crate_to_temp(&self, name: &str, version: &str) -> Result<PathBuf> {
-        let source = self.crate_path(name, version);
+        let source = self.crate_path(name, version)?;
         if !source.exists() {
             bail!("Crate {name}-{version} not found in cache");
         }
@@ -363,7 +397,7 @@ impl CacheStorage {
             bail!("Backup path does not exist: {}", backup_path.display());
         }
 
-        let target = self.crate_path(name, version);
+        let target = self.crate_path(name, version)?;
 
         // Remove current version if it exists
         if target.exists() {
@@ -394,5 +428,118 @@ impl CacheStorage {
             })?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_crate_path_validation() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+
+        // Test path traversal attempts are rejected
+        assert!(storage.crate_path("../../../etc/passwd", "1.0.0").is_err());
+        assert!(storage.crate_path("crate/../../../etc", "1.0.0").is_err());
+        assert!(storage.crate_path("..", "1.0.0").is_err());
+
+        // Test path separators are rejected
+        assert!(storage.crate_path("crate/subcrate", "1.0.0").is_err());
+        assert!(storage.crate_path("crate\\subcrate", "1.0.0").is_err());
+        assert!(storage.crate_path("/absolute/path", "1.0.0").is_err());
+
+        // Test valid names work
+        assert!(storage.crate_path("valid-crate", "1.0.0").is_ok());
+        assert!(storage.crate_path("valid_crate", "1.0.0").is_ok());
+    }
+
+    #[test]
+    fn test_member_path_validation() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+
+        // Test member name validation
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "../../../etc")
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "member/../../other")
+                .is_err()
+        );
+        assert!(storage.member_path("valid-crate", "1.0.0", "..").is_err());
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "/absolute")
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "C:\\windows")
+                .is_err()
+        );
+
+        // Test valid member names
+        assert!(storage.member_path("valid-crate", "1.0.0", "rmcp").is_ok());
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "rmcp-macros")
+                .is_ok()
+        );
+        assert!(
+            storage
+                .member_path("valid-crate", "1.0.0", "my_member")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_all_path_methods_validate() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+
+        let malicious_name = "../../../etc/passwd";
+        let version = "1.0.0";
+
+        // Ensure all methods that take name/version validate input
+        assert!(storage.crate_path(malicious_name, version).is_err());
+        assert!(storage.source_path(malicious_name, version).is_err());
+        assert!(storage.docs_path(malicious_name, version).is_err());
+        assert!(storage.metadata_path(malicious_name, version).is_err());
+        assert!(storage.dependencies_path(malicious_name, version).is_err());
+        assert!(storage.search_index_path(malicious_name, version).is_err());
+
+        // Test member path methods
+        let malicious_member = "../../other";
+        assert!(
+            storage
+                .member_path("valid", version, malicious_member)
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_docs_path("valid", version, malicious_member)
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_metadata_path("valid", version, malicious_member)
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_dependencies_path("valid", version, malicious_member)
+                .is_err()
+        );
+        assert!(
+            storage
+                .member_search_index_path("valid", version, malicious_member)
+                .is_err()
+        );
     }
 }
