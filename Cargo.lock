@@ -854,23 +854,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "fs2"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
-dependencies = [
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "fs4"
-version = "0.8.4"
+version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7e180ac76c23b45e767bd7ae9579bc0bb458618c4bc71835926e098e61d15f8"
+checksum = "8640e34b88f7652208ce9e88b1a37a2ae95227d84abec377ccd3c5cfeb141ed4"
 dependencies = [
- "rustix 0.38.44",
- "windows-sys 0.52.0",
+ "rustix",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3046,7 +3036,7 @@ dependencies = [
 [[package]]
 name = "rust-analyzer-salsa"
 version = "0.17.0-pre.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
+source = "registry+https://github.com/rust-lang/crates.io-index"https://github.com/snowmead/rust-docs-mcp/pull/21/conflict?name=Cargo.lock&ancestor_oid=5a2208a8e51479b37fe24dd2ad4a5461c0407715&base_oid=3921a938a1608b52b9d77b3e70461376e8754973&head_oid=b11321d2ce812bbea20a70c72d8b8c1d8563e347
 checksum = "719825638c59fd26a55412a24561c7c5bcf54364c88b9a7a04ba08a6eafaba8d"
 dependencies = [
  "indexmap",
@@ -3082,7 +3072,7 @@ dependencies = [
  "clap",
  "dirs",
  "flate2",
- "fs2",
+ "fs4",
  "futures",
  "git2",
  "ra_ap_ide",
