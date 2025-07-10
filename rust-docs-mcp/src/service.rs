@@ -15,7 +15,7 @@ use crate::cache::{
     CrateCache,
     tools::{
         CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools, GetCratesMetadataParams, RemoveCrateParams, ListCrateVersionsParams,
+        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams, RemoveCrateParams,
     },
 };
 use crate::deps::tools::{DepsTools, GetDependenciesParams};
@@ -86,10 +86,7 @@ impl RustDocsService {
     #[tool(
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
-    pub async fn remove_crate(
-        &self,
-        Parameters(params): Parameters<RemoveCrateParams>,
-    ) -> String {
+    pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
         self.cache_tools.remove_crate(params).await
     }
 

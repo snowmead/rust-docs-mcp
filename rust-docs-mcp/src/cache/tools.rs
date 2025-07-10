@@ -148,7 +148,10 @@ impl CacheTools {
 
     pub async fn remove_crate(&self, params: RemoveCrateParams) -> String {
         let cache = self.cache.write().await;
-        match cache.remove_crate(&params.crate_name, &params.version).await {
+        match cache
+            .remove_crate(&params.crate_name, &params.version)
+            .await
+        {
             Ok(_) => serde_json::json!({
                 "status": "success",
                 "message": format!("Successfully removed {}-{}", params.crate_name, params.version),

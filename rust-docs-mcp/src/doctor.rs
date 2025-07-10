@@ -1,8 +1,8 @@
 use anyhow::Result;
 use dirs;
+use fs4;
 use reqwest;
 use rust_docs_mcp::rustdoc;
-use fs4;
 use serde::Serialize;
 use std::fs;
 use std::process::Command;
