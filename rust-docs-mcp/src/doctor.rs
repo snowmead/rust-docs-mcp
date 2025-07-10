@@ -3,7 +3,7 @@ use std::process::Command;
 use std::fs;
 use reqwest;
 use dirs;
-use fs2;
+use fs4;
 use serde::Serialize;
 use crate::rustdoc;
 
@@ -314,7 +314,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
             let _ = fs::remove_file(&test_file);
             
             // Check available disk space
-            match fs2::available_space(&cache_path) {
+            match fs4::available_space(&cache_path) {
                 Ok(available_bytes) => {
                     let available_formatted = format_bytes(available_bytes);
                     // Warn if less than 1GB available
