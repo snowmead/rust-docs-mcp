@@ -89,6 +89,20 @@ pub struct GetCratesMetadataParams {
     pub queries: Vec<CrateMetadataQuery>,
 }
 
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveCrateParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ListCrateVersionsParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheTools {
     cache: Arc<Mutex<CrateCache>>,
@@ -132,7 +146,8 @@ impl CacheTools {
         cache.cache_crate_with_source(source).await
     }
 
-    pub async fn remove_crate(&self, crate_name: String, version: String) -> String {
+    pub async fn remove_crate(&self, params: RemoveCrateParams) -> String {
+        let RemoveCrateParams { crate_name, version } = params;
         let cache = self.cache.lock().await;
         match cache.remove_crate(&crate_name, &version).await {
             Ok(_) => serde_json::json!({
@@ -207,7 +222,8 @@ impl CacheTools {
         }
     }
 
-    pub async fn list_crate_versions(&self, crate_name: String) -> String {
+    pub async fn list_crate_versions(&self, params: ListCrateVersionsParams) -> String {
+        let ListCrateVersionsParams { crate_name } = params;
         let cache = self.cache.lock().await;
         match cache.get_cached_versions(&crate_name).await {
             Ok(versions) => serde_json::json!({

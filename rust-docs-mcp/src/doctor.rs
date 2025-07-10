@@ -406,7 +406,7 @@ pub fn print_results(results: &[DiagnosticResult]) {
     println!("🔍 rust-docs-mcp doctor\n");
     
     let mut failed_count = 0;
-    let mut critical_failed = false;
+    let mut _critical_failed = false;
     
     for result in results {
         let icon = if result.success { "✅" } else { "❌" };
@@ -415,7 +415,7 @@ pub fn print_results(results: &[DiagnosticResult]) {
         if !result.success {
             failed_count += 1;
             if result.critical {
-                critical_failed = true;
+                _critical_failed = true;
             }
         }
     }

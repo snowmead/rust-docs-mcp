@@ -3,11 +3,18 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use anyhow::Result;
+use rmcp::schemars::{self, JsonSchema};
 use rmcp::{
     ServerHandler,
-    model::{ServerCapabilities, ServerInfo},
-    tool,
+    handler::server::{prompt::Arguments, router::tool::ToolRouter, tool::Parameters},
+    model::{
+        GetPromptRequestParam, GetPromptResult, ListPromptsResult, PaginatedRequestParam,
+        PromptMessage, PromptMessageRole, ServerCapabilities, ServerInfo,
+    },
+    service::{RequestContext, RoleServer},
+    tool, tool_handler, tool_router,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::analysis::tools::AnalysisTools;
 use crate::cache::{
@@ -20,15 +27,28 @@ use crate::cache::{
 use crate::deps::tools::DepsTools;
 use crate::docs::tools::DocsTools;
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct FindImplementationArgs {
+    /// The name of the crate to search in
+    pub crate_name: String,
+
+    /// Optional member name if searching in a workspace member
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub member_name: Option<String>,
+
+    /// What you are trying to find (e.g., "async runtime initialization", "error handling")
+    pub query: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
     cache_tools: CacheTools,
     docs_tools: DocsTools,
     deps_tools: DepsTools,
     analysis_tools: AnalysisTools,
+    tool_router: ToolRouter<Self>,
 }
 
-#[tool(tool_box)]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache = Arc::new(Mutex::new(CrateCache::new(cache_dir)?));
@@ -38,20 +58,22 @@ impl RustDocsService {
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
             analysis_tools: AnalysisTools::new(cache),
+            tool_router: Self::tool_router(),
         })
     }
+}
 
-    // Delegate all tool methods to the respective tool structs
-
+#[tool_router]
+impl RustDocsService {
     // Cache tools
     #[tool(
         description = "Download and cache a specific crate version from crates.io for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
     )]
     pub async fn cache_crate_from_cratesio(
         &self,
-        #[tool(aggr)] params: CacheCrateFromCratesIOParams,
+        params: Parameters<CacheCrateFromCratesIOParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_cratesio(params).await
+        self.cache_tools.cache_crate_from_cratesio(params.0).await
     }
 
     #[tool(
@@ -59,9 +81,9 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_github(
         &self,
-        #[tool(aggr)] params: CacheCrateFromGitHubParams,
+        params: Parameters<CacheCrateFromGitHubParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_github(params).await
+        self.cache_tools.cache_crate_from_github(params.0).await
     }
 
     #[tool(
@@ -69,9 +91,9 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_local(
         &self,
-        #[tool(aggr)] params: CacheCrateFromLocalParams,
+        params: Parameters<CacheCrateFromLocalParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_local(params).await
+        self.cache_tools.cache_crate_from_local(params.0).await
     }
 
     #[tool(
@@ -79,14 +101,9 @@ impl RustDocsService {
     )]
     pub async fn remove_crate(
         &self,
-        #[tool(param)]
-        #[schemars(description = "The name of the crate")]
-        crate_name: String,
-        #[tool(param)]
-        #[schemars(description = "The version of the crate")]
-        version: String,
+        params: Parameters<crate::cache::tools::RemoveCrateParams>,
     ) -> String {
-        self.cache_tools.remove_crate(crate_name, version).await
+        self.cache_tools.remove_crate(params.0).await
     }
 
     #[tool(
@@ -101,11 +118,9 @@ impl RustDocsService {
     )]
     pub async fn list_crate_versions(
         &self,
-        #[tool(param)]
-        #[schemars(description = "The name of the crate")]
-        crate_name: String,
+        params: Parameters<crate::cache::tools::ListCrateVersionsParams>,
     ) -> String {
-        self.cache_tools.list_crate_versions(crate_name).await
+        self.cache_tools.list_crate_versions(params.0).await
     }
 
     #[tool(
@@ -113,9 +128,9 @@ impl RustDocsService {
     )]
     pub async fn get_crates_metadata(
         &self,
-        #[tool(aggr)] params: crate::cache::tools::GetCratesMetadataParams,
+        params: Parameters<crate::cache::tools::GetCratesMetadataParams>,
     ) -> String {
-        self.cache_tools.get_crates_metadata(params).await
+        self.cache_tools.get_crates_metadata(params.0).await
     }
 
     // Docs tools
@@ -124,9 +139,9 @@ impl RustDocsService {
     )]
     pub async fn list_crate_items(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::ListItemsParams,
+        params: Parameters<crate::docs::tools::ListItemsParams>,
     ) -> String {
-        self.docs_tools.list_crate_items(params).await
+        self.docs_tools.list_crate_items(params.0).await
     }
 
     #[tool(
@@ -134,9 +149,9 @@ impl RustDocsService {
     )]
     pub async fn search_items(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::SearchItemsParams,
+        params: Parameters<crate::docs::tools::SearchItemsParams>,
     ) -> String {
-        self.docs_tools.search_items(params).await
+        self.docs_tools.search_items(params.0).await
     }
 
     #[tool(
@@ -144,9 +159,9 @@ impl RustDocsService {
     )]
     pub async fn search_items_preview(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::SearchItemsPreviewParams,
+        params: Parameters<crate::docs::tools::SearchItemsPreviewParams>,
     ) -> String {
-        self.docs_tools.search_items_preview(params).await
+        self.docs_tools.search_items_preview(params.0).await
     }
 
     #[tool(
@@ -154,9 +169,9 @@ impl RustDocsService {
     )]
     pub async fn get_item_details(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::GetItemDetailsParams,
+        params: Parameters<crate::docs::tools::GetItemDetailsParams>,
     ) -> String {
-        self.docs_tools.get_item_details(params).await
+        self.docs_tools.get_item_details(params.0).await
     }
 
     #[tool(
@@ -164,9 +179,9 @@ impl RustDocsService {
     )]
     pub async fn get_item_docs(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::GetItemDocsParams,
+        params: Parameters<crate::docs::tools::GetItemDocsParams>,
     ) -> String {
-        self.docs_tools.get_item_docs(params).await
+        self.docs_tools.get_item_docs(params.0).await
     }
 
     #[tool(
@@ -174,9 +189,9 @@ impl RustDocsService {
     )]
     pub async fn get_item_source(
         &self,
-        #[tool(aggr)] params: crate::docs::tools::GetItemSourceParams,
+        params: Parameters<crate::docs::tools::GetItemSourceParams>,
     ) -> String {
-        self.docs_tools.get_item_source(params).await
+        self.docs_tools.get_item_source(params.0).await
     }
 
     // Deps tools
@@ -185,9 +200,9 @@ impl RustDocsService {
     )]
     pub async fn get_dependencies(
         &self,
-        #[tool(aggr)] params: crate::deps::tools::GetDependenciesParams,
+        params: Parameters<crate::deps::tools::GetDependenciesParams>,
     ) -> String {
-        self.deps_tools.get_dependencies(params).await
+        self.deps_tools.get_dependencies(params.0).await
     }
 
     // Analysis tools
@@ -196,13 +211,36 @@ impl RustDocsService {
     )]
     pub async fn structure(
         &self,
-        #[tool(aggr)] params: crate::analysis::tools::AnalyzeCrateStructureParams,
+        params: Parameters<crate::analysis::tools::AnalyzeCrateStructureParams>,
     ) -> String {
-        self.analysis_tools.structure(params).await
+        self.analysis_tools.structure(params.0).await
     }
 }
 
-#[tool(tool_box)]
+async fn find_source_code_prompt_template(
+    _service: &RustDocsService,
+    Arguments(args): Arguments<FindImplementationArgs>,
+    _ctx: RequestContext<RoleServer>,
+) -> Result<Vec<PromptMessage>, rmcp::Error> {
+    let mut messages = vec![];
+
+    messages.push(PromptMessage::new_text(
+        PromptMessageRole::User,
+        format!(
+            "Find implementations of '{}' in crate '{}'{}. Ensure to first check the version crate that is in the Cargo.toml file. If it is not there, then ask the user for the version. If it is a github url or local path dependency, then you can use those.",
+            args.query,
+            args.crate_name,
+            args.member_name
+                .as_ref()
+                .map(|m| format!(" (member: {})", m))
+                .unwrap_or_default()
+        ),
+    ));
+
+    Ok(messages)
+}
+
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for RustDocsService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -212,12 +250,66 @@ impl ServerHandler for RustDocsService {
             },
             capabilities: ServerCapabilities {
                 tools: Some(Default::default()),
+                prompts: Some(Default::default()),
                 ..Default::default()
             },
             instructions: Some(
                 "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.".to_string(),
             ),
             ..Default::default()
+        }
+    }
+
+    async fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListPromptsResult, rmcp::Error> {
+        Ok(ListPromptsResult {
+            next_cursor: None,
+            prompts: vec![rmcp::model::Prompt {
+                name: "find_implementation".to_string(),
+                description: Some(
+                    "Find implementations of specific functionality within a Rust crate"
+                        .to_string(),
+                ),
+                arguments: rmcp::handler::server::prompt::arguments_from_schema::<
+                    FindImplementationArgs,
+                >(),
+            }],
+        })
+    }
+
+    async fn get_prompt(
+        &self,
+        request: GetPromptRequestParam,
+        context: RequestContext<RoleServer>,
+    ) -> Result<GetPromptResult, rmcp::Error> {
+        match request.name.as_str() {
+            "find_implementation" => {
+                let args = if let Some(args_obj) = request.arguments {
+                    serde_json::from_value::<FindImplementationArgs>(serde_json::Value::Object(
+                        args_obj,
+                    ))
+                    .map_err(|e| {
+                        rmcp::Error::invalid_params(format!("Invalid arguments: {}", e), None)
+                    })?
+                } else {
+                    return Err(rmcp::Error::invalid_params(
+                        "Missing required arguments",
+                        None,
+                    ));
+                };
+
+                let messages =
+                    find_source_code_prompt_template(self, Arguments(args), context).await?;
+
+                Ok(GetPromptResult {
+                    description: None,
+                    messages,
+                })
+            }
+            _ => Err(rmcp::Error::invalid_params("Prompt not found", None)),
         }
     }
 }
