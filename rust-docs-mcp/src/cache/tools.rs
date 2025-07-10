@@ -89,6 +89,20 @@ pub struct GetCratesMetadataParams {
     pub queries: Vec<CrateMetadataQuery>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RemoveCrateParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ListCrateVersionsParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheTools {
     cache: Arc<RwLock<CrateCache>>,
@@ -132,14 +146,14 @@ impl CacheTools {
         cache.cache_crate_with_source(source).await
     }
 
-    pub async fn remove_crate(&self, crate_name: String, version: String) -> String {
+    pub async fn remove_crate(&self, params: RemoveCrateParams) -> String {
         let cache = self.cache.write().await;
-        match cache.remove_crate(&crate_name, &version).await {
+        match cache.remove_crate(&params.crate_name, &params.version).await {
             Ok(_) => serde_json::json!({
                 "status": "success",
-                "message": format!("Successfully removed {crate_name}-{version}"),
-                "crate": crate_name,
-                "version": version
+                "message": format!("Successfully removed {}-{}", params.crate_name, params.version),
+                "crate": params.crate_name,
+                "version": params.version
             })
             .to_string(),
             Err(e) => CacheResponse::error(format!("Failed to remove crate: {e}")).to_json(),
@@ -207,11 +221,11 @@ impl CacheTools {
         }
     }
 
-    pub async fn list_crate_versions(&self, crate_name: String) -> String {
+    pub async fn list_crate_versions(&self, params: ListCrateVersionsParams) -> String {
         let cache = self.cache.read().await;
-        match cache.get_cached_versions(&crate_name).await {
+        match cache.get_cached_versions(&params.crate_name).await {
             Ok(versions) => serde_json::json!({
-                "crate": crate_name,
+                "crate": params.crate_name,
                 "versions": versions
             })
             .to_string(),
