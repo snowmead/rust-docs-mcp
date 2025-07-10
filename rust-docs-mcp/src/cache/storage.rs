@@ -19,7 +19,7 @@ pub struct CacheMetadata {
     pub source: String,
     #[serde(default)]
     pub source_path: Option<String>,
-    
+
     // Member-specific fields (None for main crates)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_info: Option<MemberInfo>,
@@ -83,14 +83,14 @@ impl CacheStorage {
 
     /// Get the path for a specific workspace member
     pub fn member_path(&self, name: &str, version: &str, member_name: &str) -> Result<PathBuf> {
-        use crate::cache::member_utils::{validate_member_path, normalize_member_path};
-        
+        use crate::cache::member_utils::{normalize_member_path, validate_member_path};
+
         // Validate the member path for security
         validate_member_path(member_name)?;
-        
+
         // Normalize the path for storage
         let normalized = normalize_member_path(member_name);
-        
+
         Ok(self
             .crate_path(name, version)?
             .join(MEMBERS_DIR)
@@ -103,7 +103,12 @@ impl CacheStorage {
     }
 
     /// Get the documentation JSON path for a crate or workspace member
-    pub fn docs_path(&self, name: &str, version: &str, member_name: Option<&str>) -> Result<PathBuf> {
+    pub fn docs_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<PathBuf> {
         let base_path = if let Some(member) = member_name {
             self.member_path(name, version, member)?
         } else {
@@ -112,9 +117,13 @@ impl CacheStorage {
         Ok(base_path.join(DOCS_FILE))
     }
 
-
     /// Get the metadata path for a crate or workspace member
-    pub fn metadata_path(&self, name: &str, version: &str, member_name: Option<&str>) -> Result<PathBuf> {
+    pub fn metadata_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<PathBuf> {
         let base_path = if let Some(member) = member_name {
             self.member_path(name, version, member)?
         } else {
@@ -123,9 +132,13 @@ impl CacheStorage {
         Ok(base_path.join(METADATA_FILE))
     }
 
-
     /// Get the dependencies path for a crate or workspace member
-    pub fn dependencies_path(&self, name: &str, version: &str, member_name: Option<&str>) -> Result<PathBuf> {
+    pub fn dependencies_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<PathBuf> {
         let base_path = if let Some(member) = member_name {
             self.member_path(name, version, member)?
         } else {
@@ -134,9 +147,13 @@ impl CacheStorage {
         Ok(base_path.join(DEPENDENCIES_FILE))
     }
 
-
     /// Get the search index path for a crate or workspace member
-    pub fn search_index_path(&self, name: &str, version: &str, member_name: Option<&str>) -> Result<PathBuf> {
+    pub fn search_index_path(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<PathBuf> {
         let base_path = if let Some(member) = member_name {
             self.member_path(name, version, member)?
         } else {
@@ -144,7 +161,6 @@ impl CacheStorage {
         };
         Ok(base_path.join(SEARCH_INDEX_DIR))
     }
-
 
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
@@ -154,7 +170,7 @@ impl CacheStorage {
     }
 
     /// Check if a workspace member is cached
-    /// 
+    ///
     /// Accepts full member paths (e.g., "crates/rmcp") which are normalized internally
     pub fn is_member_cached(&self, name: &str, version: &str, member_path: &str) -> bool {
         // member_path method handles validation and normalization
@@ -170,14 +186,12 @@ impl CacheStorage {
             .unwrap_or(false)
     }
 
-
     /// Check if a search index exists for a crate or workspace member
     pub fn has_search_index(&self, name: &str, version: &str, member_name: Option<&str>) -> bool {
         self.search_index_path(name, version, member_name)
             .map(|p| p.exists())
             .unwrap_or(false)
     }
-
 
     /// Ensure a directory exists
     pub fn ensure_dir(&self, path: &Path) -> Result<()> {
@@ -226,14 +240,14 @@ impl CacheStorage {
         // Extract member path as owned string to avoid borrowing issues
         let member_path_string = member_info.as_ref().map(|info| info.original_path.clone());
         let member_path_str = member_path_string.as_deref();
-        
+
         let base_path = match &member_info {
             Some(info) => self.member_path(name, version, &info.original_path)?,
-            None => self.crate_path(name, version)?
+            None => self.crate_path(name, version)?,
         };
-        
+
         let size_bytes = self.calculate_dir_size(&base_path)?;
-        
+
         let metadata = CacheMetadata {
             name: name.to_string(),
             version: version.to_string(),
@@ -244,7 +258,7 @@ impl CacheStorage {
             source_path: source_path.map(String::from),
             member_info,
         };
-        
+
         let metadata_path = self.metadata_path(name, version, member_path_str)?;
         let json = serde_json::to_string_pretty(&metadata)?;
         fs::write(metadata_path, json)?;
@@ -263,7 +277,6 @@ impl CacheStorage {
         let metadata: CacheMetadata = serde_json::from_str(&json)?;
         Ok(metadata)
     }
-
 
     /// Get all cached crate versions
     pub fn list_cached_crates(&self) -> Result<Vec<CacheMetadata>> {
@@ -333,38 +346,40 @@ impl CacheStorage {
             let member_entry = member_entry?;
             if member_entry.file_type()?.is_dir() {
                 let normalized_name = member_entry.file_name().to_string_lossy().to_string();
-                
+
                 // Load metadata to get original path
                 let metadata_path = member_entry.path().join(METADATA_FILE);
                 match fs::read_to_string(&metadata_path) {
-                    Ok(content) => {
-                        match serde_json::from_str::<CacheMetadata>(&content) {
-                            Ok(metadata) => {
-                                if let Some(member_info) = metadata.member_info {
-                                    members.push(member_info.original_path);
-                                    continue;
-                                }
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to parse member metadata for {}: {}",
-                                    normalized_name, e
-                                );
+                    Ok(content) => match serde_json::from_str::<CacheMetadata>(&content) {
+                        Ok(metadata) => {
+                            if let Some(member_info) = metadata.member_info {
+                                members.push(member_info.original_path);
+                                continue;
                             }
                         }
-                    }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to parse member metadata for {}: {}",
+                                normalized_name,
+                                e
+                            );
+                        }
+                    },
                     Err(e) => {
                         tracing::warn!(
                             "Failed to read member metadata for {}: {}",
-                            normalized_name, e
+                            normalized_name,
+                            e
                         );
                     }
                 }
-                
+
                 // This shouldn't happen with proper metadata
                 tracing::error!(
                     "Member {} missing proper metadata in {}-{}",
-                    normalized_name, name, version
+                    normalized_name,
+                    name,
+                    version
                 );
             }
         }
@@ -389,15 +404,13 @@ impl CacheStorage {
             bail!("Crate {name}-{version} not found in cache");
         }
 
-        let temp_dir = std::env::temp_dir()
-            .join(BACKUP_DIR_PREFIX)
-            .join(format!(
-                "{name}-{version}-{}-{}",
-                chrono::Utc::now()
-                    .timestamp_nanos_opt()
-                    .unwrap_or_else(|| chrono::Utc::now().timestamp_micros()),
-                std::process::id()
-            ));
+        let temp_dir = std::env::temp_dir().join(BACKUP_DIR_PREFIX).join(format!(
+            "{name}-{version}-{}-{}",
+            chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_micros()),
+            std::process::id()
+        ));
 
         self.ensure_dir(&temp_dir)?;
         copy_directory_contents(&source, &temp_dir)
@@ -530,9 +543,21 @@ mod tests {
         assert!(storage.crate_path(malicious_name, version).is_err());
         assert!(storage.source_path(malicious_name, version).is_err());
         assert!(storage.docs_path(malicious_name, version, None).is_err());
-        assert!(storage.metadata_path(malicious_name, version, None).is_err());
-        assert!(storage.dependencies_path(malicious_name, version, None).is_err());
-        assert!(storage.search_index_path(malicious_name, version, None).is_err());
+        assert!(
+            storage
+                .metadata_path(malicious_name, version, None)
+                .is_err()
+        );
+        assert!(
+            storage
+                .dependencies_path(malicious_name, version, None)
+                .is_err()
+        );
+        assert!(
+            storage
+                .search_index_path(malicious_name, version, None)
+                .is_err()
+        );
 
         // Test member path methods
         let malicious_member = "../../other";

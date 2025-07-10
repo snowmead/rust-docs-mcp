@@ -230,8 +230,13 @@ impl CrateDownloader {
             Some(path) => format!("{repo_url}#{path}"),
             None => repo_url.to_string(),
         };
-        self.storage
-            .save_metadata_with_source(name, version, "github", Some(&source_info), None)?;
+        self.storage.save_metadata_with_source(
+            name,
+            version,
+            "github",
+            Some(&source_info),
+            None,
+        )?;
 
         tracing::info!(
             "Successfully downloaded and extracted {}-{} from GitHub",

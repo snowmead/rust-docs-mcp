@@ -4,10 +4,10 @@
 //! slashes to dash-separated formats, preventing path traversal attacks
 //! while maintaining compatibility with workspace member paths.
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 /// Convert a member path with slashes to a safe dash-separated format
-/// 
+///
 /// # Examples
 /// ```
 /// assert_eq!(normalize_member_path("crates/rmcp"), "crates-rmcp");
@@ -23,7 +23,7 @@ pub fn needs_normalization(member_path: &str) -> bool {
 }
 
 /// Validate that a member path doesn't contain dangerous sequences
-/// 
+///
 /// This function ensures the member path is safe to use in file operations
 /// by rejecting absolute paths, path traversal attempts, and backslashes.
 pub fn validate_member_path(member_path: &str) -> Result<()> {
@@ -31,27 +31,39 @@ pub fn validate_member_path(member_path: &str) -> Result<()> {
     if member_path.is_empty() {
         bail!("Invalid member path: empty path not allowed");
     }
-    
+
     // Reject absolute paths
     if member_path.starts_with('/') || member_path.starts_with('\\') {
-        bail!("Invalid member path '{}': absolute paths not allowed", member_path);
+        bail!(
+            "Invalid member path '{}': absolute paths not allowed",
+            member_path
+        );
     }
-    
+
     // Check for Windows absolute paths (e.g., C:\)
     if member_path.len() > 2 && member_path.chars().nth(1) == Some(':') {
-        bail!("Invalid member path '{}': absolute paths not allowed", member_path);
+        bail!(
+            "Invalid member path '{}': absolute paths not allowed",
+            member_path
+        );
     }
-    
+
     // Reject path traversal
     if member_path.contains("..") {
-        bail!("Invalid member path '{}': path traversal not allowed", member_path);
+        bail!(
+            "Invalid member path '{}': path traversal not allowed",
+            member_path
+        );
     }
-    
+
     // Reject backslashes (Windows paths)
     if member_path.contains('\\') {
-        bail!("Invalid member path '{}': backslashes not allowed", member_path);
+        bail!(
+            "Invalid member path '{}': backslashes not allowed",
+            member_path
+        );
     }
-    
+
     Ok(())
 }
 
@@ -62,7 +74,10 @@ mod tests {
     #[test]
     fn test_normalize_member_path() {
         assert_eq!(normalize_member_path("crates/rmcp"), "crates-rmcp");
-        assert_eq!(normalize_member_path("crates/rmcp/submodule"), "crates-rmcp-submodule");
+        assert_eq!(
+            normalize_member_path("crates/rmcp/submodule"),
+            "crates-rmcp-submodule"
+        );
         assert_eq!(normalize_member_path("simple"), "simple");
         assert_eq!(normalize_member_path("already-dashed"), "already-dashed");
     }
@@ -81,7 +96,7 @@ mod tests {
         assert!(validate_member_path("crates/rmcp").is_ok());
         assert!(validate_member_path("simple").is_ok());
         assert!(validate_member_path("path/to/member").is_ok());
-        
+
         // Invalid paths
         assert!(validate_member_path("").is_err());
         assert!(validate_member_path("/absolute/path").is_err());

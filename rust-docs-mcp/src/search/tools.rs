@@ -152,7 +152,11 @@ impl SearchTools {
             // First check with read lock if docs already exist
             {
                 let cache = self.cache.read().await;
-                let has_docs = cache.has_docs(&params.crate_name, &params.version, params.member.as_deref());
+                let has_docs = cache.has_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                );
 
                 if has_docs
                     && self
@@ -175,7 +179,11 @@ impl SearchTools {
             {
                 let cache = self.cache.write().await;
                 // Double-check in case another task generated it
-                let has_docs = cache.has_docs(&params.crate_name, &params.version, params.member.as_deref());
+                let has_docs = cache.has_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                );
 
                 if !has_docs {
                     cache

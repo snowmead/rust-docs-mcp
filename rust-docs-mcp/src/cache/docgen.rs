@@ -222,7 +222,9 @@ impl DocGenerator {
         member_path: &str,
     ) -> Result<()> {
         let source_path = self.storage.source_path(name, version)?;
-        let deps_path = self.storage.member_path(name, version, member_path)?
+        let deps_path = self
+            .storage
+            .member_path(name, version, member_path)?
             .join(DEPENDENCIES_FILE);
 
         tracing::info!(
@@ -320,7 +322,6 @@ impl DocGenerator {
         Ok(docs)
     }
 
-
     /// Create search index for a crate or workspace member
     pub async fn create_search_index(
         &self,
@@ -333,7 +334,7 @@ impl DocGenerator {
         } else {
             String::new()
         };
-        
+
         tracing::info!(
             "Creating search index for {}{}-{}",
             log_prefix,
@@ -343,7 +344,7 @@ impl DocGenerator {
 
         // Load the generated documentation
         let docs_path = self.storage.docs_path(name, version, member_name)?;
-        
+
         let docs_json = tokio::fs::read_to_string(&docs_path)
             .await
             .context("Failed to read documentation for indexing")?;

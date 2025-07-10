@@ -76,20 +76,22 @@ impl CrateCache {
         // Generate documentation for the specific workspace member
         self.generate_workspace_member_docs(name, version, member_path)
             .await?;
-            
+
         // Get package name for the member
-        let member_cargo_toml = self.storage.source_path(name, version)?
+        let member_cargo_toml = self
+            .storage
+            .source_path(name, version)?
             .join(member_path)
             .join(CARGO_TOML);
         let package_name = WorkspaceHandler::get_package_name(&member_cargo_toml)?;
-        
+
         // Create member info
         let member_info = MemberInfo {
             original_path: member_path.to_string(),
             normalized_path: normalize_member_path(member_path),
             package_name,
         };
-        
+
         // Save unified metadata
         self.storage.save_metadata_with_source(
             name,
@@ -176,7 +178,10 @@ impl CrateCache {
         version: &str,
         member_name: Option<&str>,
     ) -> Result<rustdoc_types::Crate> {
-        let json_value = self.doc_generator.load_docs(name, version, member_name).await?;
+        let json_value = self
+            .doc_generator
+            .load_docs(name, version, member_name)
+            .await?;
         let context_msg = if member_name.is_some() {
             "Failed to parse member documentation JSON"
         } else {
@@ -225,7 +230,10 @@ impl CrateCache {
     ) -> Result<Option<rustdoc_types::Crate>> {
         if self.storage.has_docs(crate_name, version, member) {
             if let Some(member_name) = member {
-                Ok(Some(self.load_docs(crate_name, version, Some(member_name)).await?))
+                Ok(Some(
+                    self.load_docs(crate_name, version, Some(member_name))
+                        .await?,
+                ))
             } else {
                 Ok(Some(self.load_docs(crate_name, version, None).await?))
             }
@@ -233,7 +241,6 @@ impl CrateCache {
             Ok(None)
         }
     }
-
 
     /// Get the source path for a crate
     pub fn get_source_path(&self, name: &str, version: &str) -> Result<PathBuf> {
