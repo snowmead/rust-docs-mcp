@@ -229,7 +229,7 @@ impl CacheTools {
 
             // Check if main crate is cached
             let main_crate_result = if cache.storage.is_cached(crate_name, version) {
-                match cache.storage.load_metadata(crate_name, version) {
+                match cache.storage.load_metadata(crate_name, version, None) {
                     Ok(metadata) => {
                         serde_json::json!({
                             "crate_name": crate_name,
@@ -263,16 +263,15 @@ impl CacheTools {
             // Check requested members if any
             if let Some(members) = query.members {
                 for member_path in members {
-                    let member_name = member_path.split('/').next_back().unwrap_or(&member_path);
                     let member_result =
                         if cache
                             .storage
                             .is_member_cached(crate_name, version, &member_path)
                         {
-                            match cache.storage.load_member_metadata(
+                            match cache.storage.load_metadata(
                                 crate_name,
                                 version,
-                                member_name,
+                                Some(&member_path),
                             ) {
                                 Ok(metadata) => {
                                     serde_json::json!({

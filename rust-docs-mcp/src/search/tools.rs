@@ -90,14 +90,7 @@ impl SearchTools {
         member: Option<&str>,
     ) -> bool {
         let cache = self.cache.read().await;
-        match member {
-            Some(member_name) => {
-                cache
-                    .storage
-                    .has_member_search_index(crate_name, version, member_name)
-            }
-            None => cache.storage.has_search_index(crate_name, version),
-        }
+        cache.storage.has_search_index(crate_name, version, member)
     }
 
     /// Perform the actual search without holding any locks
@@ -159,12 +152,7 @@ impl SearchTools {
             // First check with read lock if docs already exist
             {
                 let cache = self.cache.read().await;
-                let has_docs = match params.member.as_deref() {
-                    Some(member) => {
-                        cache.has_member_docs(&params.crate_name, &params.version, member)
-                    }
-                    None => cache.has_docs(&params.crate_name, &params.version),
-                };
+                let has_docs = cache.has_docs(&params.crate_name, &params.version, params.member.as_deref());
 
                 if has_docs
                     && self
@@ -187,12 +175,7 @@ impl SearchTools {
             {
                 let cache = self.cache.write().await;
                 // Double-check in case another task generated it
-                let has_docs = match params.member.as_deref() {
-                    Some(member) => {
-                        cache.has_member_docs(&params.crate_name, &params.version, member)
-                    }
-                    None => cache.has_docs(&params.crate_name, &params.version),
-                };
+                let has_docs = cache.has_docs(&params.crate_name, &params.version, params.member.as_deref());
 
                 if !has_docs {
                     cache
@@ -221,22 +204,13 @@ impl SearchTools {
             {
                 // Docs exist but search index is missing - regenerate it
                 let cache = self.cache.write().await;
-                match params.member.as_deref() {
-                    Some(member) => {
-                        cache
-                            .create_search_index_for_member(
-                                &params.crate_name,
-                                &params.version,
-                                member,
-                            )
-                            .await?;
-                    }
-                    None => {
-                        cache
-                            .create_search_index(&params.crate_name, &params.version)
-                            .await?;
-                    }
-                }
+                cache
+                    .create_search_index(
+                        &params.crate_name,
+                        &params.version,
+                        params.member.as_deref(),
+                    )
+                    .await?;
             }
 
             self.perform_search(params, storage).await

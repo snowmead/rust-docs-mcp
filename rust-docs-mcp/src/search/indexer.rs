@@ -61,12 +61,7 @@ impl SearchIndexer {
         storage: &CacheStorage,
         member: Option<&str>,
     ) -> Result<Self> {
-        let index_path = match member {
-            Some(member_name) => {
-                storage.member_search_index_path(crate_name, version, member_name)?
-            }
-            None => storage.search_index_path(crate_name, version)?,
-        };
+        let index_path = storage.search_index_path(crate_name, version, member)?;
 
         let mut indexer = Self::new_at_path(&index_path)?;
         indexer.member = member.map(|s| s.to_string());

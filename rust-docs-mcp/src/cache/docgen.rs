@@ -3,6 +3,7 @@
 //! This module handles running `cargo rustdoc` to generate JSON documentation
 //! for both regular crates and workspace members.
 
+use crate::cache::constants::*;
 use crate::cache::storage::CacheStorage;
 use crate::cache::workspace::WorkspaceHandler;
 use crate::rustdoc;
@@ -34,7 +35,7 @@ impl DocGenerator {
         self.validate_toolchain().await?;
 
         let source_path = self.storage.source_path(name, version)?;
-        let docs_path = self.storage.docs_path(name, version)?;
+        let docs_path = self.storage.docs_path(name, version, None)?;
 
         if !source_path.exists() {
             bail!(
@@ -50,7 +51,7 @@ impl DocGenerator {
         rustdoc::run_cargo_rustdoc_json(&source_path, None).await?;
 
         // Find the generated JSON file in target/doc
-        let doc_dir = source_path.join("target").join("doc");
+        let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
         let json_file = self.find_json_doc(&doc_dir, name)?;
 
         // Copy the JSON file to our cache location
@@ -63,7 +64,7 @@ impl DocGenerator {
         self.storage.save_metadata(name, version)?;
 
         // Create search index for the crate
-        self.create_search_index(name, version)
+        self.create_search_index(name, version, None)
             .await
             .context("Failed to create search index")?;
 
@@ -104,12 +105,11 @@ impl DocGenerator {
         }
 
         // Get the actual package name from the member's Cargo.toml
-        let member_cargo_toml = member_full_path.join("Cargo.toml");
+        let member_cargo_toml = member_full_path.join(CARGO_TOML);
         let package_name = WorkspaceHandler::get_package_name(&member_cargo_toml)?;
 
-        // Extract the member name from the path (last directory)
-        let member_name = WorkspaceHandler::extract_member_name(member_path);
-        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
+        // Use the full member path directly
+        let docs_path = self.storage.docs_path(name, version, Some(member_path))?;
 
         tracing::info!(
             "Generating documentation for workspace member {} (package: {}) in {}-{}",
@@ -123,7 +123,7 @@ impl DocGenerator {
         rustdoc::run_cargo_rustdoc_json(&source_path, Some(&package_name)).await?;
 
         // Find the generated JSON file in target/doc
-        let doc_dir = source_path.join("target").join("doc");
+        let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
         let json_file = self.find_json_doc(&doc_dir, &package_name)?;
 
         // Ensure the member directory exists in cache
@@ -144,14 +144,8 @@ impl DocGenerator {
         self.generate_workspace_member_dependencies(name, version, member_path)
             .await?;
 
-        // Extract member name from path
-        let member_name = member_path
-            .split('/')
-            .next_back()
-            .ok_or_else(|| anyhow::anyhow!("Invalid member path: {}", member_path))?;
-
         // Create search index for the workspace member
-        self.create_search_index_for_member(name, version, member_name)
+        self.create_search_index(name, version, Some(member_path))
             .await
             .context("Failed to create search index for workspace member")?;
 
@@ -196,7 +190,7 @@ impl DocGenerator {
     /// Generate and save dependency information for a crate
     async fn generate_dependencies(&self, name: &str, version: &str) -> Result<()> {
         let source_path = self.storage.source_path(name, version)?;
-        let deps_path = self.storage.dependencies_path(name, version)?;
+        let deps_path = self.storage.dependencies_path(name, version, None)?;
 
         tracing::info!("Generating dependency information for {}-{}", name, version);
 
@@ -228,10 +222,8 @@ impl DocGenerator {
         member_path: &str,
     ) -> Result<()> {
         let source_path = self.storage.source_path(name, version)?;
-        let member_name = WorkspaceHandler::extract_member_name(member_path);
-        let deps_path = self
-            .storage
-            .member_dependencies_path(name, version, member_name)?;
+        let deps_path = self.storage.member_path(name, version, member_path)?
+            .join(DEPENDENCIES_FILE);
 
         tracing::info!(
             "Generating dependency information for workspace member {} in {}-{}",
@@ -241,7 +233,7 @@ impl DocGenerator {
         );
 
         // Path to the member's Cargo.toml
-        let member_cargo_toml = source_path.join(member_path).join("Cargo.toml");
+        let member_cargo_toml = source_path.join(member_path).join(CARGO_TOML);
 
         // Run cargo metadata with --manifest-path for the specific member
         let output = Command::new("cargo")
@@ -280,7 +272,7 @@ impl DocGenerator {
 
     /// Load dependency information from cache
     pub async fn load_dependencies(&self, name: &str, version: &str) -> Result<serde_json::Value> {
-        let deps_path = self.storage.dependencies_path(name, version)?;
+        let deps_path = self.storage.dependencies_path(name, version, None)?;
 
         if !deps_path.exists() {
             bail!("Dependencies not found for {}-{}", name, version);
@@ -296,12 +288,26 @@ impl DocGenerator {
         Ok(deps)
     }
 
-    /// Load documentation from cache
-    pub async fn load_docs(&self, name: &str, version: &str) -> Result<serde_json::Value> {
-        let docs_path = self.storage.docs_path(name, version)?;
+    /// Load documentation from cache for a crate or workspace member
+    pub async fn load_docs(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let docs_path = self.storage.docs_path(name, version, member_name)?;
 
         if !docs_path.exists() {
-            bail!("Documentation not found for {}-{}", name, version);
+            if let Some(member) = member_name {
+                bail!(
+                    "Documentation not found for workspace member {} in {}-{}",
+                    member,
+                    name,
+                    version
+                );
+            } else {
+                bail!("Documentation not found for {}-{}", name, version);
+            }
         }
 
         let json_string = tokio::fs::read_to_string(&docs_path)
@@ -314,40 +320,30 @@ impl DocGenerator {
         Ok(docs)
     }
 
-    /// Load workspace member documentation from cache
-    pub async fn load_member_docs(
+
+    /// Create search index for a crate or workspace member
+    pub async fn create_search_index(
         &self,
         name: &str,
         version: &str,
-        member_name: &str,
-    ) -> Result<serde_json::Value> {
-        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
-
-        if !docs_path.exists() {
-            bail!(
-                "Documentation not found for workspace member {} in {}-{}",
-                member_name,
-                name,
-                version
-            );
-        }
-
-        let json_string = tokio::fs::read_to_string(&docs_path)
-            .await
-            .context("Failed to read member documentation file")?;
-
-        let docs: serde_json::Value = serde_json::from_str(&json_string)
-            .context("Failed to parse member documentation JSON")?;
-
-        Ok(docs)
-    }
-
-    /// Create search index for a crate
-    pub async fn create_search_index(&self, name: &str, version: &str) -> Result<()> {
-        tracing::info!("Creating search index for {}-{}", name, version);
+        member_name: Option<&str>,
+    ) -> Result<()> {
+        let log_prefix = if let Some(member) = member_name {
+            format!("workspace member {member} in")
+        } else {
+            String::new()
+        };
+        
+        tracing::info!(
+            "Creating search index for {}{}-{}",
+            log_prefix,
+            name,
+            version
+        );
 
         // Load the generated documentation
-        let docs_path = self.storage.docs_path(name, version)?;
+        let docs_path = self.storage.docs_path(name, version, member_name)?;
+        
         let docs_json = tokio::fs::read_to_string(&docs_path)
             .await
             .context("Failed to read documentation for indexing")?;
@@ -355,49 +351,15 @@ impl DocGenerator {
         let crate_data: rustdoc_types::Crate = serde_json::from_str(&docs_json)
             .context("Failed to parse documentation JSON for indexing")?;
 
-        // Create the search indexer for this crate
-        let mut indexer = SearchIndexer::new_for_crate(name, version, &self.storage, None)?;
-
-        // Add all crate items to the index
-        indexer.add_crate_items(name, version, &crate_data)?;
-
-        tracing::info!("Successfully created search index for {}-{}", name, version);
-        Ok(())
-    }
-
-    /// Create search index for a workspace member
-    pub async fn create_search_index_for_member(
-        &self,
-        name: &str,
-        version: &str,
-        member_name: &str,
-    ) -> Result<()> {
-        tracing::info!(
-            "Creating search index for workspace member {} in {}-{}",
-            member_name,
-            name,
-            version
-        );
-
-        // Load the generated documentation
-        let docs_path = self.storage.member_docs_path(name, version, member_name)?;
-        let docs_json = tokio::fs::read_to_string(&docs_path)
-            .await
-            .context("Failed to read member documentation for indexing")?;
-
-        let crate_data: rustdoc_types::Crate = serde_json::from_str(&docs_json)
-            .context("Failed to parse member documentation JSON for indexing")?;
-
-        // Create the search indexer for this workspace member
-        let mut indexer =
-            SearchIndexer::new_for_crate(name, version, &self.storage, Some(member_name))?;
+        // Create the search indexer for this crate or workspace member
+        let mut indexer = SearchIndexer::new_for_crate(name, version, &self.storage, member_name)?;
 
         // Add all crate items to the index
         indexer.add_crate_items(name, version, &crate_data)?;
 
         tracing::info!(
-            "Successfully created search index for workspace member {} in {}-{}",
-            member_name,
+            "Successfully created search index for {}{}-{}",
+            log_prefix,
             name,
             version
         );
@@ -427,7 +389,7 @@ mod tests {
         let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
         let docgen = DocGenerator::new(storage);
 
-        let doc_dir = temp_dir.path().join("doc");
+        let doc_dir = temp_dir.path().join(DOC_DIR);
         fs::create_dir_all(&doc_dir).unwrap();
 
         let result = docgen.find_json_doc(&doc_dir, "nonexistent");
@@ -440,7 +402,7 @@ mod tests {
         let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
         let docgen = DocGenerator::new(storage);
 
-        let doc_dir = temp_dir.path().join("doc");
+        let doc_dir = temp_dir.path().join(DOC_DIR);
         fs::create_dir_all(&doc_dir).unwrap();
 
         // Create a JSON file
@@ -457,7 +419,7 @@ mod tests {
         let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
         let docgen = DocGenerator::new(storage);
 
-        let doc_dir = temp_dir.path().join("doc");
+        let doc_dir = temp_dir.path().join(DOC_DIR);
         fs::create_dir_all(&doc_dir).unwrap();
 
         // Create a JSON file with underscores (converted from hyphens)

@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
-use crate::cache::CrateCache;
+use crate::cache::{CrateCache, workspace::WorkspaceHandler};
 
 /// Enhanced node structure for better readability
 #[derive(Debug, Serialize)]
@@ -106,11 +106,12 @@ impl AnalysisTools {
                 // (either the crate root or the member directory)
                 let manifest_path = source_path.join("Cargo.toml");
 
-                // Extract the package name for workspace members
-                let package = params
-                    .member
-                    .as_ref()
-                    .map(|member| member.split('/').next_back().unwrap_or(member).to_string());
+                // Get the actual package name from Cargo.toml for workspace members
+                let package = if params.member.is_some() {
+                    WorkspaceHandler::get_package_name(&manifest_path).ok()
+                } else {
+                    None
+                };
 
                 drop(cache); // Release the lock before the blocking operation
 
