@@ -123,27 +123,12 @@ impl WorkspaceHandler {
 
         Ok(version.to_string())
     }
-
-    /// Extract member name from a member path
-    pub fn extract_member_name(member_path: &str) -> &str {
-        member_path.split('/').next_back().unwrap_or(member_path)
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[test]
-    fn test_extract_member_name() {
-        assert_eq!(WorkspaceHandler::extract_member_name("crates/rmcp"), "rmcp");
-        assert_eq!(WorkspaceHandler::extract_member_name("rmcp"), "rmcp");
-        assert_eq!(
-            WorkspaceHandler::extract_member_name("path/to/deep/crate"),
-            "crate"
-        );
-    }
 
     #[test]
     fn test_get_package_version() -> Result<()> {

@@ -1,6 +1,8 @@
+use crate::cache::constants::*;
 use crate::cache::docgen::DocGenerator;
 use crate::cache::downloader::{CrateDownloader, CrateSource};
-use crate::cache::storage::CacheStorage;
+use crate::cache::member_utils::normalize_member_path;
+use crate::cache::storage::{CacheStorage, MemberInfo};
 use crate::cache::transaction::CacheTransaction;
 use crate::cache::utils::CacheResponse;
 use crate::cache::workspace::WorkspaceHandler;
@@ -37,8 +39,8 @@ impl CrateCache {
         source: Option<&str>,
     ) -> Result<rustdoc_types::Crate> {
         // Check if docs already exist
-        if self.storage.has_docs(name, version) {
-            return self.load_docs(name, version).await;
+        if self.storage.has_docs(name, version, None) {
+            return self.load_docs(name, version, None).await;
         }
 
         // Check if crate is downloaded but docs not generated
@@ -50,7 +52,7 @@ impl CrateCache {
         self.generate_docs(name, version).await?;
 
         // Load and return the generated docs
-        self.load_docs(name, version).await
+        self.load_docs(name, version, None).await
     }
 
     /// Ensure a workspace member's documentation is available
@@ -62,10 +64,8 @@ impl CrateCache {
         member_path: &str,
     ) -> Result<rustdoc_types::Crate> {
         // Check if docs already exist for this member
-        let member_name = WorkspaceHandler::extract_member_name(member_path);
-
-        if self.storage.has_member_docs(name, version, member_name) {
-            return self.load_member_docs(name, version, member_name).await;
+        if self.storage.has_docs(name, version, Some(member_path)) {
+            return self.load_docs(name, version, Some(member_path)).await;
         }
 
         // Check if crate is downloaded
@@ -77,8 +77,32 @@ impl CrateCache {
         self.generate_workspace_member_docs(name, version, member_path)
             .await?;
 
+        // Get package name for the member
+        let member_cargo_toml = self
+            .storage
+            .source_path(name, version)?
+            .join(member_path)
+            .join(CARGO_TOML);
+        let package_name = WorkspaceHandler::get_package_name(&member_cargo_toml)?;
+
+        // Create member info
+        let member_info = MemberInfo {
+            original_path: member_path.to_string(),
+            normalized_path: normalize_member_path(member_path),
+            package_name,
+        };
+
+        // Save unified metadata
+        self.storage.save_metadata_with_source(
+            name,
+            version,
+            source.unwrap_or("unknown"),
+            None,
+            Some(member_info),
+        )?;
+
         // Load and return the generated docs
-        self.load_member_docs(name, version, member_name).await
+        self.load_docs(name, version, Some(member_path)).await
     }
 
     /// Ensure documentation is available for a crate or workspace member
@@ -97,7 +121,7 @@ impl CrateCache {
 
         // Check if crate is already downloaded
         if self.storage.is_cached(name, version) {
-            let source_path = self.storage.source_path(name, version);
+            let source_path = self.storage.source_path(name, version)?;
             let cargo_toml_path = source_path.join("Cargo.toml");
 
             // Check if it's a workspace
@@ -147,27 +171,24 @@ impl CrateCache {
             .await
     }
 
-    /// Load documentation from cache
-    pub async fn load_docs(&self, name: &str, version: &str) -> Result<rustdoc_types::Crate> {
-        let json_value = self.doc_generator.load_docs(name, version).await?;
-        let crate_docs: rustdoc_types::Crate =
-            serde_json::from_value(json_value).context("Failed to parse documentation JSON")?;
-        Ok(crate_docs)
-    }
-
-    /// Load workspace member documentation from cache
-    pub async fn load_member_docs(
+    /// Load documentation from cache for a crate or workspace member
+    pub async fn load_docs(
         &self,
         name: &str,
         version: &str,
-        member_name: &str,
+        member_name: Option<&str>,
     ) -> Result<rustdoc_types::Crate> {
         let json_value = self
             .doc_generator
-            .load_member_docs(name, version, member_name)
+            .load_docs(name, version, member_name)
             .await?;
-        let crate_docs: rustdoc_types::Crate = serde_json::from_value(json_value)
-            .context("Failed to parse member documentation JSON")?;
+        let context_msg = if member_name.is_some() {
+            "Failed to parse member documentation JSON"
+        } else {
+            "Failed to parse documentation JSON"
+        };
+        let crate_docs: rustdoc_types::Crate =
+            serde_json::from_value(json_value).context(context_msg)?;
         Ok(crate_docs)
     }
 
@@ -186,7 +207,7 @@ impl CrateCache {
     /// Get all cached crates with their metadata
     pub async fn list_all_cached_crates(
         &self,
-    ) -> Result<Vec<crate::cache::storage::CrateMetadata>> {
+    ) -> Result<Vec<crate::cache::storage::CacheMetadata>> {
         self.storage.list_cached_crates()
     }
 
@@ -195,8 +216,34 @@ impl CrateCache {
         self.storage.remove_crate(name, version)
     }
 
+    /// Check if docs exist without ensuring they're generated
+    pub fn has_docs(&self, crate_name: &str, version: &str, member: Option<&str>) -> bool {
+        self.storage.has_docs(crate_name, version, member)
+    }
+
+    /// Try to load existing docs without generating
+    pub async fn try_load_docs(
+        &self,
+        crate_name: &str,
+        version: &str,
+        member: Option<&str>,
+    ) -> Result<Option<rustdoc_types::Crate>> {
+        if self.storage.has_docs(crate_name, version, member) {
+            if let Some(member_name) = member {
+                Ok(Some(
+                    self.load_docs(crate_name, version, Some(member_name))
+                        .await?,
+                ))
+            } else {
+                Ok(Some(self.load_docs(crate_name, version, None).await?))
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Get the source path for a crate
-    pub fn get_source_path(&self, name: &str, version: &str) -> PathBuf {
+    pub fn get_source_path(&self, name: &str, version: &str) -> Result<PathBuf> {
         self.storage.source_path(name, version)
     }
 
@@ -212,7 +259,7 @@ impl CrateCache {
             self.download_or_copy_crate(name, version, source).await?;
         }
 
-        Ok(self.storage.source_path(name, version))
+        self.storage.source_path(name, version)
     }
 
     /// Ensure source is available for a crate or workspace member
@@ -678,5 +725,17 @@ impl CrateCache {
             Ok(response) => response.to_json(),
             Err(e) => CacheResponse::error(format!("Failed to cache crate: {e}")).to_json(),
         }
+    }
+
+    /// Create search index for a crate or workspace member (exposed for search module)
+    pub async fn create_search_index(
+        &self,
+        name: &str,
+        version: &str,
+        member_name: Option<&str>,
+    ) -> Result<()> {
+        self.doc_generator
+            .create_search_index(name, version, member_name)
+            .await
     }
 }

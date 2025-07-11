@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use rmcp::schemars;
 use schemars::JsonSchema;
@@ -28,16 +28,16 @@ pub struct GetDependenciesParams {
 
 #[derive(Debug, Clone)]
 pub struct DepsTools {
-    cache: Arc<Mutex<CrateCache>>,
+    cache: Arc<RwLock<CrateCache>>,
 }
 
 impl DepsTools {
-    pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
+    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
     }
 
     pub async fn get_dependencies(&self, params: GetDependenciesParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
 
         // First ensure the crate is cached
         match cache

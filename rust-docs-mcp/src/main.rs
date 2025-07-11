@@ -5,15 +5,9 @@ use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
 
-mod analysis;
-mod cache;
-mod deps;
-mod docs;
 mod doctor;
-mod rustdoc;
-mod service;
 mod update;
-use service::RustDocsService;
+use rust_docs_mcp::RustDocsService;
 
 /// MCP server for querying Rust crate documentation with offline caching
 #[derive(Parser, Debug)]
@@ -180,12 +174,12 @@ async fn install_executable(target_dir: Option<PathBuf>, force: bool) -> Result<
 
 async fn handle_doctor_command(cache_dir: Option<PathBuf>, json_output: bool) -> Result<()> {
     let results = doctor::run_diagnostics(cache_dir).await?;
-    
+
     if json_output {
         doctor::print_results_json(&results)?;
     } else {
         doctor::print_results(&results);
     }
-    
+
     process::exit(doctor::exit_code(&results));
 }

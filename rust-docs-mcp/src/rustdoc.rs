@@ -38,38 +38,44 @@ pub async fn validate_toolchain() -> Result<()> {
 pub async fn test_rustdoc_json() -> Result<()> {
     // First validate the toolchain
     validate_toolchain().await?;
-    
+
     // Create a temporary directory and test file
-    let temp_dir = tempfile::tempdir()
-        .context("Failed to create temporary directory for testing")?;
-    
+    let temp_dir =
+        tempfile::tempdir().context("Failed to create temporary directory for testing")?;
+
     let test_file = temp_dir.path().join("lib.rs");
     std::fs::write(&test_file, "//! Test crate\npub fn test() {}")
         .context("Failed to create test file")?;
-    
+
     let test_file_str = test_file
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Test file path contains invalid UTF-8"))?;
-    
-    tracing::debug!("Testing rustdoc JSON generation with {}", REQUIRED_TOOLCHAIN);
-    
+
+    tracing::debug!(
+        "Testing rustdoc JSON generation with {}",
+        REQUIRED_TOOLCHAIN
+    );
+
     // Try to generate JSON documentation using the pinned toolchain
     let output = Command::new("rustdoc")
-        .args(&[
-            &format!("+{}", REQUIRED_TOOLCHAIN),
-            "-Z", "unstable-options",
-            "--output-format", "json",
-            "--crate-name", "test",
+        .args([
+            &format!("+{REQUIRED_TOOLCHAIN}"),
+            "-Z",
+            "unstable-options",
+            "--output-format",
+            "json",
+            "--crate-name",
+            "test",
             test_file_str,
         ])
         .output()
         .context("Failed to run rustdoc")?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("JSON generation failed: {}", stderr);
     }
-    
+
     tracing::debug!("Successfully tested rustdoc JSON generation");
     Ok(())
 }
@@ -91,24 +97,28 @@ pub async fn get_rustdoc_version() -> Result<String> {
 /// Run cargo rustdoc with JSON output for a crate or specific package
 pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -> Result<()> {
     validate_toolchain().await?;
-    
+
     let log_msg = match package {
-        Some(pkg) => format!("Running cargo rustdoc with JSON output for package {} in {}", pkg, source_path.display()),
-        None => format!("Running cargo rustdoc with JSON output in {}", source_path.display()),
+        Some(pkg) => format!(
+            "Running cargo rustdoc with JSON output for package {} in {}",
+            pkg,
+            source_path.display()
+        ),
+        None => format!(
+            "Running cargo rustdoc with JSON output in {}",
+            source_path.display()
+        ),
     };
     tracing::debug!("{}", log_msg);
-    
-    let mut args = vec![
-        format!("+{}", REQUIRED_TOOLCHAIN),
-        "rustdoc".to_string(),
-    ];
-    
+
+    let mut args = vec![format!("+{}", REQUIRED_TOOLCHAIN), "rustdoc".to_string()];
+
     // Add package-specific arguments if provided
     if let Some(pkg) = package {
         args.push("-p".to_string());
         args.push(pkg.to_string());
     }
-    
+
     // Add remaining arguments
     args.extend_from_slice(&[
         "--all-features".to_string(),
@@ -118,7 +128,7 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
         "-Z".to_string(),
         "unstable-options".to_string(),
     ]);
-    
+
     let output = Command::new("cargo")
         .args(&args)
         .current_dir(source_path)
@@ -132,7 +142,6 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

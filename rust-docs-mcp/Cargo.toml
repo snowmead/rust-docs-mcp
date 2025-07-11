@@ -52,6 +52,7 @@ tracing-subscriber = { version = "0.3", features = [
     "fmt",
 ] }
 tempfile = "3.8"
+tantivy = "0.24.1"
 fs4 = "0.13.1"
 
 [dev-dependencies]

@@ -96,7 +96,7 @@ mod tests {
         let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf()))?;
 
         // Create a fake cached crate with proper structure
-        let source_path = storage.source_path("test-crate", "1.0.0");
+        let source_path = storage.source_path("test-crate", "1.0.0")?;
         storage.ensure_dir(&source_path)?;
         fs::write(source_path.join("file.txt"), "original content")?;
         storage.save_metadata("test-crate", "1.0.0")?;
@@ -109,7 +109,7 @@ mod tests {
         assert!(!storage.is_cached("test-crate", "1.0.0"));
 
         // Add new content
-        let new_source_path = storage.source_path("test-crate", "1.0.0");
+        let new_source_path = storage.source_path("test-crate", "1.0.0")?;
         storage.ensure_dir(&new_source_path)?;
         fs::write(new_source_path.join("file.txt"), "new content")?;
         storage.save_metadata("test-crate", "1.0.0")?;
@@ -131,7 +131,7 @@ mod tests {
         let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf()))?;
 
         // Create a fake cached crate with proper structure
-        let source_path = storage.source_path("test-crate", "1.0.0");
+        let source_path = storage.source_path("test-crate", "1.0.0")?;
         storage.ensure_dir(&source_path)?;
         fs::write(source_path.join("file.txt"), "original content")?;
 
@@ -152,7 +152,7 @@ mod tests {
 
         // Verify original content was restored
         assert!(storage.is_cached("test-crate", "1.0.0"));
-        let restored_source_path = storage.source_path("test-crate", "1.0.0");
+        let restored_source_path = storage.source_path("test-crate", "1.0.0")?;
         let content = fs::read_to_string(restored_source_path.join("file.txt"))?;
         assert_eq!(content, "original content");
 
