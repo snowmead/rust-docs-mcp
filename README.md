@@ -108,6 +108,24 @@ curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.
 
 For detailed installation instructions, package manager support, and more options, see the [Installation Guide](./docs/INSTALLATION.md).
 
+### Troubleshooting
+
+If you encounter issues during installation or runtime, run the doctor command to diagnose common problems:
+
+```bash
+rust-docs-mcp doctor
+```
+
+The doctor command checks:
+- Rust toolchain availability (stable + nightly)
+- Git installation
+- Network connectivity to crates.io and GitHub
+- Cache directory permissions and disk space
+- Rustdoc JSON generation capability
+- Optional dependencies (e.g., codesign on macOS)
+
+For programmatic integration, use `--json` flag to get structured output.
+
 ### MCP Configuration
 
 After installation, add the server to your MCP configuration. See the [Installation Guide](./docs/INSTALLATION.md#claude-code-integration) for detailed instructions.

@@ -3,6 +3,7 @@
 //! This module handles downloading crates from various sources including
 //! crates.io, GitHub repositories, and local filesystem paths.
 
+use crate::cache::constants::*;
 use crate::cache::source::{GitReference, SourceDetector, SourceType};
 use crate::cache::storage::CacheStorage;
 use crate::cache::tools::{
@@ -106,7 +107,7 @@ impl CrateDownloader {
         }
 
         // Extract the crate
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         let tar_gz = File::open(&temp_file_path).context("Failed to open downloaded file")?;
@@ -206,7 +207,7 @@ impl CrateDownloader {
         };
 
         // Verify Cargo.toml exists
-        let cargo_toml = repo_source_path.join("Cargo.toml");
+        let cargo_toml = repo_source_path.join(CARGO_TOML);
         if !cargo_toml.exists() {
             bail!(
                 "No Cargo.toml found at path: {}",
@@ -215,7 +216,7 @@ impl CrateDownloader {
         }
 
         // Copy to cache location
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         copy_directory_contents(&repo_source_path, &source_path)
@@ -229,8 +230,13 @@ impl CrateDownloader {
             Some(path) => format!("{repo_url}#{path}"),
             None => repo_url.to_string(),
         };
-        self.storage
-            .save_metadata_with_source(name, version, "github", Some(&source_info))?;
+        self.storage.save_metadata_with_source(
+            name,
+            version,
+            "github",
+            Some(&source_info),
+            None,
+        )?;
 
         tracing::info!(
             "Successfully downloaded and extracted {}-{} from GitHub",
@@ -264,7 +270,7 @@ impl CrateDownloader {
             bail!("Local path does not exist: {}", source_path_input.display());
         }
 
-        let cargo_toml = source_path_input.join("Cargo.toml");
+        let cargo_toml = source_path_input.join(CARGO_TOML);
         if !cargo_toml.exists() {
             bail!(
                 "No Cargo.toml found at path: {}",
@@ -273,7 +279,7 @@ impl CrateDownloader {
         }
 
         // Copy to cache location
-        let source_path = self.storage.source_path(name, version);
+        let source_path = self.storage.source_path(name, version)?;
         self.storage.ensure_dir(&source_path)?;
 
         copy_directory_contents(source_path_input, &source_path)
@@ -281,7 +287,7 @@ impl CrateDownloader {
 
         // Save metadata with source information
         self.storage
-            .save_metadata_with_source(name, version, "local", Some(local_path))?;
+            .save_metadata_with_source(name, version, "local", Some(local_path), None)?;
 
         tracing::info!("Successfully copied {}-{} from local path", name, version);
         Ok(source_path)

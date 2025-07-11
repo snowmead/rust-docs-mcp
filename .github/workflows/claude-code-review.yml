@@ -27,15 +27,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          # Always checkout the default branch to avoid executing untrusted code
+          # The claude-code-action will handle PR context automatically
 
       - name: Run Claude Code Review
         id: claude-review
         uses: anthropics/claude-code-action@beta
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          # Optional: Specify model (defaults to Claude Sonnet 4, uncomment for Claude Opus 4)
-          # model: "claude-opus-4-20250514"
+          model: "claude-opus-4-20250514"
 
           # Direct prompt for automated review (no @claude mention needed)
           direct_prompt: |

@@ -3,8 +3,9 @@
 //! This module provides functionality to update rust-docs-mcp to the latest version
 //! from GitHub, similar to the install.sh script but built into the application.
 
+use crate::doctor;
 use anyhow::{Context, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Update rust-docs-mcp to the latest version from GitHub
@@ -103,7 +104,11 @@ pub async fn update_executable(
     println!("  rust-docs-mcp                # Start MCP server");
     println!("  rust-docs-mcp install        # Install/update to PATH");
     println!("  rust-docs-mcp update         # Update to latest version");
+    println!("  rust-docs-mcp doctor         # Verify system environment");
     println!("  rust-docs-mcp --help         # Show help");
+
+    // Run doctor command to verify the update
+    doctor::run_and_print_diagnostics().await?;
 
     Ok(())
 }
@@ -155,7 +160,7 @@ fn check_nightly_toolchain() -> Result<()> {
 
 /// Handle macOS-specific binary signing
 #[cfg(target_os = "macos")]
-fn handle_macos_signing(target_dir: &PathBuf) -> Result<()> {
+fn handle_macos_signing(target_dir: &Path) -> Result<()> {
     let binary_path = target_dir.join("rust-docs-mcp");
 
     println!("🔐 Signing binary for macOS...");
@@ -194,11 +199,12 @@ fn handle_macos_signing(_target_dir: &PathBuf) -> Result<()> {
 }
 
 /// Check if target directory is in PATH and provide advice
-fn check_path_and_advise(target_dir: &PathBuf) -> Result<()> {
+fn check_path_and_advise(target_dir: &Path) -> Result<()> {
     use std::env;
 
     if let Ok(path_var) = env::var("PATH") {
-        let paths: Vec<&str> = path_var.split(':').collect();
+        let path_separator = if cfg!(windows) { ';' } else { ':' };
+        let paths: Vec<&str> = path_var.split(path_separator).collect();
         let target_dir_str = target_dir.to_string_lossy();
 
         if !paths.iter().any(|&p| p == target_dir_str) {

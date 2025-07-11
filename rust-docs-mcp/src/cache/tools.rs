@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use rmcp::schemars;
 use schemars::JsonSchema;
@@ -89,18 +89,32 @@ pub struct GetCratesMetadataParams {
     pub queries: Vec<CrateMetadataQuery>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct RemoveCrateParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+    #[schemars(description = "The version of the crate")]
+    pub version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ListCrateVersionsParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheTools {
-    cache: Arc<Mutex<CrateCache>>,
+    cache: Arc<RwLock<CrateCache>>,
 }
 
 impl CacheTools {
-    pub fn new(cache: Arc<Mutex<CrateCache>>) -> Self {
+    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
     }
 
     pub async fn cache_crate_from_cratesio(&self, params: CacheCrateFromCratesIOParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         let source = CrateSource::CratesIO(params);
         cache.cache_crate_with_source(source).await
     }
@@ -121,25 +135,28 @@ impl CacheTools {
             _ => {} // Valid: exactly one is provided
         }
 
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         let source = CrateSource::GitHub(params);
         cache.cache_crate_with_source(source).await
     }
 
     pub async fn cache_crate_from_local(&self, params: CacheCrateFromLocalParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.write().await;
         let source = CrateSource::LocalPath(params);
         cache.cache_crate_with_source(source).await
     }
 
-    pub async fn remove_crate(&self, crate_name: String, version: String) -> String {
-        let cache = self.cache.lock().await;
-        match cache.remove_crate(&crate_name, &version).await {
+    pub async fn remove_crate(&self, params: RemoveCrateParams) -> String {
+        let cache = self.cache.write().await;
+        match cache
+            .remove_crate(&params.crate_name, &params.version)
+            .await
+        {
             Ok(_) => serde_json::json!({
                 "status": "success",
-                "message": format!("Successfully removed {crate_name}-{version}"),
-                "crate": crate_name,
-                "version": version
+                "message": format!("Successfully removed {}-{}", params.crate_name, params.version),
+                "crate": params.crate_name,
+                "version": params.version
             })
             .to_string(),
             Err(e) => CacheResponse::error(format!("Failed to remove crate: {e}")).to_json(),
@@ -147,7 +164,7 @@ impl CacheTools {
     }
 
     pub async fn list_cached_crates(&self) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.read().await;
         match cache.list_all_cached_crates().await {
             Ok(mut crates) => {
                 // Sort by name and version for consistent output
@@ -207,11 +224,11 @@ impl CacheTools {
         }
     }
 
-    pub async fn list_crate_versions(&self, crate_name: String) -> String {
-        let cache = self.cache.lock().await;
-        match cache.get_cached_versions(&crate_name).await {
+    pub async fn list_crate_versions(&self, params: ListCrateVersionsParams) -> String {
+        let cache = self.cache.read().await;
+        match cache.get_cached_versions(&params.crate_name).await {
             Ok(versions) => serde_json::json!({
-                "crate": crate_name,
+                "crate": params.crate_name,
                 "versions": versions
             })
             .to_string(),
@@ -220,7 +237,7 @@ impl CacheTools {
     }
 
     pub async fn get_crates_metadata(&self, params: GetCratesMetadataParams) -> String {
-        let cache = self.cache.lock().await;
+        let cache = self.cache.read().await;
         let mut results = Vec::new();
 
         for query in params.queries {
@@ -229,7 +246,7 @@ impl CacheTools {
 
             // Check if main crate is cached
             let main_crate_result = if cache.storage.is_cached(crate_name, version) {
-                match cache.storage.load_metadata(crate_name, version) {
+                match cache.storage.load_metadata(crate_name, version, None) {
                     Ok(metadata) => {
                         serde_json::json!({
                             "crate_name": crate_name,
@@ -263,16 +280,15 @@ impl CacheTools {
             // Check requested members if any
             if let Some(members) = query.members {
                 for member_path in members {
-                    let member_name = member_path.split('/').next_back().unwrap_or(&member_path);
                     let member_result =
                         if cache
                             .storage
                             .is_member_cached(crate_name, version, &member_path)
                         {
-                            match cache.storage.load_member_metadata(
+                            match cache.storage.load_metadata(
                                 crate_name,
                                 version,
-                                member_name,
+                                Some(&member_path),
                             ) {
                                 Ok(metadata) => {
                                     serde_json::json!({
