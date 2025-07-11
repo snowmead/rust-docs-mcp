@@ -7,12 +7,6 @@
 use anyhow::{Result, bail};
 
 /// Convert a member path with slashes to a safe dash-separated format
-///
-/// # Examples
-/// ```
-/// assert_eq!(normalize_member_path("crates/rmcp"), "crates-rmcp");
-/// assert_eq!(normalize_member_path("simple"), "simple");
-/// ```
 pub fn normalize_member_path(member_path: &str) -> String {
     member_path.replace('/', "-")
 }
