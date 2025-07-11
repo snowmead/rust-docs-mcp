@@ -202,6 +202,7 @@ main() {
       \"mcp__rust-docs__list_crate_items\",
       \"mcp__rust-docs__search_items\",
       \"mcp__rust-docs__search_items_preview\",
+      \"mcp__rust-docs__search_items_fuzzy\",
       \"mcp__rust-docs__get_item_details\",
       \"mcp__rust-docs__get_item_docs\",
       \"mcp__rust-docs__get_item_source\",

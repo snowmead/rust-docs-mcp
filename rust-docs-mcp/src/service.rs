@@ -1,31 +1,31 @@
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 
 use anyhow::Result;
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::{
     ServerHandler,
-    handler::server::{prompt::Arguments, router::tool::ToolRouter, tool::Parameters},
-    model::{
-        GetPromptRequestParam, GetPromptResult, ListPromptsResult, PaginatedRequestParam,
-        PromptMessage, PromptMessageRole, ServerCapabilities, ServerInfo,
-    },
-    service::{RequestContext, RoleServer},
+    handler::server::{router::tool::ToolRouter, tool::Parameters},
+    model::{ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::tools::AnalysisTools;
+use crate::analysis::tools::{AnalysisTools, AnalyzeCrateStructureParams};
 use crate::cache::{
     CrateCache,
     tools::{
         CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools,
+        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams, RemoveCrateParams,
     },
 };
-use crate::deps::tools::DepsTools;
-use crate::docs::tools::DocsTools;
+use crate::deps::tools::{DepsTools, GetDependenciesParams};
+use crate::docs::tools::{
+    DocsTools, GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
+    SearchItemsParams, SearchItemsPreviewParams,
+};
+use crate::search::tools::{SearchItemsFuzzyParams, SearchTools};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct FindImplementationArgs {
@@ -42,23 +42,26 @@ struct FindImplementationArgs {
 
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
+    tool_router: ToolRouter<Self>,
     cache_tools: CacheTools,
     docs_tools: DocsTools,
     deps_tools: DepsTools,
     analysis_tools: AnalysisTools,
-    tool_router: ToolRouter<Self>,
+    search_tools: SearchTools,
 }
 
+#[tool_router]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
-        let cache = Arc::new(Mutex::new(CrateCache::new(cache_dir)?));
+        let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
 
         Ok(Self {
+            tool_router: Self::tool_router(),
             cache_tools: CacheTools::new(cache.clone()),
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
-            analysis_tools: AnalysisTools::new(cache),
-            tool_router: Self::tool_router(),
+            analysis_tools: AnalysisTools::new(cache.clone()),
+            search_tools: SearchTools::new(cache),
         })
     }
 }
@@ -71,7 +74,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_cratesio(
         &self,
-        params: Parameters<CacheCrateFromCratesIOParams>,
+        Parameters(params): Parameters<CacheCrateFromCratesIOParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_cratesio(params.0).await
     }
@@ -81,7 +84,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_github(
         &self,
-        params: Parameters<CacheCrateFromGitHubParams>,
+        Parameters(params): Parameters<CacheCrateFromGitHubParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_github(params.0).await
     }
@@ -91,7 +94,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_local(
         &self,
-        params: Parameters<CacheCrateFromLocalParams>,
+        Parameters(params): Parameters<CacheCrateFromLocalParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_local(params.0).await
     }
@@ -99,11 +102,8 @@ impl RustDocsService {
     #[tool(
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
-    pub async fn remove_crate(
-        &self,
-        params: Parameters<crate::cache::tools::RemoveCrateParams>,
-    ) -> String {
-        self.cache_tools.remove_crate(params.0).await
+    pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
+        self.cache_tools.remove_crate(params).await
     }
 
     #[tool(
@@ -118,9 +118,9 @@ impl RustDocsService {
     )]
     pub async fn list_crate_versions(
         &self,
-        params: Parameters<crate::cache::tools::ListCrateVersionsParams>,
+        Parameters(params): Parameters<ListCrateVersionsParams>,
     ) -> String {
-        self.cache_tools.list_crate_versions(params.0).await
+        self.cache_tools.list_crate_versions(params).await
     }
 
     #[tool(
@@ -128,7 +128,7 @@ impl RustDocsService {
     )]
     pub async fn get_crates_metadata(
         &self,
-        params: Parameters<crate::cache::tools::GetCratesMetadataParams>,
+        Parameters(params): Parameters<GetCratesMetadataParams>,
     ) -> String {
         self.cache_tools.get_crates_metadata(params.0).await
     }
@@ -139,7 +139,7 @@ impl RustDocsService {
     )]
     pub async fn list_crate_items(
         &self,
-        params: Parameters<crate::docs::tools::ListItemsParams>,
+        Parameters(params): Parameters<ListItemsParams>,
     ) -> String {
         self.docs_tools.list_crate_items(params.0).await
     }
@@ -147,11 +147,8 @@ impl RustDocsService {
     #[tool(
         description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn search_items(
-        &self,
-        params: Parameters<crate::docs::tools::SearchItemsParams>,
-    ) -> String {
-        self.docs_tools.search_items(params.0).await
+    pub async fn search_items(&self, Parameters(params): Parameters<SearchItemsParams>) -> String {
+        self.docs_tools.search_items(params).await
     }
 
     #[tool(
@@ -159,7 +156,7 @@ impl RustDocsService {
     )]
     pub async fn search_items_preview(
         &self,
-        params: Parameters<crate::docs::tools::SearchItemsPreviewParams>,
+        Parameters(params): Parameters<SearchItemsPreviewParams>,
     ) -> String {
         self.docs_tools.search_items_preview(params.0).await
     }
@@ -169,7 +166,7 @@ impl RustDocsService {
     )]
     pub async fn get_item_details(
         &self,
-        params: Parameters<crate::docs::tools::GetItemDetailsParams>,
+        Parameters(params): Parameters<GetItemDetailsParams>,
     ) -> String {
         self.docs_tools.get_item_details(params.0).await
     }
@@ -177,11 +174,8 @@ impl RustDocsService {
     #[tool(
         description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn get_item_docs(
-        &self,
-        params: Parameters<crate::docs::tools::GetItemDocsParams>,
-    ) -> String {
-        self.docs_tools.get_item_docs(params.0).await
+    pub async fn get_item_docs(&self, Parameters(params): Parameters<GetItemDocsParams>) -> String {
+        self.docs_tools.get_item_docs(params).await
     }
 
     #[tool(
@@ -189,7 +183,7 @@ impl RustDocsService {
     )]
     pub async fn get_item_source(
         &self,
-        params: Parameters<crate::docs::tools::GetItemSourceParams>,
+        Parameters(params): Parameters<GetItemSourceParams>,
     ) -> String {
         self.docs_tools.get_item_source(params.0).await
     }
@@ -200,7 +194,7 @@ impl RustDocsService {
     )]
     pub async fn get_dependencies(
         &self,
-        params: Parameters<crate::deps::tools::GetDependenciesParams>,
+        Parameters(params): Parameters<GetDependenciesParams>,
     ) -> String {
         self.deps_tools.get_dependencies(params.0).await
     }
@@ -211,36 +205,24 @@ impl RustDocsService {
     )]
     pub async fn structure(
         &self,
-        params: Parameters<crate::analysis::tools::AnalyzeCrateStructureParams>,
+        Parameters(params): Parameters<AnalyzeCrateStructureParams>,
     ) -> String {
         self.analysis_tools.structure(params.0).await
     }
+
+    // Search tools
+    #[tool(
+        description = "Perform fuzzy search on crate items with typo tolerance and semantic similarity. This provides more flexible searching compared to exact pattern matching, allowing you to find items even with typos or partial matches. The search indexes item names, documentation, and metadata using Tantivy full-text search engine. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
+    )]
+    pub async fn search_items_fuzzy(
+        &self,
+        Parameters(params): Parameters<SearchItemsFuzzyParams>,
+    ) -> String {
+        self.search_tools.search_items_fuzzy(params).await
+    }
 }
 
-async fn find_source_code_prompt_template(
-    _service: &RustDocsService,
-    Arguments(args): Arguments<FindImplementationArgs>,
-    _ctx: RequestContext<RoleServer>,
-) -> Result<Vec<PromptMessage>, rmcp::Error> {
-    let mut messages = vec![];
-
-    messages.push(PromptMessage::new_text(
-        PromptMessageRole::User,
-        format!(
-            "Find implementations of '{}' in crate '{}'{}. Ensure to first check the version crate that is in the Cargo.toml file. If it is not there, then ask the user for the version. If it is a github url or local path dependency, then you can use those.",
-            args.query,
-            args.crate_name,
-            args.member_name
-                .as_ref()
-                .map(|m| format!(" (member: {})", m))
-                .unwrap_or_default()
-        ),
-    ));
-
-    Ok(messages)
-}
-
-#[tool_handler(router = self.tool_router)]
+#[tool_handler]
 impl ServerHandler for RustDocsService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -254,7 +236,7 @@ impl ServerHandler for RustDocsService {
                 ..Default::default()
             },
             instructions: Some(
-                "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.".to_string(),
+                "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. For more flexible searching, use search_items_fuzzy which supports typo tolerance and fuzzy matching. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.".to_string(),
             ),
             ..Default::default()
         }

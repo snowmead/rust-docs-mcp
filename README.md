@@ -59,6 +59,7 @@ With these capabilities, agents can build confidently with any Rust crate — ev
 
 - `search_items_preview` - Lightweight search returning only IDs, names, and types
 - `search_items` - Full search with complete documentation (may hit token limits)
+- `search_items_fuzzy` - Fuzzy search with typo tolerance and semantic similarity
 - `list_crate_items` - Browse all items in a crate with optional filtering
 - `get_item_details` - Detailed information about specific items (signatures, fields, etc.)
 - `get_item_docs` - Extract just the documentation string for an item

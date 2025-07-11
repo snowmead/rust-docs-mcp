@@ -9,6 +9,41 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+/// Validate that a crate name is safe for use in file paths
+fn validate_crate_name(name: &str) -> Result<()> {
+    // Check for path traversal attempts
+    if name.contains("..") || name.contains("/") || name.contains("\\") {
+        bail!(
+            "Invalid crate name '{}': contains path separators or traversal sequences",
+            name
+        );
+    }
+
+    // Check for absolute paths
+    if name.starts_with('/')
+        || name.starts_with('\\')
+        || (name.len() > 2 && name.chars().nth(1) == Some(':'))
+    {
+        bail!(
+            "Invalid crate name '{}': appears to be an absolute path",
+            name
+        );
+    }
+
+    // Ensure it's a valid crate name pattern (alphanumeric, underscore, dash)
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        bail!(
+            "Invalid crate name '{}': contains invalid characters. Only alphanumeric, underscore, and dash are allowed",
+            name
+        );
+    }
+
+    Ok(())
+}
+
 /// Represents a crate identifier with name and version
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct CrateIdentifier {
@@ -26,6 +61,9 @@ impl CrateIdentifier {
         if name.is_empty() {
             bail!("Crate name cannot be empty");
         }
+
+        // Validate for path traversal and other security issues
+        validate_crate_name(&name)?;
 
         // Validate version
         if version.is_empty() {
@@ -139,6 +177,38 @@ mod tests {
     }
 
     #[test]
+    fn test_crate_identifier_security_validation() -> Result<()> {
+        // Test path traversal attempts
+        assert!(CrateIdentifier::new("../../../etc/passwd", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate/../../../etc", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("..", "1.0.0").is_err());
+        assert!(CrateIdentifier::new(".", "1.0.0").is_err());
+
+        // Test path separators
+        assert!(CrateIdentifier::new("crate/subcrate", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\\subcrate", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("/absolute/path", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("\\absolute\\path", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("C:\\windows", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("C:/windows", "1.0.0").is_err());
+
+        // Test invalid characters
+        assert!(CrateIdentifier::new("crate$name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate@name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate name", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\nname", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate\0name", "1.0.0").is_err());
+
+        // Test valid names
+        assert!(CrateIdentifier::new("valid_crate", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("valid-crate", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("Valid123", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("a", "1.0.0").is_ok());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_crate_identifier_from_str() -> Result<()> {
         let id: CrateIdentifier = "serde-1.0.0".parse()?;
         assert_eq!(id.name(), "serde");
@@ -165,5 +235,56 @@ mod tests {
         assert!(MemberPath::new("").is_err());
 
         Ok(())
+    }
+
+    #[test]
+    fn test_validate_crate_name() {
+        // Valid names
+        assert!(validate_crate_name("serde").is_ok());
+        assert!(validate_crate_name("tokio-util").is_ok());
+        assert!(validate_crate_name("async_trait").is_ok());
+        assert!(validate_crate_name("log2").is_ok());
+        assert!(validate_crate_name("h3").is_ok());
+
+        // Path traversal attempts
+        assert!(validate_crate_name("../etc/passwd").is_err());
+        assert!(validate_crate_name("crate/../../../etc").is_err());
+        assert!(validate_crate_name("..").is_err());
+        assert!(validate_crate_name("./config").is_err());
+        assert!(validate_crate_name("crate/..").is_err());
+
+        // Path separators
+        assert!(validate_crate_name("some/path").is_err());
+        assert!(validate_crate_name("some\\path").is_err());
+        assert!(validate_crate_name("path/to/crate").is_err());
+
+        // Absolute paths
+        assert!(validate_crate_name("/etc/passwd").is_err());
+        assert!(validate_crate_name("\\Windows\\System32").is_err());
+        assert!(validate_crate_name("C:\\Windows").is_err());
+        assert!(validate_crate_name("C:").is_err());
+
+        // Invalid characters
+        assert!(validate_crate_name("crate@2.0").is_err());
+        assert!(validate_crate_name("my crate").is_err());
+        assert!(validate_crate_name("crate!name").is_err());
+        assert!(validate_crate_name("crate#name").is_err());
+        assert!(validate_crate_name("crate$name").is_err());
+    }
+
+    #[test]
+    fn test_crate_identifier_validation() {
+        // Valid crate identifiers
+        assert!(CrateIdentifier::new("serde", "1.0.0").is_ok());
+        assert!(CrateIdentifier::new("tokio-util", "0.7.0").is_ok());
+
+        // Invalid names should fail
+        assert!(CrateIdentifier::new("../malicious", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("/etc/passwd", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("crate@2.0", "1.0.0").is_err());
+
+        // Empty names/versions should fail
+        assert!(CrateIdentifier::new("", "1.0.0").is_err());
+        assert!(CrateIdentifier::new("serde", "").is_err());
     }
 }
