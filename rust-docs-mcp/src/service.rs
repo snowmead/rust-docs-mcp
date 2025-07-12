@@ -5,9 +5,16 @@ use tokio::sync::RwLock;
 use anyhow::Result;
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::{
-    ServerHandler,
-    handler::server::{router::tool::ToolRouter, tool::Parameters},
-    model::{ServerCapabilities, ServerInfo},
+    Error, RoleServer, ServerHandler,
+    handler::server::{
+        prompt::Arguments, router::prompt::PromptRouter, router::tool::ToolRouter, tool::Parameters,
+    },
+    model::{
+        GetPromptRequestParam, GetPromptResult, ListPromptsResult, PaginatedRequestParam,
+        PromptMessage, PromptMessageRole, ServerCapabilities, ServerInfo,
+    },
+    prompt, prompt_handler, prompt_router,
+    service::RequestContext,
     tool, tool_handler, tool_router,
 };
 use serde::{Deserialize, Serialize};
@@ -43,6 +50,7 @@ struct FindImplementationArgs {
 #[derive(Debug, Clone)]
 pub struct RustDocsService {
     tool_router: ToolRouter<Self>,
+    prompt_router: PromptRouter<Self>,
     cache_tools: CacheTools,
     docs_tools: DocsTools,
     deps_tools: DepsTools,
@@ -51,12 +59,14 @@ pub struct RustDocsService {
 }
 
 #[tool_router]
+#[prompt_router]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
 
         Ok(Self {
             tool_router: Self::tool_router(),
+            prompt_router: Self::prompt_router(),
             cache_tools: CacheTools::new(cache.clone()),
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
@@ -64,10 +74,7 @@ impl RustDocsService {
             search_tools: SearchTools::new(cache),
         })
     }
-}
 
-#[tool_router]
-impl RustDocsService {
     // Cache tools
     #[tool(
         description = "Download and cache a specific crate version from crates.io for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
@@ -76,7 +83,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<CacheCrateFromCratesIOParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_cratesio(params.0).await
+        self.cache_tools.cache_crate_from_cratesio(params).await
     }
 
     #[tool(
@@ -86,7 +93,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<CacheCrateFromGitHubParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_github(params.0).await
+        self.cache_tools.cache_crate_from_github(params).await
     }
 
     #[tool(
@@ -96,7 +103,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<CacheCrateFromLocalParams>,
     ) -> String {
-        self.cache_tools.cache_crate_from_local(params.0).await
+        self.cache_tools.cache_crate_from_local(params).await
     }
 
     #[tool(
@@ -130,7 +137,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<GetCratesMetadataParams>,
     ) -> String {
-        self.cache_tools.get_crates_metadata(params.0).await
+        self.cache_tools.get_crates_metadata(params).await
     }
 
     // Docs tools
@@ -141,7 +148,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<ListItemsParams>,
     ) -> String {
-        self.docs_tools.list_crate_items(params.0).await
+        self.docs_tools.list_crate_items(params).await
     }
 
     #[tool(
@@ -158,7 +165,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<SearchItemsPreviewParams>,
     ) -> String {
-        self.docs_tools.search_items_preview(params.0).await
+        self.docs_tools.search_items_preview(params).await
     }
 
     #[tool(
@@ -168,7 +175,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<GetItemDetailsParams>,
     ) -> String {
-        self.docs_tools.get_item_details(params.0).await
+        self.docs_tools.get_item_details(params).await
     }
 
     #[tool(
@@ -185,7 +192,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<GetItemSourceParams>,
     ) -> String {
-        self.docs_tools.get_item_source(params.0).await
+        self.docs_tools.get_item_source(params).await
     }
 
     // Deps tools
@@ -196,7 +203,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<GetDependenciesParams>,
     ) -> String {
-        self.deps_tools.get_dependencies(params.0).await
+        self.deps_tools.get_dependencies(params).await
     }
 
     // Analysis tools
@@ -207,7 +214,7 @@ impl RustDocsService {
         &self,
         Parameters(params): Parameters<AnalyzeCrateStructureParams>,
     ) -> String {
-        self.analysis_tools.structure(params.0).await
+        self.analysis_tools.structure(params).await
     }
 
     // Search tools
@@ -220,9 +227,52 @@ impl RustDocsService {
     ) -> String {
         self.search_tools.search_items_fuzzy(params).await
     }
+
+    // Prompts
+    #[prompt(
+        name = "find_implementation",
+        description = "Find implementations of specific functionality within a Rust crate"
+    )]
+    pub async fn find_implementation(
+        &self,
+        Arguments(args): Arguments<FindImplementationArgs>,
+        _ctx: RequestContext<RoleServer>,
+    ) -> Result<Vec<PromptMessage>, Error> {
+        let messages = vec![
+            PromptMessage::new_text(
+                PromptMessageRole::User,
+                format!(
+                    "I need to find implementations of {} in the {} crate{}. \
+                    Please help me search for relevant code.",
+                    args.query,
+                    args.crate_name,
+                    args.member_name
+                        .as_ref()
+                        .map(|m| format!(" (member: {})", m))
+                        .unwrap_or_default()
+                ),
+            ),
+            PromptMessage::new_text(
+                PromptMessageRole::Assistant,
+                format!(
+                    "I'll help you find implementations related to '{}' in the {} crate{}. \
+                    Let me search through the crate's documentation and source code.",
+                    args.query,
+                    args.crate_name,
+                    args.member_name
+                        .as_ref()
+                        .map(|m| format!(" (member: {})", m))
+                        .unwrap_or_default()
+                ),
+            ),
+        ];
+
+        Ok(messages)
+    }
 }
 
 #[tool_handler]
+#[prompt_handler]
 impl ServerHandler for RustDocsService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
@@ -239,59 +289,6 @@ impl ServerHandler for RustDocsService {
                 "MCP server for analyzing crate structure and querying documentation, dependencies and source code. Use the structure tool to get a high-level overview of the crate's organization before narrowing down your search. Use list_cached_crates to see what crates are already cached and to easily find the crate or member from a workspace crate instead of guessing. Common workflow: search_items_preview to find items quickly by symbol name, then get_item_details to fetch full documentation. For more flexible searching, use search_items_fuzzy which supports typo tolerance and fuzzy matching. Use get_item_source to view the actual source code of items. Use get_dependencies to understand a crate's dependency graph.".to_string(),
             ),
             ..Default::default()
-        }
-    }
-
-    async fn list_prompts(
-        &self,
-        _request: Option<PaginatedRequestParam>,
-        _context: RequestContext<RoleServer>,
-    ) -> Result<ListPromptsResult, rmcp::Error> {
-        Ok(ListPromptsResult {
-            next_cursor: None,
-            prompts: vec![rmcp::model::Prompt {
-                name: "find_implementation".to_string(),
-                description: Some(
-                    "Find implementations of specific functionality within a Rust crate"
-                        .to_string(),
-                ),
-                arguments: rmcp::handler::server::prompt::arguments_from_schema::<
-                    FindImplementationArgs,
-                >(),
-            }],
-        })
-    }
-
-    async fn get_prompt(
-        &self,
-        request: GetPromptRequestParam,
-        context: RequestContext<RoleServer>,
-    ) -> Result<GetPromptResult, rmcp::Error> {
-        match request.name.as_str() {
-            "find_implementation" => {
-                let args = if let Some(args_obj) = request.arguments {
-                    serde_json::from_value::<FindImplementationArgs>(serde_json::Value::Object(
-                        args_obj,
-                    ))
-                    .map_err(|e| {
-                        rmcp::Error::invalid_params(format!("Invalid arguments: {}", e), None)
-                    })?
-                } else {
-                    return Err(rmcp::Error::invalid_params(
-                        "Missing required arguments",
-                        None,
-                    ));
-                };
-
-                let messages =
-                    find_source_code_prompt_template(self, Arguments(args), context).await?;
-
-                Ok(GetPromptResult {
-                    description: None,
-                    messages,
-                })
-            }
-            _ => Err(rmcp::Error::invalid_params("Prompt not found", None)),
         }
     }
 }
