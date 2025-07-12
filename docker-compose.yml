@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  rust-docs-mcp:
+    image: ghcr.io/snowmead/rust-docs-mcp:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      # Mount cache directory for persistent storage
+      - ./cache:/home/rustdocs/.rust-docs-mcp/cache
+      # Optional: Mount local config if needed
+      # - ./config:/home/rustdocs/.rust-docs-mcp/config
+    environment:
+      - RUST_DOCS_MCP_CACHE_DIR=/home/rustdocs/.rust-docs-mcp/cache
+    restart: unless-stopped
+    # Security settings
+    user: "1000:1000"  # Adjust to match your user ID
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Example: Run with custom cache directory
+  rust-docs-mcp-custom:
+    image: ghcr.io/snowmead/rust-docs-mcp:latest
+    stdin_open: true
+    tty: true
+    volumes:
+      - /host/path/to/cache:/home/rustdocs/.rust-docs-mcp/cache
+    environment:
+      - RUST_DOCS_MCP_CACHE_DIR=/home/rustdocs/.rust-docs-mcp/cache
+    profiles:
+      - custom
+    restart: unless-stopped
+
+  # Example: Development setup with source code mounted
+  rust-docs-mcp-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    stdin_open: true
+    tty: true
+    volumes:
+      - .:/app
+      - cargo-cache:/usr/local/cargo/registry
+      - target-cache:/app/target
+    working_dir: /app
+    environment:
+      - RUST_DOCS_MCP_CACHE_DIR=/app/cache
+    command: cargo run -p rust-docs-mcp
+    profiles:
+      - dev
+
+volumes:
+  cargo-cache:
+    driver: local
+  target-cache:
+    driver: local
