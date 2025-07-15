@@ -2,6 +2,10 @@
 
 # Rustdocs MCP Server
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289DA?logo=discord&logoColor=white)](https://discord.gg/ak2yTNN7)
+[![Build Status](https://github.com/snowmead/rust-docs-mcp/workflows/Rust/badge.svg)](https://github.com/snowmead/rust-docs-mcp/actions)
+
 _Rust is the language of AI_
 
 An MCP (Model Context Protocol) server that provides comprehensive access to Rust crate documentation, source code analysis, dependency trees, and module structure visualization. Built for agents to gain quality insights into Rust projects and build with confidence.
@@ -163,6 +167,7 @@ rust-docs-mcp doctor
 ```
 
 The doctor command checks:
+
 - Rust toolchain availability (stable + nightly)
 - Git installation
 - Network connectivity to crates.io and GitHub
