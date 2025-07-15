@@ -5,10 +5,8 @@ use tokio::sync::RwLock;
 use anyhow::Result;
 use rmcp::schemars::{self, JsonSchema};
 use rmcp::{
-    Error, RoleServer, ServerHandler,
-    handler::server::{
-        prompt::Arguments, router::prompt::PromptRouter, router::tool::ToolRouter, tool::Parameters,
-    },
+    ErrorData, RoleServer, ServerHandler,
+    handler::server::{router::prompt::PromptRouter, router::tool::ToolRouter},
     model::{
         GetPromptRequestParam, GetPromptResult, ListPromptsResult, PaginatedRequestParam,
         PromptMessage, PromptMessageRole, ServerCapabilities, ServerInfo,
@@ -17,6 +15,7 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
+
 use serde::{Deserialize, Serialize};
 
 use crate::analysis::tools::{AnalysisTools, AnalyzeCrateStructureParams};
@@ -35,16 +34,21 @@ use crate::docs::tools::{
 use crate::search::tools::{SearchItemsFuzzyParams, SearchTools};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
-struct FindImplementationArgs {
-    /// The name of the crate to search in
-    pub crate_name: String,
+struct CacheDependenciesArgs {
+    /// Path to the Cargo.toml file or project directory (defaults to current working directory if not specified)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_path: Option<String>,
 
-    /// Optional member name if searching in a workspace member
+    /// Optional workspace member name to focus on specific member dependencies
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member_name: Option<String>,
 
-    /// What you are trying to find (e.g., "async runtime initialization", "error handling")
-    pub query: String,
+    /// Whether to force re-cache dependencies that are already cached
+    #[serde(
+        default,
+        deserialize_with = "crate::util::deserialize_bool_from_anything"
+    )]
+    pub force_update: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +63,6 @@ pub struct RustDocsService {
 }
 
 #[tool_router]
-#[prompt_router]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
@@ -81,7 +84,9 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_cratesio(
         &self,
-        Parameters(params): Parameters<CacheCrateFromCratesIOParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            CacheCrateFromCratesIOParams,
+        >,
     ) -> String {
         self.cache_tools.cache_crate_from_cratesio(params).await
     }
@@ -91,7 +96,9 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_github(
         &self,
-        Parameters(params): Parameters<CacheCrateFromGitHubParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            CacheCrateFromGitHubParams,
+        >,
     ) -> String {
         self.cache_tools.cache_crate_from_github(params).await
     }
@@ -101,7 +108,9 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_local(
         &self,
-        Parameters(params): Parameters<CacheCrateFromLocalParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            CacheCrateFromLocalParams,
+        >,
     ) -> String {
         self.cache_tools.cache_crate_from_local(params).await
     }
@@ -109,7 +118,12 @@ impl RustDocsService {
     #[tool(
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
-    pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
+    pub async fn remove_crate(
+        &self,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            RemoveCrateParams,
+        >,
+    ) -> String {
         self.cache_tools.remove_crate(params).await
     }
 
@@ -125,7 +139,9 @@ impl RustDocsService {
     )]
     pub async fn list_crate_versions(
         &self,
-        Parameters(params): Parameters<ListCrateVersionsParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            ListCrateVersionsParams,
+        >,
     ) -> String {
         self.cache_tools.list_crate_versions(params).await
     }
@@ -135,7 +151,9 @@ impl RustDocsService {
     )]
     pub async fn get_crates_metadata(
         &self,
-        Parameters(params): Parameters<GetCratesMetadataParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            GetCratesMetadataParams,
+        >,
     ) -> String {
         self.cache_tools.get_crates_metadata(params).await
     }
@@ -146,7 +164,9 @@ impl RustDocsService {
     )]
     pub async fn list_crate_items(
         &self,
-        Parameters(params): Parameters<ListItemsParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            ListItemsParams,
+        >,
     ) -> String {
         self.docs_tools.list_crate_items(params).await
     }
@@ -154,7 +174,12 @@ impl RustDocsService {
     #[tool(
         description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn search_items(&self, Parameters(params): Parameters<SearchItemsParams>) -> String {
+    pub async fn search_items(
+        &self,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            SearchItemsParams,
+        >,
+    ) -> String {
         self.docs_tools.search_items(params).await
     }
 
@@ -163,7 +188,9 @@ impl RustDocsService {
     )]
     pub async fn search_items_preview(
         &self,
-        Parameters(params): Parameters<SearchItemsPreviewParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            SearchItemsPreviewParams,
+        >,
     ) -> String {
         self.docs_tools.search_items_preview(params).await
     }
@@ -173,7 +200,9 @@ impl RustDocsService {
     )]
     pub async fn get_item_details(
         &self,
-        Parameters(params): Parameters<GetItemDetailsParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            GetItemDetailsParams,
+        >,
     ) -> String {
         self.docs_tools.get_item_details(params).await
     }
@@ -181,7 +210,12 @@ impl RustDocsService {
     #[tool(
         description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn get_item_docs(&self, Parameters(params): Parameters<GetItemDocsParams>) -> String {
+    pub async fn get_item_docs(
+        &self,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            GetItemDocsParams,
+        >,
+    ) -> String {
         self.docs_tools.get_item_docs(params).await
     }
 
@@ -190,7 +224,9 @@ impl RustDocsService {
     )]
     pub async fn get_item_source(
         &self,
-        Parameters(params): Parameters<GetItemSourceParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            GetItemSourceParams,
+        >,
     ) -> String {
         self.docs_tools.get_item_source(params).await
     }
@@ -201,7 +237,9 @@ impl RustDocsService {
     )]
     pub async fn get_dependencies(
         &self,
-        Parameters(params): Parameters<GetDependenciesParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            GetDependenciesParams,
+        >,
     ) -> String {
         self.deps_tools.get_dependencies(params).await
     }
@@ -212,7 +250,9 @@ impl RustDocsService {
     )]
     pub async fn structure(
         &self,
-        Parameters(params): Parameters<AnalyzeCrateStructureParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            AnalyzeCrateStructureParams,
+        >,
     ) -> String {
         self.analysis_tools.structure(params).await
     }
@@ -223,42 +263,66 @@ impl RustDocsService {
     )]
     pub async fn search_items_fuzzy(
         &self,
-        Parameters(params): Parameters<SearchItemsFuzzyParams>,
+        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
+            SearchItemsFuzzyParams,
+        >,
     ) -> String {
         self.search_tools.search_items_fuzzy(params).await
     }
+}
 
-    // Prompts
+#[prompt_router]
+impl RustDocsService {
     #[prompt(
-        name = "find_implementation",
-        description = "Find implementations of specific functionality within a Rust crate"
+        name = "cache_dependencies",
+        description = "Cache all dependencies from a Rust project's Cargo.toml using rust-docs MCP tools"
     )]
-    pub async fn find_implementation(
+    pub async fn cache_dependencies(
         &self,
-        Arguments(args): Arguments<FindImplementationArgs>,
+        rmcp::handler::server::prompt::Parameters(args): rmcp::handler::server::prompt::Parameters<
+            CacheDependenciesArgs,
+        >,
         _ctx: RequestContext<RoleServer>,
-    ) -> Result<Vec<PromptMessage>, Error> {
+    ) -> Result<Vec<PromptMessage>, ErrorData> {
         let messages = vec![
             PromptMessage::new_text(
                 PromptMessageRole::User,
                 format!(
-                    "I need to find implementations of {} in the {} crate{}. \
-                    Please help me search for relevant code.",
-                    args.query,
-                    args.crate_name,
+                    "I need to cache all dependencies from the Rust project{}{}. \
+                    Please analyze the Cargo.toml file{} and cache every dependency using the rust-docs MCP caching tools.",
+                    args.project_path
+                        .as_ref()
+                        .map(|p| format!(" at {}", p))
+                        .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
-                        .map(|m| format!(" (member: {})", m))
-                        .unwrap_or_default()
+                        .map(|m| format!(" (focusing on member: {})", m))
+                        .unwrap_or_default(),
+                    if args.force_update {
+                        " and force update existing cached dependencies"
+                    } else {
+                        ""
+                    }
                 ),
             ),
             PromptMessage::new_text(
                 PromptMessageRole::Assistant,
                 format!(
-                    "I'll help you find implementations related to '{}' in the {} crate{}. \
-                    Let me search through the crate's documentation and source code.",
-                    args.query,
-                    args.crate_name,
+                    "I'll help you cache all dependencies from the project{}. \
+                    I'll read the Cargo.toml file{}, analyze all dependencies (including dev-dependencies), \
+                    and cache them using the appropriate rust-docs MCP tools.\n\n\
+                    First, I'll aggregate a list of all dependencies with their:\n\
+                    - Source (crates.io, GitHub, or local absolute path)\n\
+                    - Full semver version (e.g., 4.0.0 not 4.0 - if minor/patch are missing, fill with zeros)\n\n\
+                    Then I'll cache them using:\n\
+                    - For crates.io dependencies: cache_crate_from_cratesio\n\
+                    - For Git dependencies: cache_crate_from_github\n\
+                    - For local path dependencies: cache_crate_from_local\n\n\
+                    Let me start by examining the Cargo.toml file to identify all dependencies.",
+                    args.project_path
+                        .as_ref()
+                        .map(|p| format!(" at '{}'", p))
+                        .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
                         .map(|m| format!(" (member: {})", m))
