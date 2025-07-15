@@ -6,6 +6,7 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
+use crate::util::analyze_crate_features;
 
 /// The pinned nightly toolchain version compatible with rustdoc-types 0.53.0
 pub const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-23";
@@ -119,9 +120,28 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
         args.push(pkg.to_string());
     }
 
+    // Analyze crate features to determine if we can use --all-features
+    let feature_analysis = analyze_crate_features(source_path)?;
+    
+    // Add feature flags based on analysis
+    if feature_analysis.has_features && !feature_analysis.has_mutually_exclusive {
+        // Safe to use all features
+        args.push("--all-features".to_string());
+        tracing::debug!(
+            "Using --all-features for {} (no mutually exclusive features detected)",
+            source_path.display()
+        );
+    } else if feature_analysis.has_mutually_exclusive {
+        // Use default features only
+        tracing::debug!(
+            "Using default features only for {} (mutually exclusive features detected: {:?})",
+            source_path.display(),
+            feature_analysis.conflict_groups
+        );
+    }
+    
     // Add remaining arguments
     args.extend_from_slice(&[
-        "--all-features".to_string(),
         "--".to_string(),
         "--output-format".to_string(),
         "json".to_string(),
