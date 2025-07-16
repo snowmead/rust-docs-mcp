@@ -275,7 +275,7 @@ impl RustDocsService {
 impl RustDocsService {
     #[prompt(
         name = "cache_dependencies",
-        description = "Cache all dependencies from a Rust project's Cargo.toml using rust-docs MCP tools"
+        description = "Cache all dependencies from a Rust project's Cargo.toml"
     )]
     pub async fn cache_dependencies(
         &self,
