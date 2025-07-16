@@ -13,6 +13,20 @@ use rust_docs_mcp::cache::tools::{
 };
 use rmcp::handler::server::tool::Parameters;
 use tempfile::TempDir;
+use std::time::Duration;
+
+// Test constants
+const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+const SEMVER_VERSION: &str = "1.0.0";
+const SERDE_VERSION: &str = "v1.0.136";
+const SERDE_GITHUB_URL: &str = "https://github.com/serde-rs/serde";
+const CLIPPY_GITHUB_URL: &str = "https://github.com/rust-lang/rust-clippy";
+const CLIPPY_BRANCH: &str = "master";
+
+// Expected response fragments
+const SUCCESS_RESPONSE: &str = "Successfully cached";
+const ERROR_RESPONSE: &str = "Error";
+const WORKSPACE_RESPONSE: &str = "workspace detected";
 
 /// Helper to create a test service with temporary cache
 fn create_test_service() -> Result<(RustDocsService, TempDir)> {
@@ -28,13 +42,16 @@ async fn test_cache_from_crates_io() -> Result<()> {
     // Cache a small, stable crate from crates.io
     let params = CacheCrateFromCratesIOParams {
         crate_name: "semver".to_string(),
-        version: "1.0.0".to_string(),
+        version: SEMVER_VERSION.to_string(),
         members: None,
         update: None,
     };
     
-    let response = service.cache_crate_from_cratesio(Parameters(params)).await;
-    assert!(response.contains("success"), "Failed to cache from crates.io: {}", response);
+    let response = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params))
+    ).await?;
+    assert!(response.contains(SUCCESS_RESPONSE), "Failed to cache from crates.io: {}", response);
     
     // Verify it's in the cache by listing versions
     let list_params = ListCrateVersionsParams {
@@ -42,7 +59,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
     };
     
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
-    assert!(versions_response.contains("1.0.0"), "Version not found in cache: {}", versions_response);
+    assert!(versions_response.contains(SEMVER_VERSION), "Version not found in cache: {}", versions_response);
     
     Ok(())
 }
@@ -54,15 +71,18 @@ async fn test_cache_from_github() -> Result<()> {
     // Cache a crate from GitHub using a tag
     let params = CacheCrateFromGitHubParams {
         crate_name: "serde-test".to_string(),
-        github_url: "https://github.com/serde-rs/serde".to_string(),
+        github_url: SERDE_GITHUB_URL.to_string(),
         branch: None,
-        tag: Some("v1.0.136".to_string()),
+        tag: Some(SERDE_VERSION.to_string()),
         members: None,
         update: None,
     };
     
-    let response = service.cache_crate_from_github(Parameters(params)).await;
-    assert!(response.contains("success") || response.contains("Success"), 
+    let response = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_github(Parameters(params))
+    ).await?;
+    assert!(response.contains(SUCCESS_RESPONSE), 
         "Failed to cache from GitHub: {}", response);
     
     // Verify cached
@@ -71,7 +91,7 @@ async fn test_cache_from_github() -> Result<()> {
     };
     
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
-    assert!(versions_response.contains("v1.0.136"), "Version not found: {}", versions_response);
+    assert!(versions_response.contains(SERDE_VERSION), "Version not found: {}", versions_response);
     
     Ok(())
 }
@@ -83,16 +103,19 @@ async fn test_cache_from_github_branch() -> Result<()> {
     // Cache from GitHub using a branch
     let params = CacheCrateFromGitHubParams {
         crate_name: "clippy-test".to_string(),
-        github_url: "https://github.com/rust-lang/rust-clippy".to_string(),
-        branch: Some("master".to_string()),
+        github_url: CLIPPY_GITHUB_URL.to_string(),
+        branch: Some(CLIPPY_BRANCH.to_string()),
         tag: None,
         members: None,
         update: None,
     };
     
-    let response = service.cache_crate_from_github(Parameters(params)).await;
+    let response = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_github(Parameters(params))
+    ).await?;
     // Clippy is a workspace, so we might get a workspace detection response
-    assert!(response.contains("success") || response.contains("workspace"), 
+    assert!(response.contains(SUCCESS_RESPONSE) || response.contains(WORKSPACE_RESPONSE), 
         "Unexpected response: {}", response);
     
     Ok(())
@@ -129,7 +152,7 @@ edition = "2021"
     };
     
     let response = service.cache_crate_from_local(Parameters(params)).await;
-    assert!(response.contains("success"), "Failed to cache from local path: {}", response);
+    assert!(response.contains(SUCCESS_RESPONSE), "Failed to cache from local path: {}", response);
     
     // Verify cached
     let list_params = ListCrateVersionsParams {
@@ -189,7 +212,7 @@ serde = {{ workspace = true }}
     let response = service.cache_crate_from_local(Parameters(params)).await;
     
     // Response should indicate workspace detection
-    assert!(response.contains("workspace"), "Response should mention workspace: {}", response);
+    assert!(response.contains(WORKSPACE_RESPONSE), "Response should mention workspace: {}", response);
     assert!(response.contains("crate-a") && response.contains("crate-b"), 
         "Response should list workspace members: {}", response);
     
@@ -208,8 +231,11 @@ async fn test_cache_update() -> Result<()> {
         update: None,
     };
     
-    let response1 = service.cache_crate_from_cratesio(Parameters(params1)).await;
-    assert!(response1.contains("success"), "Initial cache failed: {}", response1);
+    let response1 = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params1))
+    ).await?;
+    assert!(response1.contains(SUCCESS_RESPONSE), "Initial cache failed: {}", response1);
     
     // Cache again with update flag
     let params2 = CacheCrateFromCratesIOParams {
@@ -219,8 +245,11 @@ async fn test_cache_update() -> Result<()> {
         update: Some(true),
     };
     
-    let response2 = service.cache_crate_from_cratesio(Parameters(params2)).await;
-    assert!(response2.contains("success") || response2.contains("updated"), 
+    let response2 = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params2))
+    ).await?;
+    assert!(response2.contains(SUCCESS_RESPONSE), 
         "Update cache failed: {}", response2);
     
     Ok(())
@@ -238,8 +267,11 @@ async fn test_invalid_inputs() -> Result<()> {
         update: None,
     };
     
-    let response = service.cache_crate_from_cratesio(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("Error") || response.contains("failed"), 
+    let response = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params))
+    ).await?;
+    assert!(response.contains(ERROR_RESPONSE), 
         "Expected error response: {}", response);
     
     // Test invalid GitHub URL
@@ -253,7 +285,7 @@ async fn test_invalid_inputs() -> Result<()> {
     };
     
     let response = service.cache_crate_from_github(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("Error") || response.contains("invalid"), 
+    assert!(response.contains(ERROR_RESPONSE), 
         "Expected error response: {}", response);
     
     // Test non-existent local path
@@ -266,7 +298,7 @@ async fn test_invalid_inputs() -> Result<()> {
     };
     
     let response = service.cache_crate_from_local(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("Error") || response.contains("not found"), 
+    assert!(response.contains(ERROR_RESPONSE), 
         "Expected error response: {}", response);
     
     Ok(())
@@ -277,48 +309,95 @@ async fn test_concurrent_caching() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     let service = std::sync::Arc::new(service);
     
-    // Cache multiple crates concurrently
-    let mut handles = vec![];
-    
-    for (name, version) in &[
+    // Define test crates with expected metadata
+    let test_crates = vec![
         ("serde", "1.0.0"),
         ("serde_json", "1.0.0"),
         ("anyhow", "1.0.0"),
-    ] {
+    ];
+    
+    // Cache multiple crates concurrently
+    let mut handles = vec![];
+    
+    for (name, version) in &test_crates {
         let service_clone = service.clone();
         let name = name.to_string();
         let version = version.to_string();
         
         let handle = tokio::spawn(async move {
             let params = CacheCrateFromCratesIOParams {
-                crate_name: name,
-                version,
+                crate_name: name.clone(),
+                version: version.clone(),
                 members: None,
                 update: None,
             };
-            service_clone.cache_crate_from_cratesio(Parameters(params)).await
+            let start = std::time::Instant::now();
+            let result = service_clone.cache_crate_from_cratesio(Parameters(params)).await;
+            let duration = start.elapsed();
+            (name, version, result, duration)
         });
         
         handles.push(handle);
     }
     
-    // Wait for all to complete
-    let mut all_success = true;
+    // Wait for all to complete and verify results
+    let mut results = vec![];
     for handle in handles {
-        let result = handle.await?;
-        if !result.contains("success") {
-            all_success = false;
-            eprintln!("Concurrent cache failed: {}", result);
+        let (name, version, result, duration) = handle.await?;
+        println!("Cached {} {} in {:?}", name, version, duration);
+        
+        if !result.contains(SUCCESS_RESPONSE) {
+            eprintln!("Concurrent cache failed for {}: {}", name, result);
         }
+        results.push((name, version, result));
     }
     
-    assert!(all_success, "Some concurrent caching operations failed");
+    // Verify all operations succeeded
+    for (name, version, result) in &results {
+        assert!(
+            result.contains(SUCCESS_RESPONSE), 
+            "Failed to cache {} {}: {}", 
+            name, version, result
+        );
+    }
     
-    // Verify all are cached
+    // Verify cache consistency - all crates should be present
     let cached_crates_response = service.list_cached_crates().await;
-    assert!(cached_crates_response.contains("serde"), "serde not found in cache");
-    assert!(cached_crates_response.contains("serde_json"), "serde_json not found in cache");
-    assert!(cached_crates_response.contains("anyhow"), "anyhow not found in cache");
+    for (name, version) in &test_crates {
+        assert!(
+            cached_crates_response.contains(name), 
+            "{} not found in cache listing", 
+            name
+        );
+        
+        // Also verify specific version is cached
+        let list_params = ListCrateVersionsParams {
+            crate_name: name.to_string(),
+        };
+        let versions_response = service.list_crate_versions(Parameters(list_params)).await;
+        assert!(
+            versions_response.contains(version),
+            "Version {} of {} not found in cache",
+            version, name
+        );
+    }
+    
+    // Verify no corruption by attempting to use the cached crates
+    // This would fail if the cache was corrupted during concurrent access
+    for (name, version) in &test_crates {
+        let params = CacheCrateFromCratesIOParams {
+            crate_name: name.to_string(),
+            version: version.to_string(),
+            members: None,
+            update: Some(false), // Should not re-download if already cached
+        };
+        let result = service.cache_crate_from_cratesio(Parameters(params)).await;
+        assert!(
+            result.contains("already cached") || result.contains(SUCCESS_RESPONSE),
+            "Cache integrity check failed for {} {}: {}",
+            name, version, result
+        );
+    }
     
     Ok(())
 }
@@ -362,7 +441,7 @@ edition = "2021"
     };
     
     let response1 = service.cache_crate_from_local(Parameters(params1)).await;
-    assert!(response1.contains("workspace") && response1.contains("lib-a") && response1.contains("lib-b"),
+    assert!(response1.contains(WORKSPACE_RESPONSE) && response1.contains("lib-a") && response1.contains("lib-b"),
         "Should detect workspace and list members: {}", response1);
     
     // Now cache with specific members
@@ -375,7 +454,7 @@ edition = "2021"
     };
     
     let response2 = service.cache_crate_from_local(Parameters(params2)).await;
-    assert!(response2.contains("success") || response2.contains("cached"),
+    assert!(response2.contains(SUCCESS_RESPONSE),
         "Should successfully cache workspace members: {}", response2);
     
     Ok(())
