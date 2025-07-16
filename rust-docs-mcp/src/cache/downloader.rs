@@ -10,6 +10,7 @@ use crate::cache::tools::{
     CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
 };
 use crate::cache::utils::copy_directory_contents;
+use crate::util::ensure_crate_isolation;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
@@ -136,6 +137,10 @@ impl CrateDownloader {
         // Clean up temp file
         std::fs::remove_file(&temp_file_path).ok();
 
+        // Ensure the crate is isolated from parent workspace
+        ensure_crate_isolation(&source_path)
+            .context("Failed to ensure crate isolation")?;
+
         // Save metadata for the cached crate
         self.storage.save_metadata(name, version)?;
 
@@ -225,6 +230,10 @@ impl CrateDownloader {
         // Clean up temp directory
         fs::remove_dir_all(&temp_dir).ok();
 
+        // Ensure the crate is isolated from parent workspace
+        ensure_crate_isolation(&source_path)
+            .context("Failed to ensure crate isolation")?;
+
         // Save metadata with source information
         let source_info = match repo_path {
             Some(path) => format!("{repo_url}#{path}"),
@@ -284,6 +293,10 @@ impl CrateDownloader {
 
         copy_directory_contents(source_path_input, &source_path)
             .context("Failed to copy local directory contents")?;
+
+        // Ensure the crate is isolated from parent workspace
+        ensure_crate_isolation(&source_path)
+            .context("Failed to ensure crate isolation")?;
 
         // Save metadata with source information
         self.storage
