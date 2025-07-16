@@ -2,3 +2,51 @@
 members = ["rust-docs-mcp", "cargo-modules"]
 resolver = "2"
 exclude = ["cargo-modules/tests/projects/**"]
+
+# Profile configuration for the workspace
+[profile.dev-opt]
+inherits = "dev"
+opt-level = 2
+debug = true
+
+[profile.dev.package."ra_ap_base_db"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_cfg"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_hir"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_hir_def"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_hir_ty"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_ide"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_ide_db"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_load-cargo"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_paths"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_proc_macro_api"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_project_model"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_syntax"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_text_edit"]
+inherits = "dev-opt"
+
+[profile.dev.package."ra_ap_vfs"]
+inherits = "dev-opt"

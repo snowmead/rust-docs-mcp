@@ -428,7 +428,6 @@ pub fn print_results(results: &[DiagnosticResult]) {
     println!("🔍 rust-docs-mcp doctor\n");
 
     let mut failed_count = 0;
-
     for result in results {
         let icon = if result.success { "✅" } else { "❌" };
         println!("{} {}: {}", icon, result.name, result.message);
