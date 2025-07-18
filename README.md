@@ -111,52 +111,7 @@ rust-docs-mcp
 curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
 ```
 
-### Installation Options
-
-#### One-liner (Recommended)
-
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash
-```
-
-#### Custom install directory
-
-```bash
-curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
-```
-
-#### Building from Source
-
-> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release.
-
-##### Requirements
-
-- Rust nightly toolchain (for Rustdoc JSON generation)
-
-  ```bash
-  rustup toolchain install nightly
-  ```
-
-- Network access to download crates from [crates.io](https://crates.io)
-
-```bash
-git clone https://github.com/snowmead/rust-docs-mcp
-cd rust-docs-mcp/rust-docs-mcp
-cargo build --release
-./target/release/rust-docs-mcp install
-```
-
-### CLI Commands
-
-```bash
-rust-docs-mcp                   # Start MCP server
-rust-docs-mcp install           # Install to ~/.local/bin
-rust-docs-mcp install --force   # Force overwrite existing installation
-rust-docs-mcp doctor            # Verify system environment and dependencies
-rust-docs-mcp doctor --json     # Output diagnostic results in JSON format
-rust-docs-mcp update            # Update to latest version from GitHub
-rust-docs-mcp --help            # Show help
-```
+For detailed installation instructions, package manager support, and more options, see the [Installation Guide](./docs/INSTALLATION.md).
 
 ### Troubleshooting
 
@@ -179,16 +134,7 @@ For programmatic integration, use `--json` flag to get structured output.
 
 ### MCP Configuration
 
-Add the server to your MCP configuration:
-
-```json
-{
-  "rust-docs": {
-    "command": "/path/to/rust-docs-mcp/target/release/rust-docs-mcp",
-    "transport": "stdio"
-  }
-}
-```
+After installation, add the server to your MCP configuration. See the [Installation Guide](./docs/INSTALLATION.md#claude-code-integration) for detailed instructions.
 
 ## Star History
 
