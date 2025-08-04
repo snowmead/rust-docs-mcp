@@ -94,6 +94,20 @@ export RUST_DOCS_MCP_CACHE_DIR=/custom/path/to/cache
 rust-docs-mcp
 ```
 
+### GitHub Authentication
+
+To access private repositories or increase GitHub API rate limits, set the `GITHUB_TOKEN` environment variable:
+
+```bash
+export GITHUB_TOKEN=your_github_personal_access_token
+```
+
+Benefits of authentication:
+
+- **Access private repositories** — Cache and analyze private Rust crates
+- **Higher rate limits** — 5,000 requests/hour (vs 60 unauthenticated)
+- **Avoid rate limit errors** — Essential for caching multiple GitHub-hosted crates
+
 ### Each crate version stores
 
 - Complete source code in `source/` directory

@@ -394,6 +394,16 @@ async fn check_optional_dependencies() -> DiagnosticResult {
         }
     }
 
+    // Check for GITHUB_TOKEN
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(_) => {
+            messages.push("GITHUB_TOKEN set (enables authenticated GitHub access)".to_string());
+        }
+        Err(_) => {
+            messages.push("GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)".to_string());
+        }
+    }
+
     // If no optional dependencies to check, return success
     if messages.is_empty() {
         messages.push("No optional dependencies to check".to_string());

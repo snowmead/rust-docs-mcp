@@ -13,10 +13,11 @@ use crate::cache::utils::copy_directory_contents;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
-use git2::Repository;
+use git2::{FetchOptions, RemoteCallbacks, Cred};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::env;
 use tar::Archive;
 
 /// Unified crate source enum that reuses the parameter structs from tools
@@ -178,9 +179,40 @@ impl CrateDownloader {
             fs::remove_dir_all(&temp_dir).context("Failed to clean temp directory")?;
         }
 
-        // Clone the repository
-        let repo = Repository::clone(repo_url, &temp_dir)
-            .with_context(|| format!("Failed to clone repository: {repo_url}"))?;
+        // Set up GitHub authentication if token is available
+        let github_token = env::var("GITHUB_TOKEN").ok();
+        
+        // Configure git authentication callbacks
+        let mut fetch_options = FetchOptions::new();
+        let mut callbacks = RemoteCallbacks::new();
+        
+        if let Some(token) = &github_token {
+            tracing::debug!("Using GITHUB_TOKEN for authentication");
+            callbacks.credentials(move |_url, username_from_url, _allowed_types| {
+                Cred::userpass_plaintext(
+                    username_from_url.unwrap_or("git"),
+                    token
+                )
+            });
+        } else {
+            tracing::debug!("No GITHUB_TOKEN found, using unauthenticated access");
+        }
+        
+        fetch_options.remote_callbacks(callbacks);
+
+        // Clone the repository with authentication
+        let mut builder = git2::build::RepoBuilder::new();
+        builder.fetch_options(fetch_options);
+        
+        let repo = builder
+            .clone(repo_url, &temp_dir)
+            .with_context(|| {
+                let mut msg = format!("Failed to clone repository: {repo_url}");
+                if github_token.is_none() && repo_url.contains("github.com") {
+                    msg.push_str("\nNote: Set GITHUB_TOKEN environment variable for private repositories and higher rate limits");
+                }
+                msg
+            })?;
 
         // Checkout the specific branch or tag (version contains the branch/tag name)
         // The version parameter here is actually the branch or tag name
