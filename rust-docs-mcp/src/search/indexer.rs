@@ -28,7 +28,7 @@ use rustdoc_types::Crate;
 use std::path::{Path, PathBuf};
 use tantivy::{
     Index, IndexWriter, TantivyDocument, doc,
-    schema::{FAST, Field, STORED, Schema, TEXT},
+    schema::{FAST, Field, STORED, STRING, Schema, TEXT},
 };
 
 /// Tantivy-based search indexer for Rust documentation
@@ -76,14 +76,14 @@ impl SearchIndexer {
         let name_field = schema_builder.add_text_field("name", TEXT | STORED);
         let docs_field = schema_builder.add_text_field("docs", TEXT);
         let path_field = schema_builder.add_text_field("path", TEXT | STORED);
-        let kind_field = schema_builder.add_text_field("kind", TEXT | STORED);
+        let kind_field = schema_builder.add_text_field("kind", STRING | STORED);
 
         // Metadata fields
-        let crate_field = schema_builder.add_text_field("crate", TEXT | STORED);
-        let version_field = schema_builder.add_text_field("version", TEXT | STORED);
+        let crate_field = schema_builder.add_text_field("crate", STRING | STORED);
+        let version_field = schema_builder.add_text_field("version", STRING | STORED);
         let item_id_field = schema_builder.add_u64_field("item_id", FAST | STORED);
         let visibility_field = schema_builder.add_text_field("visibility", TEXT | STORED);
-        let member_field = schema_builder.add_text_field("member", TEXT | STORED);
+        let member_field = schema_builder.add_text_field("member", STRING | STORED);
 
         let schema = schema_builder.build();
 

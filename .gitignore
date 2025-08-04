@@ -1,4 +1,5 @@
 /target
+**/target
 snapshots
 **/*.snap
 cargo-modules/tests/projects/

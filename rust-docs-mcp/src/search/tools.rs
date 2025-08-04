@@ -135,6 +135,7 @@ impl SearchTools {
             limit,
             kind_filter: params.kind_filter.clone(),
             crate_filter: Some(params.crate_name.clone()),
+            member_filter: params.member.clone(),
         };
 
         // Perform search
