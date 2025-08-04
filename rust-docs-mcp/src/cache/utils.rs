@@ -30,8 +30,8 @@ pub fn copy_directory_contents(src: &Path, dest: &Path) -> Result<()> {
         let dest_path = dest.join(&name);
 
         if path.is_dir() {
-            // Skip version control directories
-            if name == ".git" || name == ".svn" || name == ".hg" {
+            // Skip version control directories and target directory
+            if name == ".git" || name == ".svn" || name == ".hg" || name == "target" {
                 continue;
             }
             copy_directory_contents(&path, &dest_path)?;
