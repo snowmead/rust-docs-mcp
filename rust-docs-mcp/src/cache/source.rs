@@ -70,15 +70,28 @@ impl SourceDetector {
 
     /// Parse a URL to determine if it's a GitHub URL
     fn parse_url(url: &str) -> SourceType {
-        // Normalize http to https for GitHub
-        let normalized_url = if url.starts_with("http://github.com/") {
-            url.replace("http://", "https://")
+        // Check for #branch: or #tag: suffix
+        let (base_url, reference) = if let Some(pos) = url.find("#branch:") {
+            let (base, branch_part) = url.split_at(pos);
+            let branch = branch_part.trim_start_matches("#branch:");
+            (base.to_string(), Some(GitReference::Branch(branch.to_string())))
+        } else if let Some(pos) = url.find("#tag:") {
+            let (base, tag_part) = url.split_at(pos);
+            let tag = tag_part.trim_start_matches("#tag:");
+            (base.to_string(), Some(GitReference::Tag(tag.to_string())))
         } else {
-            url.to_string()
+            (url.to_string(), None)
+        };
+
+        // Normalize http to https for GitHub
+        let normalized_url = if base_url.starts_with("http://github.com/") {
+            base_url.replace("http://", "https://")
+        } else {
+            base_url
         };
 
         if let Some(github_part) = normalized_url.strip_prefix("https://github.com/") {
-            Self::parse_github_url(github_part)
+            Self::parse_github_url(github_part, reference)
         } else {
             // Not a GitHub URL, treat as local path
             SourceType::Local {
@@ -88,7 +101,7 @@ impl SourceDetector {
     }
 
     /// Parse GitHub URL components
-    fn parse_github_url(github_part: &str) -> SourceType {
+    fn parse_github_url(github_part: &str, explicit_reference: Option<GitReference>) -> SourceType {
         let parts: Vec<&str> = github_part.split('/').collect();
 
         if parts.len() >= 2 {
@@ -103,14 +116,14 @@ impl SourceDetector {
                 SourceType::GitHub {
                     url: base_url,
                     repo_path: Some(repo_path),
-                    reference: GitReference::Branch(branch.to_string()),
+                    reference: explicit_reference.unwrap_or_else(|| GitReference::Branch(branch.to_string())),
                 }
             } else {
                 // Simple repository URL
                 SourceType::GitHub {
                     url: base_url,
                     repo_path: None,
-                    reference: GitReference::Default,
+                    reference: explicit_reference.unwrap_or(GitReference::Default),
                 }
             }
         } else {
@@ -180,6 +193,38 @@ mod tests {
                 assert!(matches!(reference, GitReference::Branch(b) if b == "master"));
             }
             _ => panic!("Expected GitHub source with path"),
+        }
+    }
+
+    #[test]
+    fn test_detect_github_with_tag() {
+        match SourceDetector::detect(Some("https://github.com/serde-rs/serde#tag:v1.0.136")) {
+            SourceType::GitHub {
+                url,
+                repo_path,
+                reference,
+            } => {
+                assert_eq!(url, "https://github.com/serde-rs/serde");
+                assert_eq!(repo_path, None);
+                assert!(matches!(reference, GitReference::Tag(t) if t == "v1.0.136"));
+            }
+            _ => panic!("Expected GitHub source with tag"),
+        }
+    }
+
+    #[test]
+    fn test_detect_github_with_branch() {
+        match SourceDetector::detect(Some("https://github.com/rust-lang/rust-clippy#branch:master")) {
+            SourceType::GitHub {
+                url,
+                repo_path,
+                reference,
+            } => {
+                assert_eq!(url, "https://github.com/rust-lang/rust-clippy");
+                assert_eq!(repo_path, None);
+                assert!(matches!(reference, GitReference::Branch(b) if b == "master"));
+            }
+            _ => panic!("Expected GitHub source with branch"),
         }
     }
 }

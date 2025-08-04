@@ -14,11 +14,13 @@
 //! - [`types`] - Type definitions for improved type safety
 //! - [`utils`] - Common utilities including response formatting
 //! - [`workspace`] - Workspace crate handling
+//! - [`outputs`] - Output types for cache operations
 
 pub mod constants;
 pub mod docgen;
 pub mod downloader;
 pub mod member_utils;
+pub mod outputs;
 pub mod service;
 pub mod source;
 pub mod storage;

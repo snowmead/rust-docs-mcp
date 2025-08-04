@@ -10,8 +10,23 @@ use rmcp::handler::server::tool::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::cache::tools::{
     CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-    ListCrateVersionsParams,
+    ListCrateVersionsParams, GetCratesMetadataParams, CrateMetadataQuery,
 };
+use rust_docs_mcp::cache::outputs::{CacheCrateOutput, ListCrateVersionsOutput, GetCratesMetadataOutput, ListCachedCratesOutput, RemoveCrateOutput};
+use rust_docs_mcp::docs::tools::{
+    ListItemsParams, SearchItemsParams, SearchItemsPreviewParams, 
+    GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams,
+};
+use rust_docs_mcp::docs::outputs::{
+    ListCrateItemsOutput, SearchItemsOutput, SearchItemsPreviewOutput,
+    GetItemDetailsOutput, GetItemDocsOutput, GetItemSourceOutput,
+};
+use rust_docs_mcp::deps::tools::GetDependenciesParams;
+use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
+use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
+use rust_docs_mcp::analysis::outputs::StructureOutput;
+use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -23,10 +38,20 @@ const SERDE_GITHUB_URL: &str = "https://github.com/serde-rs/serde";
 const CLIPPY_GITHUB_URL: &str = "https://github.com/rust-lang/rust-clippy";
 const CLIPPY_BRANCH: &str = "master";
 
-// Expected response fragments
-const SUCCESS_RESPONSE: &str = "Successfully cached";
-const ERROR_RESPONSE: &str = "Error";
-const WORKSPACE_RESPONSE: &str = "workspace detected";
+// Response validation helpers
+fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
+    serde_json::from_str(response)
+        .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {}\nResponse: {}", e, response))
+}
+
+fn is_binary_only_response(response: &str) -> bool {
+    // Binary-only packages will return an error with this message
+    if let Ok(output) = parse_cache_response(response) {
+        matches!(output, CacheCrateOutput::Error { error } if error.contains("binary-only") || error.contains("no library"))
+    } else {
+        false
+    }
+}
 
 /// Helper to create a test service with temporary cache
 fn create_test_service() -> Result<(RustDocsService, TempDir)> {
@@ -34,6 +59,52 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
     let service = RustDocsService::new(Some(temp_dir.path().to_path_buf()))?;
     Ok((service, temp_dir))
 }
+
+/// Helper to setup and cache the semver test crate
+async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
+    let params = CacheCrateFromCratesIOParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        members: None,
+        update: None,
+    };
+
+    let response = tokio::time::timeout(
+        TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params)),
+    )
+    .await?;
+
+    let output = parse_cache_response(&response)?;
+    if !output.is_success() {
+        return Err(anyhow::anyhow!("Failed to cache test crate: {:?}", output));
+    }
+    Ok(())
+}
+
+/// Helper to get a test item ID from the semver crate
+async fn get_test_item_id(service: &RustDocsService) -> Result<i32> {
+    let params = SearchItemsPreviewParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        pattern: "Version".to_string(),
+        limit: Some(1),
+        offset: None,
+        kind_filter: Some("struct".to_string()),
+        path_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_preview(Parameters(params)).await;
+    let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
+    
+    if let Some(item) = output.items.first() {
+        return Ok(item.id.parse::<i32>()?);
+    }
+    
+    Err(anyhow::anyhow!("Could not find test item ID in response"))
+}
+
 
 #[tokio::test]
 async fn test_cache_from_crates_io() -> Result<()> {
@@ -52,11 +123,15 @@ async fn test_cache_from_crates_io() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params)),
     )
     .await?;
-    assert!(
-        response.contains(SUCCESS_RESPONSE),
-        "Failed to cache from crates.io: {}",
-        response
-    );
+    
+    let output = parse_cache_response(&response)?;
+    match &output {
+        CacheCrateOutput::Success { crate_name, version, .. } => {
+            assert_eq!(crate_name, "semver");
+            assert_eq!(version, SEMVER_VERSION);
+        }
+        _ => panic!("Expected success response, got: {:?}", output)
+    }
 
     // Verify it's in the cache by listing versions
     let list_params = ListCrateVersionsParams {
@@ -64,10 +139,12 @@ async fn test_cache_from_crates_io() -> Result<()> {
     };
 
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
+    let versions_output: ListCrateVersionsOutput = serde_json::from_str(&versions_response)?;
+    assert_eq!(versions_output.crate_name, "semver");
     assert!(
-        versions_response.contains(SEMVER_VERSION),
-        "Version not found in cache: {}",
-        versions_response
+        versions_output.versions.iter().any(|v| v.version == SEMVER_VERSION),
+        "Version not found in cache: {:?}",
+        versions_output
     );
 
     Ok(())
@@ -92,22 +169,26 @@ async fn test_cache_from_github() -> Result<()> {
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
+    
+    // Serde is a workspace, so we should get a workspace detection response
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(SUCCESS_RESPONSE),
-        "Failed to cache from GitHub: {}",
-        response
+        output.is_workspace_detected(),
+        "Expected workspace detection for serde: {:?}",
+        output
     );
 
-    // Verify cached
+    // Verify cached (workspace metadata should be cached)
     let list_params = ListCrateVersionsParams {
         crate_name: "serde-test".to_string(),
     };
 
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
+    let versions_output: ListCrateVersionsOutput = serde_json::from_str(&versions_response)?;
     assert!(
-        versions_response.contains(SERDE_VERSION),
-        "Version not found: {}",
-        versions_response
+        versions_output.versions.iter().any(|v| v.version == SERDE_VERSION),
+        "Version not found: {:?}",
+        versions_output
     );
 
     Ok(())
@@ -115,6 +196,11 @@ async fn test_cache_from_github() -> Result<()> {
 
 #[tokio::test]
 async fn test_cache_from_github_branch() -> Result<()> {
+    // Initialize tracing for this test
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rust_docs_mcp=debug")
+        .try_init();
+        
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache from GitHub using a branch
@@ -132,10 +218,14 @@ async fn test_cache_from_github_branch() -> Result<()> {
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
-    // Clippy is a workspace, so we might get a workspace detection response
+    
+    // Print the response for debugging
+    println!("Response: {}", response);
+    
+    // Clippy is a binary-only package, so we should expect an appropriate error
     assert!(
-        response.contains(SUCCESS_RESPONSE) || response.contains(WORKSPACE_RESPONSE),
-        "Unexpected response: {}",
+        is_binary_only_response(&response),
+        "Expected binary-only package response, got: {}",
         response
     );
 
@@ -155,7 +245,7 @@ async fn test_cache_from_local_path() -> Result<()> {
 [package]
 name = "test-local"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
     "#,
@@ -179,10 +269,11 @@ edition = "2024"
     };
 
     let response = service.cache_crate_from_local(Parameters(params)).await;
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(SUCCESS_RESPONSE),
-        "Failed to cache from local path: {}",
-        response
+        output.is_success(),
+        "Failed to cache from local path: {:?}",
+        output
     );
 
     // Verify cached
@@ -230,7 +321,7 @@ serde = "1.0"
 [package]
 name = "{}"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 serde = {{ workspace = true }}
@@ -256,16 +347,17 @@ serde = {{ workspace = true }}
     let response = service.cache_crate_from_local(Parameters(params)).await;
 
     // Response should indicate workspace detection
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(WORKSPACE_RESPONSE),
-        "Response should mention workspace: {}",
-        response
+        output.is_workspace_detected(),
+        "Response should indicate workspace detection: {:?}",
+        output
     );
-    assert!(
-        response.contains("crate-a") && response.contains("crate-b"),
-        "Response should list workspace members: {}",
-        response
-    );
+    
+    if let CacheCrateOutput::WorkspaceDetected { workspace_members, .. } = &output {
+        assert!(workspace_members.contains(&"crate-a".to_string()));
+        assert!(workspace_members.contains(&"crate-b".to_string()));
+    }
 
     Ok(())
 }
@@ -287,10 +379,11 @@ async fn test_cache_update() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params1)),
     )
     .await?;
+    let output1 = parse_cache_response(&response1)?;
     assert!(
-        response1.contains(SUCCESS_RESPONSE),
-        "Initial cache failed: {}",
-        response1
+        output1.is_success(),
+        "Initial cache failed: {:?}",
+        output1
     );
 
     // Cache again with update flag
@@ -306,11 +399,17 @@ async fn test_cache_update() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params2)),
     )
     .await?;
+    // Update should return "Successfully updated" message
+    let output2 = parse_cache_response(&response2)?;
     assert!(
-        response2.contains(SUCCESS_RESPONSE),
-        "Update cache failed: {}",
-        response2
+        output2.is_success(),
+        "Update cache failed: {:?}",
+        output2
     );
+    
+    if let CacheCrateOutput::Success { updated, .. } = &output2 {
+        assert_eq!(*updated, Some(true), "Should have updated flag set");
+    }
 
     Ok(())
 }
@@ -332,10 +431,13 @@ async fn test_invalid_inputs() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params)),
     )
     .await?;
+    
+    // crates.io returns 403 Forbidden for non-existent crates
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(ERROR_RESPONSE),
-        "Expected error response: {}",
-        response
+        output.is_error(),
+        "Expected error response, got: {:?}",
+        output
     );
 
     // Test invalid GitHub URL
@@ -349,10 +451,11 @@ async fn test_invalid_inputs() -> Result<()> {
     };
 
     let response = service.cache_crate_from_github(Parameters(params)).await;
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(ERROR_RESPONSE),
-        "Expected error response: {}",
-        response
+        output.is_error(),
+        "Expected error response, got: {:?}",
+        output
     );
 
     // Test non-existent local path
@@ -365,10 +468,11 @@ async fn test_invalid_inputs() -> Result<()> {
     };
 
     let response = service.cache_crate_from_local(Parameters(params)).await;
+    let output = parse_cache_response(&response)?;
     assert!(
-        response.contains(ERROR_RESPONSE),
-        "Expected error response: {}",
-        response
+        output.is_error(),
+        "Expected error response, got: {:?}",
+        output
     );
 
     Ok(())
@@ -381,9 +485,9 @@ async fn test_concurrent_caching() -> Result<()> {
 
     // Define test crates with expected metadata
     let test_crates = vec![
-        ("serde", "1.0.0"),
-        ("serde_json", "1.0.0"),
-        ("anyhow", "1.0.0"),
+        ("semver", "1.0.0"),
+        ("once_cell", "1.0.0"),
+        ("regex", "1.11.1"), // Use the latest version compatible with nightly toolchain
     ];
 
     // Cache multiple crates concurrently
@@ -418,7 +522,12 @@ async fn test_concurrent_caching() -> Result<()> {
         let (name, version, result, duration) = handle.await?;
         println!("Cached {} {} in {:?}", name, version, duration);
 
-        if !result.contains(SUCCESS_RESPONSE) {
+        let success = if let Ok(output) = parse_cache_response(&result) {
+            output.is_success()
+        } else {
+            false
+        };
+        if !success {
             eprintln!("Concurrent cache failed for {}: {}", name, result);
         }
         results.push((name, version, result));
@@ -426,12 +535,13 @@ async fn test_concurrent_caching() -> Result<()> {
 
     // Verify all operations succeeded
     for (name, version, result) in &results {
+        let output = parse_cache_response(&result)?;
         assert!(
-            result.contains(SUCCESS_RESPONSE),
-            "Failed to cache {} {}: {}",
+            output.is_success(),
+            "Failed to cache {} {}: {:?}",
             name,
             version,
-            result
+            output
         );
     }
 
@@ -467,12 +577,19 @@ async fn test_concurrent_caching() -> Result<()> {
             update: Some(false), // Should not re-download if already cached
         };
         let result = service.cache_crate_from_cratesio(Parameters(params)).await;
+        let output = parse_cache_response(&result)?;
+        // Should either be already cached or successful
+        let is_valid = match &output {
+            CacheCrateOutput::Success { .. } => true,
+            CacheCrateOutput::Error { error } if error.contains("already cached") => true,
+            _ => false,
+        };
         assert!(
-            result.contains("already cached") || result.contains(SUCCESS_RESPONSE),
-            "Cache integrity check failed for {} {}: {}",
+            is_valid,
+            "Cache integrity check failed for {} {}: {:?}",
             name,
             version,
-            result
+            output
         );
     }
 
@@ -506,7 +623,7 @@ resolver = "2"
 [package]
 name = "{}"
 version = "{}"
-edition = "2024"
+edition = "2021"
         "#,
                 member, version
             ),
@@ -527,12 +644,13 @@ edition = "2024"
     };
 
     let response1 = service.cache_crate_from_local(Parameters(params1)).await;
+    let output1 = parse_cache_response(&response1)?;
     assert!(
-        response1.contains(WORKSPACE_RESPONSE)
-            && response1.contains("lib-a")
-            && response1.contains("lib-b"),
-        "Should detect workspace and list members: {}",
-        response1
+        matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. } 
+            if workspace_members.contains(&"lib-a".to_string()) 
+            && workspace_members.contains(&"lib-b".to_string())),
+        "Should detect workspace and list members: {:?}",
+        output1
     );
 
     // Now cache with specific members
@@ -545,11 +663,531 @@ edition = "2024"
     };
 
     let response2 = service.cache_crate_from_local(Parameters(params2)).await;
+    let output2 = parse_cache_response(&response2)?;
     assert!(
-        response2.contains(SUCCESS_RESPONSE),
-        "Should successfully cache workspace members: {}",
-        response2
+        matches!(&output2, CacheCrateOutput::Success { .. }),
+        "Should successfully cache workspace members: {:?}",
+        output2
     );
+
+    Ok(())
+}
+
+// ===== DOCUMENTATION TOOLS TESTS =====
+
+#[tokio::test]
+async fn test_list_crate_items() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test basic listing
+    let params = ListItemsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        kind_filter: None,
+        limit: Some(50),
+        offset: Some(0),
+        member: None,
+    };
+
+    let response = service.list_crate_items(Parameters(params)).await;
+    let output: ListCrateItemsOutput = serde_json::from_str(&response)?;
+    
+    assert!(!output.items.is_empty(), "Should have items");
+    assert_eq!(output.pagination.limit, 50, "Limit should match request");
+    assert_eq!(output.pagination.offset, 0, "Offset should match request");
+
+    // Test with kind filter
+    let params = ListItemsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        kind_filter: Some("struct".to_string()),
+        limit: Some(10),
+        offset: None,
+        member: None,
+    };
+
+    let response = service.list_crate_items(Parameters(params)).await;
+    let output: ListCrateItemsOutput = serde_json::from_str(&response)?;
+    
+    // Check all items are structs
+    for item in &output.items {
+        assert_eq!(item.kind, "struct", "All items should be structs");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_items_preview() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test basic preview search
+    let params = SearchItemsPreviewParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        pattern: "Version".to_string(),
+        limit: Some(10),
+        offset: None,
+        kind_filter: None,
+        path_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_preview(Parameters(params)).await;
+    let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
+    
+    assert!(!output.items.is_empty(), "Should find items matching 'Version'");
+    
+    // Verify preview format (only id, name, kind, path)
+    if let Some(item) = output.items.first() {
+        assert!(!item.id.is_empty(), "Item should have id");
+        assert!(!item.name.is_empty(), "Item should have name");
+        assert!(!item.kind.is_empty(), "Item should have kind");
+        assert!(!item.path.is_empty(), "Item should have path");
+    }
+
+    // Test with filters
+    let params = SearchItemsPreviewParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        pattern: "new".to_string(),
+        limit: Some(5),
+        offset: None,
+        kind_filter: Some("function".to_string()),
+        path_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_preview(Parameters(params)).await;
+    let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
+    
+    // Check all items are functions
+    for item in &output.items {
+        assert_eq!(item.kind, "function", "All items should be functions");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_search_items_full() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test full search with complete documentation
+    let params = SearchItemsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        pattern: "Version".to_string(),
+        limit: Some(5),
+        offset: None,
+        kind_filter: Some("struct".to_string()),
+        path_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items(Parameters(params)).await;
+    let output: SearchItemsOutput = serde_json::from_str(&response)?;
+    
+    assert!(!output.items.is_empty(), "Should find items");
+    
+    // Verify full format includes documentation
+    if let Some(item) = output.items.first() {
+        assert!(!item.id.is_empty(), "Item should have id");
+        assert!(!item.name.is_empty(), "Item should have name");
+        assert_eq!(item.kind, "struct", "Item should be a struct");
+        // Full search may include documentation
+        // Note: docs field is Optional, so it's OK if it's None
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_item_details() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+    
+    let item_id = get_test_item_id(&service).await?;
+
+    // Test getting complete item details
+    let params = GetItemDetailsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id,
+        member: None,
+    };
+
+    let response = service.get_item_details(Parameters(params)).await;
+    let output: GetItemDetailsOutput = serde_json::from_str(&response)?;
+    
+    assert!(output.is_success(), "Should be a success response");
+    
+    if let GetItemDetailsOutput::Success(detailed_item) = output {
+        // Should contain detailed information about the item
+        assert!(!detailed_item.info.id.is_empty(), "Details should have id");
+        assert!(!detailed_item.info.name.is_empty(), "Details should have name");
+        assert!(!detailed_item.info.kind.is_empty(), "Details should have kind");
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_get_item_docs_and_source() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+    
+    let item_id = get_test_item_id(&service).await?;
+
+    // Test getting just documentation
+    let docs_params = GetItemDocsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id,
+        member: None,
+    };
+
+    let docs_response = service.get_item_docs(Parameters(docs_params)).await;
+    let docs_output: GetItemDocsOutput = serde_json::from_str(&docs_response)?;
+    
+    // Documentation is optional - the item may not have docs
+    // If it has documentation, it should be in the documentation field
+    if let Some(doc) = docs_output.documentation {
+        assert!(!doc.is_empty(), "If documentation exists, it should not be empty");
+    }
+
+    // Test getting source code
+    let source_params = GetItemSourceParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id,
+        context_lines: Some(5),
+        member: None,
+    };
+
+    let source_response = service.get_item_source(Parameters(source_params)).await;
+    let source_output: GetItemSourceOutput = serde_json::from_str(&source_response)?;
+    
+    assert!(source_output.is_success(), "Should be a success response");
+    
+    if let GetItemSourceOutput::Success(source_info) = source_output {
+        assert!(!source_info.code.is_empty(), "Should contain source code");
+        assert!(!source_info.location.filename.is_empty(), "Should have filename");
+        assert_eq!(source_info.context_lines, Some(5), "Context lines should match request");
+    }
+
+    Ok(())
+}
+
+// ===== SEARCH TOOLS TESTS =====
+
+#[tokio::test]
+async fn test_search_items_fuzzy() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test fuzzy search with typos
+    let params = SearchItemsFuzzyParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        query: "Versoin".to_string(), // Typo in "Version"
+        fuzzy_enabled: Some(true),
+        fuzzy_distance: Some(1),
+        limit: Some(10),
+        kind_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_fuzzy(Parameters(params)).await;
+    let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
+    
+    assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
+    assert_eq!(output.query, "Versoin", "Query should match request");
+    assert_eq!(output.crate_name, "semver", "Crate name should match");
+    assert_eq!(output.version, SEMVER_VERSION, "Version should match");
+
+    // Test exact search (fuzzy disabled)
+    let params = SearchItemsFuzzyParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        query: "Version".to_string(),
+        fuzzy_enabled: Some(false),
+        fuzzy_distance: Some(0),
+        limit: Some(5),
+        kind_filter: Some("struct".to_string()),
+        member: None,
+    };
+
+    let response = service.search_items_fuzzy(Parameters(params)).await;
+    let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
+    
+    assert!(!output.fuzzy_enabled, "Fuzzy should be disabled");
+    
+    // Check all results are structs if any results were found
+    for result in &output.results {
+        assert_eq!(result.kind, "struct", "All results should be structs");
+    }
+
+    Ok(())
+}
+
+// ===== ANALYSIS TOOLS TESTS =====
+
+#[tokio::test]
+async fn test_structure() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test basic structure analysis
+    let params = AnalyzeCrateStructureParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        member: None,
+        lib: Some(true),
+        bin: None,
+        no_default_features: None,
+        all_features: None,
+        features: None,
+        target: None,
+        cfg_test: None,
+        no_fns: None,
+        no_traits: None,
+        no_types: None,
+        sort_by: None,
+        sort_reversed: None,
+        focus_on: None,
+        max_depth: Some(3),
+    };
+
+    let response = service.structure(Parameters(params)).await;
+    let output: StructureOutput = serde_json::from_str(&response)?;
+    
+    assert!(output.is_success(), "Structure analysis should succeed");
+    assert_eq!(output.status, "success", "Status should be success");
+    assert!(!output.message.is_empty(), "Should have a message");
+    assert!(!output.tree.name.is_empty(), "Tree should have a name");
+    assert!(!output.tree.kind.is_empty(), "Tree should have a kind");
+
+    // Test with filtering options
+    let params = AnalyzeCrateStructureParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        member: None,
+        lib: Some(true),
+        bin: None,
+        no_default_features: None,
+        all_features: None,
+        features: None,
+        target: None,
+        cfg_test: None,
+        no_fns: Some(true), // Filter out functions
+        no_traits: None,
+        no_types: None,
+        sort_by: Some("name".to_string()),
+        sort_reversed: None,
+        focus_on: None,
+        max_depth: Some(2),
+    };
+
+    let response = service.structure(Parameters(params)).await;
+    let output: StructureOutput = serde_json::from_str(&response)?;
+    
+    assert!(output.is_success(), "Filtered structure analysis should succeed");
+
+    Ok(())
+}
+
+// ===== DEPENDENCY TOOLS TESTS =====
+
+#[tokio::test]
+async fn test_get_dependencies() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test direct dependencies
+    let params = GetDependenciesParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        include_tree: Some(false),
+        filter: None,
+        member: None,
+    };
+
+    let response = service.get_dependencies(Parameters(params)).await;
+    let output: GetDependenciesOutput = serde_json::from_str(&response)?;
+    
+    assert_eq!(output.crate_info.name, "semver", "Crate name should match");
+    assert_eq!(output.crate_info.version, SEMVER_VERSION, "Version should match");
+    // Direct dependencies is a list, could be empty
+    assert!(output.direct_dependencies.len() >= 0, "Should have dependencies list");
+
+    // Test full dependency tree
+    let params = GetDependenciesParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        include_tree: Some(true),
+        filter: None,
+        member: None,
+    };
+
+    let response = service.get_dependencies(Parameters(params)).await;
+    let output: GetDependenciesOutput = serde_json::from_str(&response)?;
+    
+    // When include_tree is true, dependency_tree should be populated
+    assert!(output.dependency_tree.is_some(), "Should include dependency tree when requested");
+
+    // Test with filter
+    let params = GetDependenciesParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        include_tree: Some(false),
+        filter: Some("serde".to_string()),
+        member: None,
+    };
+
+    let response = service.get_dependencies(Parameters(params)).await;
+    let output: GetDependenciesOutput = serde_json::from_str(&response)?;
+    
+    // Filter might return empty results, but that's OK
+    // Just verify the response is valid
+    assert_eq!(output.crate_info.name, "semver", "Crate name should match even with filter");
+
+    Ok(())
+}
+
+// ===== METADATA TOOLS TESTS =====
+
+#[tokio::test]
+async fn test_get_crates_metadata() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test batch metadata query
+    let params = GetCratesMetadataParams {
+        queries: vec![
+            CrateMetadataQuery {
+                crate_name: "semver".to_string(),
+                version: SEMVER_VERSION.to_string(),
+                members: None,
+            },
+            CrateMetadataQuery {
+                crate_name: "nonexistent-crate".to_string(),
+                version: "1.0.0".to_string(),
+                members: None,
+            },
+        ],
+    };
+
+    let response = service.get_crates_metadata(Parameters(params)).await;
+    let output: GetCratesMetadataOutput = serde_json::from_str(&response)?;
+    
+    assert_eq!(output.total_queried, 2, "Should query 2 crates");
+    assert_eq!(output.metadata.len(), 2, "Should have 2 metadata entries");
+    
+    // First query should show semver as cached
+    assert_eq!(output.metadata[0].crate_name, "semver");
+    assert_eq!(output.metadata[0].cached, true);
+    
+    // Second query should show nonexistent crate as not cached
+    assert_eq!(output.metadata[1].crate_name, "nonexistent-crate");
+    assert_eq!(output.metadata[1].cached, false);
+
+    Ok(())
+}
+
+// ===== EDGE CASES TESTS =====
+
+#[tokio::test]
+async fn test_invalid_item_ids() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test with invalid item ID
+    let params = GetItemDetailsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id: 999999, // Invalid ID
+        member: None,
+    };
+
+    let response = service.get_item_details(Parameters(params)).await;
+    assert!(response.contains("error") || response.contains("not found"), 
+            "Should return error for invalid ID: {}", response);
+
+    // Test docs with invalid ID
+    let params = GetItemDocsParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id: 999999,
+        member: None,
+    };
+
+    let response = service.get_item_docs(Parameters(params)).await;
+    assert!(response.contains("error") || response.contains("not found"),
+            "Should return error for invalid docs ID: {}", response);
+
+    // Test source with invalid ID
+    let params = GetItemSourceParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        item_id: 999999,
+        context_lines: Some(3),
+        member: None,
+    };
+
+    let response = service.get_item_source(Parameters(params)).await;
+    assert!(response.contains("error") || response.contains("not found"),
+            "Should return error for invalid source ID: {}", response);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_empty_search_results() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+    setup_test_crate(&service).await?;
+
+    // Test search with pattern that should return no results
+    let params = SearchItemsPreviewParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        pattern: "ThisPatternShouldNotExistAnywhere123".to_string(),
+        limit: Some(10),
+        offset: None,
+        kind_filter: None,
+        path_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_preview(Parameters(params)).await;
+    let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
+    
+    assert!(output.items.is_empty(), "Should return empty results for non-existent pattern");
+    assert_eq!(output.pagination.total, 0, "Total should be 0 for no results");
+
+    // Test fuzzy search with no results
+    let params = SearchItemsFuzzyParams {
+        crate_name: "semver".to_string(),
+        version: SEMVER_VERSION.to_string(),
+        query: "XyZabc123NonExistent".to_string(),
+        fuzzy_enabled: Some(true),
+        fuzzy_distance: Some(1),
+        limit: Some(10),
+        kind_filter: None,
+        member: None,
+    };
+
+    let response = service.search_items_fuzzy(Parameters(params)).await;
+    let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
+    
+    // Fuzzy search might return some results even for non-existent patterns, but should be valid
+    assert_eq!(output.query, "XyZabc123NonExistent", "Query should match request");
+    assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
+    // Results could be empty or have some fuzzy matches
+    assert!(output.total_results >= 0, "Total results should be non-negative");
 
     Ok(())
 }

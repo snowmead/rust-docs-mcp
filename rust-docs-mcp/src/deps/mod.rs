@@ -1,3 +1,4 @@
+pub mod outputs;
 pub mod tools;
 
 use rmcp::schemars;

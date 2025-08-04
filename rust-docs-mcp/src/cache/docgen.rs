@@ -24,18 +24,29 @@ impl DocGenerator {
         Self { storage }
     }
 
-    /// Validate that the required toolchain is available
-    async fn validate_toolchain(&self) -> Result<()> {
-        rustdoc::validate_toolchain().await
+    /// Clean up the target directory to save disk space
+    fn cleanup_target_directory(&self, source_path: &Path) -> Result<()> {
+        let target_dir = source_path.join(TARGET_DIR);
+        if target_dir.exists() {
+            std::fs::remove_dir_all(&target_dir)
+                .with_context(|| format!("Failed to clean up target directory: {}", target_dir.display()))?;
+            tracing::info!("Cleaned up target directory to save disk space");
+        }
+        Ok(())
     }
 
-    /// Generate JSON documentation for a crate
+    /// Generate documentation for a crate
     pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
-        // Validate toolchain before generating docs
-        self.validate_toolchain().await?;
-
+        tracing::info!("DocGenerator::generate_docs starting for {}-{}", name, version);
+        
         let source_path = self.storage.source_path(name, version)?;
         let docs_path = self.storage.docs_path(name, version, None)?;
+        
+        // Check if docs already exist (another thread might have generated them)
+        if docs_path.exists() {
+            tracing::info!("Docs already exist for {}-{}, skipping generation", name, version);
+            return Ok(docs_path);
+        }
 
         if !source_path.exists() {
             bail!(
@@ -68,11 +79,15 @@ impl DocGenerator {
             .await
             .context("Failed to create search index")?;
 
+        // Clean up the target directory to save space
+        self.cleanup_target_directory(&source_path)?;
+
         tracing::info!(
             "Successfully generated documentation for {}-{}",
             name,
             version
         );
+        tracing::info!("DocGenerator::generate_docs completed for {}-{}", name, version);
         Ok(docs_path)
     }
 
@@ -83,9 +98,6 @@ impl DocGenerator {
         version: &str,
         member_path: &str,
     ) -> Result<PathBuf> {
-        // Validate toolchain before generating docs
-        self.validate_toolchain().await?;
-
         let source_path = self.storage.source_path(name, version)?;
         let member_full_path = source_path.join(member_path);
 
@@ -148,6 +160,9 @@ impl DocGenerator {
         self.create_search_index(name, version, Some(member_path))
             .await
             .context("Failed to create search index for workspace member")?;
+
+        // Clean up the target directory to save space
+        self.cleanup_target_directory(&source_path)?;
 
         tracing::info!(
             "Successfully generated documentation for workspace member {} in {}-{}",

@@ -202,12 +202,12 @@ main() {
       \"mcp__rust-docs__list_crate_items\",
       \"mcp__rust-docs__search_items\",
       \"mcp__rust-docs__search_items_preview\",
-      \"mcp__rust-docs__search_items_fuzzy\",
       \"mcp__rust-docs__get_item_details\",
       \"mcp__rust-docs__get_item_docs\",
       \"mcp__rust-docs__get_item_source\",
       \"mcp__rust-docs__get_dependencies\",
-      \"mcp__rust-docs__structure\"${NC}"
+      \"mcp__rust-docs__structure\",
+      \"mcp__rust-docs__search_items_fuzzy\"${NC}"
             else
                 warn "Failed to add rust-docs-mcp to Claude Code"
                 echo

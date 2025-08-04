@@ -1,3 +1,4 @@
+pub mod outputs;
 pub mod query;
 pub mod tools;
 

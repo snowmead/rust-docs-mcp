@@ -74,6 +74,8 @@ pub struct FuzzySearchOptions {
     pub kind_filter: Option<String>,
     #[schemars(description = "Filter by crate name")]
     pub crate_filter: Option<String>,
+    #[schemars(description = "Filter by workspace member")]
+    pub member_filter: Option<String>,
 }
 
 impl Default for FuzzySearchOptions {
@@ -84,6 +86,7 @@ impl Default for FuzzySearchOptions {
             limit: DEFAULT_SEARCH_LIMIT,
             kind_filter: None,
             crate_filter: None,
+            member_filter: None,
         }
     }
 }
@@ -216,6 +219,13 @@ impl FuzzySearcher {
             main_clauses.push((Occur::Must, Box::new(crate_query) as Box<dyn Query>));
         }
 
+        // Add member filter if specified
+        if let Some(member_name) = &options.member_filter {
+            let member_term = Term::from_field_text(self.fields.member, member_name);
+            let member_query = TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
+            main_clauses.push((Occur::Must, Box::new(member_query) as Box<dyn Query>));
+        }
+
         let boolean_query = BooleanQuery::new(main_clauses);
         Ok(Box::new(boolean_query))
     }
@@ -240,6 +250,13 @@ impl FuzzySearcher {
             let crate_term = Term::from_field_text(self.fields.crate_name, crate_name);
             let crate_query = TermQuery::new(crate_term, tantivy::schema::IndexRecordOption::Basic);
             clauses.push((Occur::Must, Box::new(crate_query) as Box<dyn Query>));
+        }
+
+        // Add member filter if specified
+        if let Some(member_name) = &options.member_filter {
+            let member_term = Term::from_field_text(self.fields.member, member_name);
+            let member_query = TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
+            clauses.push((Occur::Must, Box::new(member_query) as Box<dyn Query>));
         }
 
         let boolean_query = BooleanQuery::new(clauses);
@@ -341,6 +358,7 @@ mod tests {
         assert_eq!(options.limit, 50);
         assert!(options.kind_filter.is_none());
         assert!(options.crate_filter.is_none());
+        assert!(options.member_filter.is_none());
     }
 
     #[test]

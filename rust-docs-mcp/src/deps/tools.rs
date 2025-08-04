@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
-use crate::deps::process_cargo_metadata;
+use crate::deps::{process_cargo_metadata, outputs::{GetDependenciesOutput, DepsErrorOutput, CrateIdentifier, Dependency}};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetDependenciesParams {
@@ -36,7 +36,7 @@ impl DepsTools {
         Self { cache }
     }
 
-    pub async fn get_dependencies(&self, params: GetDependenciesParams) -> String {
+    pub async fn get_dependencies(&self, params: GetDependenciesParams) -> Result<GetDependenciesOutput, DepsErrorOutput> {
         let cache = self.cache.write().await;
 
         // First ensure the crate is cached
@@ -63,31 +63,37 @@ impl DepsTools {
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
-                            Ok(dep_info) => {
-                                serde_json::to_string_pretty(&dep_info).unwrap_or_else(|e| {
-                                    format!(
-                                        r#"{{"error": "Failed to serialize dependency info: {e}"}}"#
-                                    )
-                                })
-                            }
-                            Err(e) => {
-                                format!(
-                                    r#"{{"error": "Failed to process dependency metadata: {e}"}}"#
-                                )
-                            }
+                            Ok(dep_info) => Ok(GetDependenciesOutput {
+                                crate_info: CrateIdentifier {
+                                    name: dep_info.crate_info.name,
+                                    version: dep_info.crate_info.version,
+                                },
+                                direct_dependencies: dep_info.direct_dependencies.into_iter()
+                                    .map(|d| Dependency {
+                                        name: d.name,
+                                        version_req: d.version_req,
+                                        resolved_version: d.resolved_version,
+                                        kind: d.kind,
+                                        optional: d.optional,
+                                        features: d.features,
+                                        target: d.target,
+                                    })
+                                    .collect(),
+                                dependency_tree: dep_info.dependency_tree,
+                                total_dependencies: dep_info.total_dependencies,
+                            }),
+                            Err(e) => Err(DepsErrorOutput::new(
+                                format!("Failed to process dependency metadata: {e}")
+                            )),
                         }
                     }
-                    Err(e) => {
-                        format!(
-                            r#"{{"error": "Dependencies not available for {}-{}. Error: {}"}}"#,
-                            params.crate_name, params.version, e
-                        )
-                    }
+                    Err(e) => Err(DepsErrorOutput::new(format!(
+                        "Dependencies not available for {}-{}. Error: {}",
+                        params.crate_name, params.version, e
+                    )))
                 }
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to cache crate: {e}"}}"#)
-            }
+            Err(e) => Err(DepsErrorOutput::new(format!("Failed to cache crate: {e}")))
         }
     }
 }

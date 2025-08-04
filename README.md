@@ -51,7 +51,7 @@ With these capabilities, agents can build confidently with any Rust crate — ev
 
 ### Cache Management
 
-- `cache_crate_from_cratesio` - Download and cache a specific crate version from crates.io
+- `cache_crate_from_cratesio` - Download and cache a specific crate version from crates.io for offline use
 - `cache_crate_from_github` - Download and cache from GitHub (specify branch or tag)
 - `cache_crate_from_local` - Cache from a local file system path
 - `remove_crate` - Remove cached crate versions to free disk space
@@ -61,10 +61,9 @@ With these capabilities, agents can build confidently with any Rust crate — ev
 
 ### Documentation Queries
 
-- `search_items_preview` - Lightweight search returning only IDs, names, and types
-- `search_items` - Full search with complete documentation (may hit token limits)
-- `search_items_fuzzy` - Fuzzy search with typo tolerance and semantic similarity
 - `list_crate_items` - Browse all items in a crate with optional filtering
+- `search_items` - Full search with complete documentation (may hit token limits)
+- `search_items_preview` - Lightweight search returning only IDs, names, and types
 - `get_item_details` - Detailed information about specific items (signatures, fields, etc.)
 - `get_item_docs` - Extract just the documentation string for an item
 - `get_item_source` - View source code with configurable context lines
@@ -76,6 +75,10 @@ With these capabilities, agents can build confidently with any Rust crate — ev
 ### Structure Analysis
 
 - `structure` - Generate hierarchical module tree using integrated cargo-modules
+
+### Search
+
+- `search_items_fuzzy` - Fuzzy search with typo tolerance and semantic similarity
 
 ## Configuration
 
@@ -90,6 +93,20 @@ rust-docs-mcp --cache-dir /custom/path/to/cache
 export RUST_DOCS_MCP_CACHE_DIR=/custom/path/to/cache
 rust-docs-mcp
 ```
+
+### GitHub Authentication
+
+To access private repositories or increase GitHub API rate limits, set the `GITHUB_TOKEN` environment variable:
+
+```bash
+export GITHUB_TOKEN=your_github_personal_access_token
+```
+
+Benefits of authentication:
+
+- **Access private repositories** — Cache and analyze private Rust crates
+- **Higher rate limits** — 5,000 requests/hour (vs 60 unauthenticated)
+- **Avoid rate limit errors** — Essential for caching multiple GitHub-hosted crates
 
 ### Each crate version stores
 

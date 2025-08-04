@@ -88,7 +88,8 @@ impl RustDocsService {
             CacheCrateFromCratesIOParams,
         >,
     ) -> String {
-        self.cache_tools.cache_crate_from_cratesio(params).await
+        let output = self.cache_tools.cache_crate_from_cratesio(params).await;
+        output.to_json()
     }
 
     #[tool(
@@ -100,7 +101,8 @@ impl RustDocsService {
             CacheCrateFromGitHubParams,
         >,
     ) -> String {
-        self.cache_tools.cache_crate_from_github(params).await
+        let output = self.cache_tools.cache_crate_from_github(params).await;
+        output.to_json()
     }
 
     #[tool(
@@ -112,7 +114,8 @@ impl RustDocsService {
             CacheCrateFromLocalParams,
         >,
     ) -> String {
-        self.cache_tools.cache_crate_from_local(params).await
+        let output = self.cache_tools.cache_crate_from_local(params).await;
+        output.to_json()
     }
 
     #[tool(
@@ -124,14 +127,20 @@ impl RustDocsService {
             RemoveCrateParams,
         >,
     ) -> String {
-        self.cache_tools.remove_crate(params).await
+        match self.cache_tools.remove_crate(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
         description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
     )]
     pub async fn list_cached_crates(&self) -> String {
-        self.cache_tools.list_cached_crates().await
+        match self.cache_tools.list_cached_crates().await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -143,7 +152,10 @@ impl RustDocsService {
             ListCrateVersionsParams,
         >,
     ) -> String {
-        self.cache_tools.list_crate_versions(params).await
+        match self.cache_tools.list_crate_versions(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -155,7 +167,8 @@ impl RustDocsService {
             GetCratesMetadataParams,
         >,
     ) -> String {
-        self.cache_tools.get_crates_metadata(params).await
+        let output = self.cache_tools.get_crates_metadata(params).await;
+        output.to_json()
     }
 
     // Docs tools
@@ -168,7 +181,10 @@ impl RustDocsService {
             ListItemsParams,
         >,
     ) -> String {
-        self.docs_tools.list_crate_items(params).await
+        match self.docs_tools.list_crate_items(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -180,7 +196,10 @@ impl RustDocsService {
             SearchItemsParams,
         >,
     ) -> String {
-        self.docs_tools.search_items(params).await
+        match self.docs_tools.search_items(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -192,7 +211,10 @@ impl RustDocsService {
             SearchItemsPreviewParams,
         >,
     ) -> String {
-        self.docs_tools.search_items_preview(params).await
+        match self.docs_tools.search_items_preview(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -204,7 +226,7 @@ impl RustDocsService {
             GetItemDetailsParams,
         >,
     ) -> String {
-        self.docs_tools.get_item_details(params).await
+        self.docs_tools.get_item_details(params).await.to_json()
     }
 
     #[tool(
@@ -216,7 +238,10 @@ impl RustDocsService {
             GetItemDocsParams,
         >,
     ) -> String {
-        self.docs_tools.get_item_docs(params).await
+        match self.docs_tools.get_item_docs(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -228,7 +253,7 @@ impl RustDocsService {
             GetItemSourceParams,
         >,
     ) -> String {
-        self.docs_tools.get_item_source(params).await
+        self.docs_tools.get_item_source(params).await.to_json()
     }
 
     // Deps tools
@@ -241,7 +266,10 @@ impl RustDocsService {
             GetDependenciesParams,
         >,
     ) -> String {
-        self.deps_tools.get_dependencies(params).await
+        match self.deps_tools.get_dependencies(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     // Analysis tools
@@ -254,7 +282,10 @@ impl RustDocsService {
             AnalyzeCrateStructureParams,
         >,
     ) -> String {
-        self.analysis_tools.structure(params).await
+        match self.analysis_tools.structure(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     // Search tools
@@ -267,7 +298,10 @@ impl RustDocsService {
             SearchItemsFuzzyParams,
         >,
     ) -> String {
-        self.search_tools.search_items_fuzzy(params).await
+        match self.search_tools.search_items_fuzzy(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 }
 

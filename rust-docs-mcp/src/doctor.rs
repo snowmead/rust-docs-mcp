@@ -1,7 +1,4 @@
 use anyhow::Result;
-use dirs;
-use fs4;
-use reqwest;
 use rust_docs_mcp::rustdoc;
 use serde::Serialize;
 use std::fs;
@@ -77,13 +74,13 @@ async fn check_rust_toolchain() -> DiagnosticResult {
 }
 
 async fn check_nightly_toolchain() -> DiagnosticResult {
-    match Command::new("rustup").args(&["toolchain", "list"]).output() {
+    match Command::new("rustup").args(["toolchain", "list"]).output() {
         Ok(output) if output.status.success() => {
             let toolchains = String::from_utf8_lossy(&output.stdout);
             if toolchains.contains("nightly") {
                 // Try to get nightly version
                 match Command::new("rustc")
-                    .args(&["+nightly", "--version"])
+                    .args(["+nightly", "--version"])
                     .output()
                 {
                     Ok(nightly_output) if nightly_output.status.success() => {
@@ -391,6 +388,16 @@ async fn check_optional_dependencies() -> DiagnosticResult {
             _ => {
                 messages.push("codesign not available (optional for binary signing)".to_string());
             }
+        }
+    }
+
+    // Check for GITHUB_TOKEN
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(_) => {
+            messages.push("GITHUB_TOKEN set (enables authenticated GitHub access)".to_string());
+        }
+        Err(_) => {
+            messages.push("GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)".to_string());
         }
     }
 
