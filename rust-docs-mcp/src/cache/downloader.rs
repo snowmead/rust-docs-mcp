@@ -13,11 +13,11 @@ use crate::cache::utils::copy_directory_contents;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
-use git2::{FetchOptions, RemoteCallbacks, Cred};
+use git2::{Cred, FetchOptions, RemoteCallbacks};
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::env;
 use tar::Archive;
 
 /// Constants for download operations
@@ -60,9 +60,9 @@ impl CrateDownloader {
     /// Build the HTTP client with proper configuration
     fn build_http_client() -> reqwest::Client {
         let user_agent = Self::format_user_agent();
-        
+
         tracing::info!("Creating HTTP client with User-Agent: {}", user_agent);
-        
+
         reqwest::Client::builder()
             .user_agent(user_agent)
             .redirect(reqwest::redirect::Policy::limited(10))
@@ -119,33 +119,45 @@ impl CrateDownloader {
         // Create a lock file to prevent concurrent downloads
         let crate_path = self.storage.crate_path(name, version)?;
         let lock_path = crate_path.with_extension("lock");
-        
+
         // Check if another process is already downloading
         if lock_path.exists() {
-            tracing::info!("Another process is downloading {}-{}, waiting...", name, version);
+            tracing::info!(
+                "Another process is downloading {}-{}, waiting...",
+                name,
+                version
+            );
             // Wait for the other process to finish (simple polling)
             let start = std::time::Instant::now();
-            while lock_path.exists() && start.elapsed() < std::time::Duration::from_secs(LOCK_TIMEOUT_SECS) {
+            while lock_path.exists()
+                && start.elapsed() < std::time::Duration::from_secs(LOCK_TIMEOUT_SECS)
+            {
                 tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS)).await;
             }
-            
+
             // Check if it was successfully cached by the other process
             if self.storage.is_cached(name, version) {
                 tracing::info!("Crate {}-{} was cached by another process", name, version);
                 return self.storage.source_path(name, version);
             }
         }
-        
+
         // Create lock file
         if let Some(parent) = lock_path.parent() {
             self.storage.ensure_dir(parent)?;
         }
         std::fs::write(&lock_path, "downloading").context("Failed to create lock file")?;
-        
-        // Ensure lock file is removed on exit
-        let _lock_guard = LockGuard { path: lock_path.clone() };
 
-        tracing::info!("Starting fresh download of {}-{} from crates.io", name, version);
+        // Ensure lock file is removed on exit
+        let _lock_guard = LockGuard {
+            path: lock_path.clone(),
+        };
+
+        tracing::info!(
+            "Starting fresh download of {}-{} from crates.io",
+            name,
+            version
+        );
 
         let url = format!("https://crates.io/api/v1/crates/{name}/{version}/download");
         tracing::debug!("Download URL: {}", url);
@@ -168,7 +180,7 @@ impl CrateDownloader {
 
         // Save to a temporary file first - make path unique to avoid concurrent conflicts
         let temp_file_path = std::env::temp_dir().join(format!(
-            "{name}-{version}-{}-{}.tar.gz", 
+            "{name}-{version}-{}-{}.tar.gz",
             std::process::id(),
             uuid::Uuid::new_v4().simple()
         ));
@@ -200,36 +212,44 @@ impl CrateDownloader {
             let components: Vec<_> = path.components().collect();
             if components.len() > 1 {
                 let relative_path: PathBuf = components[1..].iter().collect();
-                
+
                 // Validate that the path doesn't escape the destination directory
                 // Check for path traversal attempts
                 let has_parent_refs = relative_path
                     .components()
                     .any(|c| matches!(c, std::path::Component::ParentDir));
-                
+
                 if has_parent_refs {
-                    tracing::warn!("Skipping entry with parent directory reference: {}", path.display());
+                    tracing::warn!(
+                        "Skipping entry with parent directory reference: {}",
+                        path.display()
+                    );
                     continue;
                 }
-                
+
                 let dest_path = source_path.join(&relative_path);
-                
+
                 // Additional validation: ensure the destination is within source_path
-                let canonical_source = source_path.canonicalize()
+                let canonical_source = source_path
+                    .canonicalize()
                     .unwrap_or_else(|_| source_path.clone());
-                
+
                 if let Ok(canonical_dest) = dest_path.canonicalize() {
                     if !canonical_dest.starts_with(&canonical_source) {
-                        tracing::warn!("Skipping entry that would escape destination: {}", path.display());
+                        tracing::warn!(
+                            "Skipping entry that would escape destination: {}",
+                            path.display()
+                        );
                         continue;
                     }
                 } else if let Some(parent) = dest_path.parent() {
                     // For files that don't exist yet, check the parent
-                    if let Ok(canonical_parent) = parent.canonicalize() {
-                        if !canonical_parent.starts_with(&canonical_source) {
-                            tracing::warn!("Skipping entry with parent outside destination: {}", path.display());
-                            continue;
-                        }
+                    if matches!(parent.canonicalize(), Ok(canonical_parent) if !canonical_parent.starts_with(&canonical_source)) {
+                        tracing::warn!(
+                            "Skipping entry with parent outside destination: {}",
+                            path.display()
+                        );
+                        continue;
                     }
                 }
 
@@ -268,31 +288,39 @@ impl CrateDownloader {
         // Create a lock file to prevent concurrent downloads
         let crate_path = self.storage.crate_path(name, version)?;
         let lock_path = crate_path.with_extension("lock");
-        
+
         // Check if another process is already downloading
         if lock_path.exists() {
-            tracing::info!("Another process is downloading {}-{}, waiting...", name, version);
+            tracing::info!(
+                "Another process is downloading {}-{}, waiting...",
+                name,
+                version
+            );
             // Wait for the other process to finish (simple polling)
             let start = std::time::Instant::now();
-            while lock_path.exists() && start.elapsed() < std::time::Duration::from_secs(LOCK_TIMEOUT_SECS) {
+            while lock_path.exists()
+                && start.elapsed() < std::time::Duration::from_secs(LOCK_TIMEOUT_SECS)
+            {
                 tokio::time::sleep(std::time::Duration::from_millis(LOCK_POLL_INTERVAL_MS)).await;
             }
-            
+
             // Check if it was successfully cached by the other process
             if self.storage.is_cached(name, version) {
                 tracing::info!("Crate {}-{} was cached by another process", name, version);
                 return self.storage.source_path(name, version);
             }
         }
-        
+
         // Create lock file
         if let Some(parent) = lock_path.parent() {
             self.storage.ensure_dir(parent)?;
         }
         std::fs::write(&lock_path, "downloading").context("Failed to create lock file")?;
-        
+
         // Ensure lock file is removed on exit
-        let _lock_guard = LockGuard { path: lock_path.clone() };
+        let _lock_guard = LockGuard {
+            path: lock_path.clone(),
+        };
 
         tracing::info!(
             "Downloading crate {}-{} from GitHub: {}",
@@ -310,29 +338,26 @@ impl CrateDownloader {
 
         // Set up GitHub authentication if token is available
         let github_token = env::var("GITHUB_TOKEN").ok();
-        
+
         // Configure git authentication callbacks
         let mut fetch_options = FetchOptions::new();
         let mut callbacks = RemoteCallbacks::new();
-        
+
         if let Some(token) = &github_token {
             tracing::debug!("Using GITHUB_TOKEN for authentication");
             callbacks.credentials(move |_url, username_from_url, _allowed_types| {
-                Cred::userpass_plaintext(
-                    username_from_url.unwrap_or("git"),
-                    token
-                )
+                Cred::userpass_plaintext(username_from_url.unwrap_or("git"), token)
             });
         } else {
             tracing::debug!("No GITHUB_TOKEN found, using unauthenticated access");
         }
-        
+
         fetch_options.remote_callbacks(callbacks);
 
         // Clone the repository with authentication
         let mut builder = git2::build::RepoBuilder::new();
         builder.fetch_options(fetch_options);
-        
+
         let repo = builder
             .clone(repo_url, &temp_dir)
             .with_context(|| {
@@ -350,7 +375,7 @@ impl CrateDownloader {
             if !Self::is_valid_git_ref(version) {
                 bail!("Invalid git reference name: {}", version);
             }
-            
+
             // Try to checkout as a branch first
             let refname = format!("refs/remotes/origin/{version}");
             if let Ok(reference) = repo.find_reference(&refname) {
@@ -480,25 +505,23 @@ impl CrateDownloader {
         // - Start or end with dots or slashes
         // - Contain control characters or spaces
         // - Contain characters that could be problematic in shell contexts
-        
+
         if ref_name.is_empty() || ref_name.contains("..") {
             return false;
         }
-        
-        if ref_name.starts_with('.') || ref_name.ends_with('.') ||
-           ref_name.starts_with('/') || ref_name.ends_with('/') {
+
+        if ref_name.starts_with('.')
+            || ref_name.ends_with('.')
+            || ref_name.starts_with('/')
+            || ref_name.ends_with('/')
+        {
             return false;
         }
-        
+
         // Allow alphanumeric, dots, slashes, hyphens, underscores
         // Common for tags like "v1.0.0" or branches like "feature/new-thing"
         ref_name.chars().all(|c| {
-            c.is_alphanumeric() || 
-            c == '-' || 
-            c == '_' || 
-            c == '.' || 
-            c == '/' ||
-            c == '+' // Allow for version tags like "1.0.0+20240621"
+            c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '/' || c == '+' // Allow for version tags like "1.0.0+20240621"
         })
     }
 }

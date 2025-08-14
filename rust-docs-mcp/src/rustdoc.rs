@@ -141,41 +141,43 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        
+
         // If we get the multiple targets error, try again with --lib
         if stderr.contains("extra arguments to `rustdoc` can only be passed to one target") {
             tracing::debug!("Multiple targets detected, retrying with --lib flag");
-            
+
             // Try again with --lib flag
             let mut args_with_lib = base_args;
             args_with_lib.push("--lib".to_string());
             args_with_lib.extend_from_slice(&rustdoc_args);
-            
+
             let output_with_lib = Command::new("cargo")
                 .args(&args_with_lib)
                 .current_dir(source_path)
                 .output()
                 .context("Failed to run cargo rustdoc with --lib")?;
-            
+
             if !output_with_lib.status.success() {
                 let stderr_with_lib = String::from_utf8_lossy(&output_with_lib.stderr);
-                
+
                 if stderr_with_lib.contains("no library targets found") {
                     bail!("This is a binary-only package");
                 }
-                
+
                 bail!("Failed to generate documentation: {}", stderr_with_lib);
             }
-            
+
             // Success with --lib
             return Ok(());
         }
-        
+
         // Check for workspace error
         if stderr.contains("could not find `Cargo.toml` in") || stderr.contains("workspace") {
-            bail!("This appears to be a workspace. Please use workspace member caching instead of trying to cache the root workspace.");
+            bail!(
+                "This appears to be a workspace. Please use workspace member caching instead of trying to cache the root workspace."
+            );
         }
-        
+
         bail!("Failed to generate documentation: {}", stderr);
     }
 

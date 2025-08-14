@@ -5,8 +5,8 @@ use tokio::sync::RwLock;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::outputs::{AnalysisErrorOutput, StructureNode, StructureOutput};
 use crate::cache::{CrateCache, workspace::WorkspaceHandler};
-use crate::analysis::outputs::{StructureOutput, AnalysisErrorOutput, StructureNode};
 
 // Use StructureNode from outputs module instead
 
@@ -80,7 +80,10 @@ impl AnalysisTools {
         Self { cache }
     }
 
-    pub async fn structure(&self, params: AnalyzeCrateStructureParams) -> Result<StructureOutput, AnalysisErrorOutput> {
+    pub async fn structure(
+        &self,
+        params: AnalyzeCrateStructureParams,
+    ) -> Result<StructureOutput, AnalysisErrorOutput> {
         let cache = self.cache.write().await;
 
         // Ensure the crate source is available (without requiring docs)
@@ -110,9 +113,9 @@ impl AnalysisTools {
                 // Run the analysis
                 analyze_with_cargo_modules(manifest_path, package, params).await
             }
-            Err(e) => Err(AnalysisErrorOutput::new(
-                format!("Failed to ensure crate source is available: {e}")
-            ))
+            Err(e) => Err(AnalysisErrorOutput::new(format!(
+                "Failed to ensure crate source is available: {e}"
+            ))),
         }
     }
 }
@@ -166,7 +169,6 @@ async fn analyze_with_cargo_modules(
 
         // Format the tree structure
         let tree_node = format_tree(&tree, db, edition);
-        
         Ok(StructureOutput {
             status: "success".to_string(),
             message: "Module structure analysis completed".to_string(),

@@ -39,10 +39,14 @@ impl CrateCache {
         source: Option<&str>,
     ) -> Result<rustdoc_types::Crate> {
         tracing::info!("ensure_crate_docs called for {}-{}", name, version);
-        
+
         // Check if docs already exist
         if self.storage.has_docs(name, version, None) {
-            tracing::info!("Docs already exist for {}-{}, loading from cache", name, version);
+            tracing::info!(
+                "Docs already exist for {}-{}, loading from cache",
+                name,
+                version
+            );
             return self.load_docs(name, version, None).await;
         }
 
@@ -51,15 +55,23 @@ impl CrateCache {
             tracing::info!("Crate {}-{} not cached, downloading", name, version);
             self.download_or_copy_crate(name, version, source).await?;
         } else {
-            tracing::info!("Crate {}-{} already cached, skipping download", name, version);
+            tracing::info!(
+                "Crate {}-{} already cached, skipping download",
+                name,
+                version
+            );
         }
 
         // Before generating docs, check if this is a workspace
         let source_path = self.storage.source_path(name, version)?;
         let cargo_toml_path = source_path.join("Cargo.toml");
-        
-        tracing::info!("ensure_crate_docs: checking workspace for {} at {}", name, cargo_toml_path.display());
-        
+
+        tracing::info!(
+            "ensure_crate_docs: checking workspace for {} at {}",
+            name,
+            cargo_toml_path.display()
+        );
+
         if cargo_toml_path.exists() {
             tracing::info!("ensure_crate_docs: Cargo.toml exists for {}", name);
             match WorkspaceHandler::is_workspace(&cargo_toml_path) {
@@ -79,11 +91,19 @@ impl CrateCache {
                     tracing::info!("ensure_crate_docs: {} is NOT a workspace", name);
                 }
                 Err(e) => {
-                    tracing::warn!("ensure_crate_docs: error checking workspace status for {}: {}", name, e);
+                    tracing::warn!(
+                        "ensure_crate_docs: error checking workspace status for {}: {}",
+                        name,
+                        e
+                    );
                 }
             }
         } else {
-            tracing::warn!("ensure_crate_docs: Cargo.toml does not exist for {} at {}", name, cargo_toml_path.display());
+            tracing::warn!(
+                "ensure_crate_docs: Cargo.toml does not exist for {} at {}",
+                name,
+                cargo_toml_path.display()
+            );
         }
 
         // Generate documentation
@@ -609,12 +629,19 @@ impl CrateCache {
         updated: bool,
     ) -> Result<CacheResponse> {
         let cargo_toml_path = source_path.join("Cargo.toml");
-        
-        tracing::info!("detect_and_handle_workspace: checking {}", cargo_toml_path.display());
-        
+
+        tracing::info!(
+            "detect_and_handle_workspace: checking {}",
+            cargo_toml_path.display()
+        );
+
         // Read and log the content to debug workspace detection
         if let Ok(content) = std::fs::read_to_string(&cargo_toml_path) {
-            tracing::info!("detect_and_handle_workspace: Cargo.toml content preview for {}: {}", crate_name, &content[0..content.len().min(500)]);
+            tracing::info!(
+                "detect_and_handle_workspace: Cargo.toml content preview for {}: {}",
+                crate_name,
+                &content[0..content.len().min(500)]
+            );
         }
 
         match WorkspaceHandler::is_workspace(&cargo_toml_path) {
@@ -626,13 +653,20 @@ impl CrateCache {
                 Ok(self.generate_workspace_response(crate_name, version, members, source, updated))
             }
             Ok(false) => {
-                tracing::info!("detect_and_handle_workspace: {} is NOT a workspace", crate_name);
+                tracing::info!(
+                    "detect_and_handle_workspace: {} is NOT a workspace",
+                    crate_name
+                );
                 // Not a workspace, proceed with normal caching
                 self.cache_regular_crate(crate_name, version, source_str)
                     .await
             }
             Err(e) => {
-                tracing::warn!("detect_and_handle_workspace: error checking workspace status for {}: {}", crate_name, e);
+                tracing::warn!(
+                    "detect_and_handle_workspace: error checking workspace status for {}: {}",
+                    crate_name,
+                    e
+                );
                 // Error checking workspace status - try to determine if it's likely a workspace
                 // by checking for common workspace indicators to avoid attempting doc generation
                 // on workspace roots
@@ -640,22 +674,24 @@ impl CrateCache {
                     Ok(content) => content,
                     Err(_) => {
                         // Can't read Cargo.toml, fall back to normal caching
-                        return self.cache_regular_crate(crate_name, version, source_str).await;
+                        return self
+                            .cache_regular_crate(crate_name, version, source_str)
+                            .await;
                     }
                 };
-                
+
                 // Check for workspace indicators even if parsing failed
                 if cargo_content.contains("[workspace]") && cargo_content.contains("members") {
                     tracing::warn!(
                         "detect_and_handle_workspace: {} appears to be a workspace based on content analysis, \
-                        but parsing failed. Treating as workspace to avoid doc generation errors", 
+                        but parsing failed. Treating as workspace to avoid doc generation errors",
                         crate_name
                     );
-                    
+
                     // Return a generic workspace response indicating we couldn't parse the members
                     let error_msg = format!(
                         "Detected workspace but failed to parse members: {}. \
-                        Please check the Cargo.toml syntax or cache specific members manually.", 
+                        Please check the Cargo.toml syntax or cache specific members manually.",
                         e
                     );
                     Ok(CacheResponse::error(error_msg))
@@ -768,7 +804,13 @@ impl CrateCache {
         let (crate_name, version, members, source_str, update) =
             self.extract_source_params(&source);
 
-        tracing::info!("cache_crate_with_source: starting for {}-{}, update={}, members={:?}", crate_name, version, update, members);
+        tracing::info!(
+            "cache_crate_with_source: starting for {}-{}, update={}, members={:?}",
+            crate_name,
+            version,
+            update,
+            members
+        );
 
         // Validate GitHub source
         if matches!(&source, CrateSource::GitHub(_)) && version.is_empty() {
@@ -777,7 +819,10 @@ impl CrateCache {
 
         // Handle update logic if requested
         if update && self.storage.is_cached(&crate_name, &version) {
-            tracing::info!("cache_crate_with_source: {} is cached and update requested", crate_name);
+            tracing::info!(
+                "cache_crate_with_source: {} is cached and update requested",
+                crate_name
+            );
             return self
                 .handle_crate_update(
                     &crate_name,
@@ -791,7 +836,11 @@ impl CrateCache {
 
         // If members are specified, cache those specific workspace members
         if let Some(members) = members {
-            tracing::info!("cache_crate_with_source: members specified for {}: {:?}", crate_name, members);
+            tracing::info!(
+                "cache_crate_with_source: members specified for {}: {:?}",
+                crate_name,
+                members
+            );
             let response = self
                 .handle_workspace_members(
                     &crate_name,
@@ -806,13 +855,22 @@ impl CrateCache {
 
         // Check if already cached (unless update was requested)
         if !update && self.storage.is_cached(&crate_name, &version) {
-            tracing::info!("cache_crate_with_source: {} is already cached, checking docs", crate_name);
+            tracing::info!(
+                "cache_crate_with_source: {} is already cached, checking docs",
+                crate_name
+            );
             // Check if docs are generated
             if self.storage.has_docs(&crate_name, &version, None) {
-                tracing::info!("cache_crate_with_source: {} docs exist, returning success", crate_name);
+                tracing::info!(
+                    "cache_crate_with_source: {} docs exist, returning success",
+                    crate_name
+                );
                 return CacheResponse::success(&crate_name, &version).to_json();
             }
-            tracing::info!("cache_crate_with_source: {} is cached but docs not generated, continuing", crate_name);
+            tracing::info!(
+                "cache_crate_with_source: {} is cached but docs not generated, continuing",
+                crate_name
+            );
             // Crate is cached but docs not generated, continue to generate docs
         }
 
@@ -822,15 +880,21 @@ impl CrateCache {
             .await
         {
             Ok(path) => {
-                tracing::info!("cache_crate_with_source: source downloaded/available at {}", path.display());
+                tracing::info!(
+                    "cache_crate_with_source: source downloaded/available at {}",
+                    path.display()
+                );
                 path
-            },
+            }
             Err(e) => {
                 return CacheResponse::error(format!("Failed to download crate: {e}")).to_json();
             }
         };
 
-        tracing::info!("cache_crate_with_source: calling detect_and_handle_workspace for {}", crate_name);
+        tracing::info!(
+            "cache_crate_with_source: calling detect_and_handle_workspace for {}",
+            crate_name
+        );
         // Detect and handle workspace vs regular crate
         match self
             .detect_and_handle_workspace(
@@ -844,17 +908,28 @@ impl CrateCache {
             .await
         {
             Ok(response) => {
-                tracing::info!("cache_crate_with_source: detect_and_handle_workspace succeeded for {}", crate_name);
+                tracing::info!(
+                    "cache_crate_with_source: detect_and_handle_workspace succeeded for {}",
+                    crate_name
+                );
                 response.to_json()
-            },
+            }
             Err(e) => {
-                tracing::error!("cache_crate_with_source: detect_and_handle_workspace failed for {}: {}", crate_name, e);
+                tracing::error!(
+                    "cache_crate_with_source: detect_and_handle_workspace failed for {}: {}",
+                    crate_name,
+                    e
+                );
                 // Check if this is the workspace error we're looking for
-                if e.to_string().contains("This appears to be a workspace with multiple targets") {
-                    tracing::error!("cache_crate_with_source: ERROR - workspace detection failed, error came from rustdoc generation");
+                if e.to_string()
+                    .contains("This appears to be a workspace with multiple targets")
+                {
+                    tracing::error!(
+                        "cache_crate_with_source: ERROR - workspace detection failed, error came from rustdoc generation"
+                    );
                 }
                 CacheResponse::error(e.to_string()).to_json()
-            },
+            }
         }
     }
 

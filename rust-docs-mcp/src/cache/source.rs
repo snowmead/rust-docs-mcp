@@ -74,7 +74,10 @@ impl SourceDetector {
         let (base_url, reference) = if let Some(pos) = url.find("#branch:") {
             let (base, branch_part) = url.split_at(pos);
             let branch = branch_part.trim_start_matches("#branch:");
-            (base.to_string(), Some(GitReference::Branch(branch.to_string())))
+            (
+                base.to_string(),
+                Some(GitReference::Branch(branch.to_string())),
+            )
         } else if let Some(pos) = url.find("#tag:") {
             let (base, tag_part) = url.split_at(pos);
             let tag = tag_part.trim_start_matches("#tag:");
@@ -116,7 +119,8 @@ impl SourceDetector {
                 SourceType::GitHub {
                     url: base_url,
                     repo_path: Some(repo_path),
-                    reference: explicit_reference.unwrap_or_else(|| GitReference::Branch(branch.to_string())),
+                    reference: explicit_reference
+                        .unwrap_or_else(|| GitReference::Branch(branch.to_string())),
                 }
             } else {
                 // Simple repository URL
@@ -214,7 +218,9 @@ mod tests {
 
     #[test]
     fn test_detect_github_with_branch() {
-        match SourceDetector::detect(Some("https://github.com/rust-lang/rust-clippy#branch:master")) {
+        match SourceDetector::detect(Some(
+            "https://github.com/rust-lang/rust-clippy#branch:master",
+        )) {
             SourceType::GitHub {
                 url,
                 repo_path,

@@ -28,8 +28,12 @@ impl DocGenerator {
     fn cleanup_target_directory(&self, source_path: &Path) -> Result<()> {
         let target_dir = source_path.join(TARGET_DIR);
         if target_dir.exists() {
-            std::fs::remove_dir_all(&target_dir)
-                .with_context(|| format!("Failed to clean up target directory: {}", target_dir.display()))?;
+            std::fs::remove_dir_all(&target_dir).with_context(|| {
+                format!(
+                    "Failed to clean up target directory: {}",
+                    target_dir.display()
+                )
+            })?;
             tracing::info!("Cleaned up target directory to save disk space");
         }
         Ok(())
@@ -37,14 +41,22 @@ impl DocGenerator {
 
     /// Generate documentation for a crate
     pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
-        tracing::info!("DocGenerator::generate_docs starting for {}-{}", name, version);
-        
+        tracing::info!(
+            "DocGenerator::generate_docs starting for {}-{}",
+            name,
+            version
+        );
+
         let source_path = self.storage.source_path(name, version)?;
         let docs_path = self.storage.docs_path(name, version, None)?;
-        
+
         // Check if docs already exist (another thread might have generated them)
         if docs_path.exists() {
-            tracing::info!("Docs already exist for {}-{}, skipping generation", name, version);
+            tracing::info!(
+                "Docs already exist for {}-{}, skipping generation",
+                name,
+                version
+            );
             return Ok(docs_path);
         }
 
@@ -87,7 +99,11 @@ impl DocGenerator {
             name,
             version
         );
-        tracing::info!("DocGenerator::generate_docs completed for {}-{}", name, version);
+        tracing::info!(
+            "DocGenerator::generate_docs completed for {}-{}",
+            name,
+            version
+        );
         Ok(docs_path)
     }
 

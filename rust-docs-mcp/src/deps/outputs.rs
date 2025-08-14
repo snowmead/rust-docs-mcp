@@ -18,22 +18,22 @@ pub struct CrateIdentifier {
 pub struct Dependency {
     /// Name of the dependency
     pub name: String,
-    
+
     /// Version requirement specified in Cargo.toml
     pub version_req: String,
-    
+
     /// Actual resolved version
     pub resolved_version: Option<String>,
-    
+
     /// Kind of dependency (normal, dev, build)
     pub kind: String,
-    
+
     /// Whether this is an optional dependency
     pub optional: bool,
-    
+
     /// Features enabled for this dependency
     pub features: Vec<String>,
-    
+
     /// Target platform (if dependency is platform-specific)
     pub target: Option<String>,
 }
@@ -43,13 +43,13 @@ pub struct Dependency {
 pub struct GetDependenciesOutput {
     /// The crate name and version being queried
     pub crate_info: CrateIdentifier,
-    
+
     /// Direct dependencies of the crate
     pub direct_dependencies: Vec<Dependency>,
-    
+
     /// Full dependency tree (only included if requested)
     pub dependency_tree: Option<serde_json::Value>,
-    
+
     /// Total number of dependencies (direct + transitive)
     pub total_dependencies: usize,
 }
@@ -75,7 +75,7 @@ impl DepsErrorOutput {
             error: message.into(),
         }
     }
-    
+
     /// Convert to JSON string for MCP response
     pub fn to_json(&self) -> String {
         serde_json::to_string(self)
@@ -86,7 +86,7 @@ impl DepsErrorOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_get_dependencies_output_serialization() {
         let output = GetDependenciesOutput {
@@ -94,26 +94,24 @@ mod tests {
                 name: "test-crate".to_string(),
                 version: "1.0.0".to_string(),
             },
-            direct_dependencies: vec![
-                Dependency {
-                    name: "serde".to_string(),
-                    version_req: "^1.0".to_string(),
-                    resolved_version: Some("1.0.193".to_string()),
-                    kind: "normal".to_string(),
-                    optional: false,
-                    features: vec!["derive".to_string()],
-                    target: None,
-                }
-            ],
+            direct_dependencies: vec![Dependency {
+                name: "serde".to_string(),
+                version_req: "^1.0".to_string(),
+                resolved_version: Some("1.0.193".to_string()),
+                kind: "normal".to_string(),
+                optional: false,
+                features: vec!["derive".to_string()],
+                target: None,
+            }],
             dependency_tree: None,
             total_dependencies: 1,
         };
-        
+
         let json = output.to_json();
         let deserialized: GetDependenciesOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(output, deserialized);
     }
-    
+
     #[test]
     fn test_deps_error_output() {
         let output = DepsErrorOutput::new("Dependencies not available");

@@ -9,8 +9,8 @@ use crate::cache::{
     CrateCache,
     downloader::CrateSource,
     outputs::{
-        CacheCrateOutput, RemoveCrateOutput, ListCachedCratesOutput, ListCrateVersionsOutput, 
-        VersionInfo, GetCratesMetadataOutput, CrateMetadata, ErrorOutput, SizeInfo
+        CacheCrateOutput, CrateMetadata, ErrorOutput, GetCratesMetadataOutput,
+        ListCachedCratesOutput, ListCrateVersionsOutput, RemoveCrateOutput, SizeInfo, VersionInfo,
     },
     utils::format_bytes,
 };
@@ -119,26 +119,32 @@ impl CacheTools {
         Self { cache }
     }
 
-    pub async fn cache_crate_from_cratesio(&self, params: CacheCrateFromCratesIOParams) -> CacheCrateOutput {
+    pub async fn cache_crate_from_cratesio(
+        &self,
+        params: CacheCrateFromCratesIOParams,
+    ) -> CacheCrateOutput {
         let cache = self.cache.write().await;
         let source = CrateSource::CratesIO(params);
         let json_response = cache.cache_crate_with_source(source).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
-            error: "Failed to parse cache response".to_string()
+            error: "Failed to parse cache response".to_string(),
         })
     }
 
-    pub async fn cache_crate_from_github(&self, params: CacheCrateFromGitHubParams) -> CacheCrateOutput {
+    pub async fn cache_crate_from_github(
+        &self,
+        params: CacheCrateFromGitHubParams,
+    ) -> CacheCrateOutput {
         // Validate that only one of branch or tag is provided
         match (&params.branch, &params.tag) {
             (Some(_), Some(_)) => {
                 return CacheCrateOutput::Error {
-                    error: "Only one of 'branch' or 'tag' can be specified, not both".to_string()
+                    error: "Only one of 'branch' or 'tag' can be specified, not both".to_string(),
                 };
             }
             (None, None) => {
                 return CacheCrateOutput::Error {
-                    error: "Either 'branch' or 'tag' must be specified".to_string()
+                    error: "Either 'branch' or 'tag' must be specified".to_string(),
                 };
             }
             _ => {} // Valid: exactly one is provided
@@ -148,20 +154,26 @@ impl CacheTools {
         let source = CrateSource::GitHub(params);
         let json_response = cache.cache_crate_with_source(source).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
-            error: "Failed to parse cache response".to_string()
+            error: "Failed to parse cache response".to_string(),
         })
     }
 
-    pub async fn cache_crate_from_local(&self, params: CacheCrateFromLocalParams) -> CacheCrateOutput {
+    pub async fn cache_crate_from_local(
+        &self,
+        params: CacheCrateFromLocalParams,
+    ) -> CacheCrateOutput {
         let cache = self.cache.write().await;
         let source = CrateSource::LocalPath(params);
         let json_response = cache.cache_crate_with_source(source).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
-            error: "Failed to parse cache response".to_string()
+            error: "Failed to parse cache response".to_string(),
         })
     }
 
-    pub async fn remove_crate(&self, params: RemoveCrateParams) -> Result<RemoveCrateOutput, ErrorOutput> {
+    pub async fn remove_crate(
+        &self,
+        params: RemoveCrateParams,
+    ) -> Result<RemoveCrateOutput, ErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .remove_crate(&params.crate_name, &params.version)
@@ -169,7 +181,10 @@ impl CacheTools {
         {
             Ok(_) => Ok(RemoveCrateOutput {
                 status: "success".to_string(),
-                message: format!("Successfully removed {}-{}", params.crate_name, params.version),
+                message: format!(
+                    "Successfully removed {}-{}",
+                    params.crate_name, params.version
+                ),
                 crate_name: params.crate_name,
                 version: params.version,
             }),
@@ -214,7 +229,7 @@ impl CacheTools {
 
                     grouped
                         .entry(crate_name)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(version_info);
                 }
 
@@ -228,13 +243,18 @@ impl CacheTools {
                     },
                 })
             }
-            Err(e) => Err(ErrorOutput::new(format!("Failed to list cached crates: {e}"))),
+            Err(e) => Err(ErrorOutput::new(format!(
+                "Failed to list cached crates: {e}"
+            ))),
         }
     }
 
-    pub async fn list_crate_versions(&self, params: ListCrateVersionsParams) -> Result<ListCrateVersionsOutput, ErrorOutput> {
+    pub async fn list_crate_versions(
+        &self,
+        params: ListCrateVersionsParams,
+    ) -> Result<ListCrateVersionsOutput, ErrorOutput> {
         let cache = self.cache.read().await;
-        
+
         // Get all cached metadata for this crate
         match cache.storage.list_cached_crates() {
             Ok(all_crates) => {
@@ -244,11 +264,14 @@ impl CacheTools {
                     .filter(|meta| meta.name == params.crate_name)
                     .map(|meta| {
                         // Get workspace members if any
-                        let members = match cache.storage.list_workspace_members(&meta.name, &meta.version) {
+                        let members = match cache
+                            .storage
+                            .list_workspace_members(&meta.name, &meta.version)
+                        {
                             Ok(members) if !members.is_empty() => Some(members),
                             _ => None,
                         };
-                        
+
                         VersionInfo {
                             version: meta.version,
                             cached_at: meta.cached_at.to_string(),
@@ -259,21 +282,26 @@ impl CacheTools {
                         }
                     })
                     .collect();
-                
+
                 // Sort versions (newest first)
                 versions.sort_by(|a, b| b.version.cmp(&a.version));
-                
+
                 Ok(ListCrateVersionsOutput {
                     crate_name: params.crate_name.clone(),
                     versions: versions.clone(),
                     count: versions.len(),
                 })
             }
-            Err(e) => Err(ErrorOutput::new(format!("Failed to get cached versions: {e}"))),
+            Err(e) => Err(ErrorOutput::new(format!(
+                "Failed to get cached versions: {e}"
+            ))),
         }
     }
 
-    pub async fn get_crates_metadata(&self, params: GetCratesMetadataParams) -> GetCratesMetadataOutput {
+    pub async fn get_crates_metadata(
+        &self,
+        params: GetCratesMetadataParams,
+    ) -> GetCratesMetadataOutput {
         let cache = self.cache.read().await;
         let mut metadata_list = Vec::new();
         let mut total_cached = 0;
@@ -286,12 +314,12 @@ impl CacheTools {
             // Check if main crate is cached
             if cache.storage.is_cached(crate_name, version) {
                 total_cached += 1;
-                
+
                 let main_metadata = match cache.storage.load_metadata(crate_name, version, None) {
                     Ok(metadata) => {
                         // Check if docs are analyzed
                         let analyzed = cache.storage.has_docs(crate_name, version, None);
-                        
+
                         CrateMetadata {
                             crate_name: crate_name.clone(),
                             version: version.clone(),
@@ -303,18 +331,16 @@ impl CacheTools {
                             workspace_members: None,
                         }
                     }
-                    Err(_) => {
-                        CrateMetadata {
-                            crate_name: crate_name.clone(),
-                            version: version.clone(),
-                            cached: true,
-                            analyzed: false,
-                            cache_size_bytes: None,
-                            cache_size_human: None,
-                            member: None,
-                            workspace_members: None,
-                        }
-                    }
+                    Err(_) => CrateMetadata {
+                        crate_name: crate_name.clone(),
+                        version: version.clone(),
+                        cached: true,
+                        analyzed: false,
+                        cache_size_bytes: None,
+                        cache_size_human: None,
+                        member: None,
+                        workspace_members: None,
+                    },
                 };
                 metadata_list.push(main_metadata);
             } else {
@@ -333,17 +359,23 @@ impl CacheTools {
             // Check requested members if any
             if let Some(members) = query.members {
                 for member_path in members {
-                    if cache.storage.is_member_cached(crate_name, version, &member_path) {
+                    if cache
+                        .storage
+                        .is_member_cached(crate_name, version, &member_path)
+                    {
                         total_cached += 1;
-                        
+
                         let member_metadata = match cache.storage.load_metadata(
                             crate_name,
                             version,
                             Some(&member_path),
                         ) {
                             Ok(metadata) => {
-                                let analyzed = cache.storage.has_docs(crate_name, version, Some(&member_path));
-                                
+                                let analyzed =
+                                    cache
+                                        .storage
+                                        .has_docs(crate_name, version, Some(&member_path));
+
                                 CrateMetadata {
                                     crate_name: crate_name.clone(),
                                     version: version.clone(),
@@ -355,18 +387,16 @@ impl CacheTools {
                                     workspace_members: None,
                                 }
                             }
-                            Err(_) => {
-                                CrateMetadata {
-                                    crate_name: crate_name.clone(),
-                                    version: version.clone(),
-                                    cached: true,
-                                    analyzed: false,
-                                    cache_size_bytes: None,
-                                    cache_size_human: None,
-                                    member: Some(member_path),
-                                    workspace_members: None,
-                                }
-                            }
+                            Err(_) => CrateMetadata {
+                                crate_name: crate_name.clone(),
+                                version: version.clone(),
+                                cached: true,
+                                analyzed: false,
+                                cache_size_bytes: None,
+                                cache_size_human: None,
+                                member: Some(member_path),
+                                workspace_members: None,
+                            },
                         };
                         metadata_list.push(member_metadata);
                     } else {

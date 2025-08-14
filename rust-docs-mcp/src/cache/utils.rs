@@ -3,10 +3,10 @@
 //! This module contains shared utilities used across the cache implementation,
 //! including file operations, error handling, and response formatting.
 
+use super::outputs::CacheCrateOutput;
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::Path;
-use super::outputs::CacheCrateOutput;
 
 /// Recursively copy directory contents from source to destination
 ///

@@ -48,8 +48,8 @@ use crate::cache::{CrateCache, storage::CacheStorage};
 use crate::search::config::{
     DEFAULT_FUZZY_DISTANCE, DEFAULT_SEARCH_LIMIT, MAX_FUZZY_DISTANCE, MAX_SEARCH_LIMIT,
 };
+use crate::search::outputs::{SearchErrorOutput, SearchItemsFuzzyOutput};
 use crate::search::{FuzzySearchOptions, FuzzySearcher, SearchIndexer, SearchResult};
-use crate::search::outputs::{SearchItemsFuzzyOutput, SearchErrorOutput};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SearchItemsFuzzyParams {
@@ -144,7 +144,10 @@ impl SearchTools {
     }
 
     /// Perform fuzzy search on crate items
-    pub async fn search_items_fuzzy(&self, params: SearchItemsFuzzyParams) -> Result<SearchItemsFuzzyOutput, SearchErrorOutput> {
+    pub async fn search_items_fuzzy(
+        &self,
+        params: SearchItemsFuzzyParams,
+    ) -> Result<SearchItemsFuzzyOutput, SearchErrorOutput> {
         let query = params.query.clone();
         let fuzzy_enabled = params.fuzzy_enabled.unwrap_or(true);
         let crate_name = params.crate_name.clone();
@@ -231,18 +234,21 @@ impl SearchTools {
             Ok(results) => {
                 let total = results.len();
                 Ok(SearchItemsFuzzyOutput {
-                    results: results.into_iter().map(|r| crate::search::outputs::SearchResult {
-                        score: r.score,
-                        item_id: r.item_id,
-                        name: r.name,
-                        path: r.path,
-                        kind: r.kind,
-                        crate_name: r.crate_name,
-                        version: r.version,
-                        visibility: r.visibility,
-                        doc_preview: None,  // fuzzy::SearchResult doesn't have doc_preview
-                        member: r.member,
-                    }).collect(),
+                    results: results
+                        .into_iter()
+                        .map(|r| crate::search::outputs::SearchResult {
+                            score: r.score,
+                            item_id: r.item_id,
+                            name: r.name,
+                            path: r.path,
+                            kind: r.kind,
+                            crate_name: r.crate_name,
+                            version: r.version,
+                            visibility: r.visibility,
+                            doc_preview: None, // fuzzy::SearchResult doesn't have doc_preview
+                            member: r.member,
+                        })
+                        .collect(),
                     query,
                     total_results: total,
                     fuzzy_enabled,
@@ -251,9 +257,7 @@ impl SearchTools {
                     member,
                 })
             }
-            Err(e) => {
-                Err(SearchErrorOutput::new(format!("Search failed: {e}")))
-            }
+            Err(e) => Err(SearchErrorOutput::new(format!("Search failed: {e}"))),
         }
     }
 }

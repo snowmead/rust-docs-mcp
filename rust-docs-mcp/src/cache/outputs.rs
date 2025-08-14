@@ -52,9 +52,7 @@ pub enum CacheCrateOutput {
     },
     /// Error occurred during operation
     #[serde(rename = "error")]
-    Error { 
-        error: String 
-    },
+    Error { error: String },
 }
 
 impl CacheCrateOutput {

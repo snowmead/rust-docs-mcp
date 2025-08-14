@@ -32,7 +32,7 @@ impl StructureOutput {
         serde_json::to_string(self)
             .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
     }
-    
+
     /// Check if this is a success response
     pub fn is_success(&self) -> bool {
         self.status == "success"
@@ -52,7 +52,7 @@ impl AnalysisErrorOutput {
             error: message.into(),
         }
     }
-    
+
     /// Convert to JSON string for MCP response
     pub fn to_json(&self) -> String {
         serde_json::to_string(self)
@@ -63,7 +63,7 @@ impl AnalysisErrorOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_structure_output_serialization() {
         let output = StructureOutput {
@@ -74,26 +74,24 @@ mod tests {
                 name: "root".to_string(),
                 path: "".to_string(),
                 visibility: "public".to_string(),
-                children: Some(vec![
-                    StructureNode {
-                        kind: "struct".to_string(),
-                        name: "MyStruct".to_string(),
-                        path: "my_mod".to_string(),
-                        visibility: "public".to_string(),
-                        children: None,
-                    }
-                ]),
+                children: Some(vec![StructureNode {
+                    kind: "struct".to_string(),
+                    name: "MyStruct".to_string(),
+                    path: "my_mod".to_string(),
+                    visibility: "public".to_string(),
+                    children: None,
+                }]),
             },
             usage_hint: "Use the 'path' and 'name' fields to search for items".to_string(),
         };
-        
+
         assert!(output.is_success());
-        
+
         let json = output.to_json();
         let deserialized: StructureOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(output, deserialized);
     }
-    
+
     #[test]
     fn test_analysis_error_output() {
         let output = AnalysisErrorOutput::new("Failed to analyze crate");

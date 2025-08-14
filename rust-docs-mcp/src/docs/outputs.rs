@@ -108,7 +108,7 @@ pub struct DetailedItem {
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum GetItemDetailsOutput {
-    Success(DetailedItem),
+    Success(Box<DetailedItem>),
     Error { error: String },
 }
 
@@ -118,12 +118,12 @@ impl GetItemDetailsOutput {
         serde_json::to_string(self)
             .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
     }
-    
+
     /// Check if this is a success response
     pub fn is_success(&self) -> bool {
         matches!(self, GetItemDetailsOutput::Success(_))
     }
-    
+
     /// Check if this is an error response
     pub fn is_error(&self) -> bool {
         matches!(self, GetItemDetailsOutput::Error { .. })
@@ -168,12 +168,12 @@ impl GetItemSourceOutput {
         serde_json::to_string(self)
             .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
     }
-    
+
     /// Check if this is a success response
     pub fn is_success(&self) -> bool {
         matches!(self, GetItemSourceOutput::Success(_))
     }
-    
+
     /// Check if this is an error response
     pub fn is_error(&self) -> bool {
         matches!(self, GetItemSourceOutput::Error { .. })
@@ -193,7 +193,7 @@ impl DocsErrorOutput {
             error: message.into(),
         }
     }
-    
+
     /// Convert to JSON string for MCP response
     pub fn to_json(&self) -> String {
         serde_json::to_string(self)
@@ -204,20 +204,18 @@ impl DocsErrorOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_list_items_output_serialization() {
         let output = ListCrateItemsOutput {
-            items: vec![
-                ItemInfo {
-                    id: "1".to_string(),
-                    name: "test_fn".to_string(),
-                    kind: "function".to_string(),
-                    path: vec!["test".to_string()],
-                    docs: Some("Test function".to_string()),
-                    visibility: "public".to_string(),
-                }
-            ],
+            items: vec![ItemInfo {
+                id: "1".to_string(),
+                name: "test_fn".to_string(),
+                kind: "function".to_string(),
+                path: vec!["test".to_string()],
+                docs: Some("Test function".to_string()),
+                visibility: "public".to_string(),
+            }],
             pagination: PaginationInfo {
                 total: 1,
                 limit: 100,
@@ -225,23 +223,21 @@ mod tests {
                 has_more: false,
             },
         };
-        
+
         let json = output.to_json();
         let deserialized: ListCrateItemsOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(output, deserialized);
     }
-    
+
     #[test]
     fn test_search_preview_output() {
         let output = SearchItemsPreviewOutput {
-            items: vec![
-                ItemPreview {
-                    id: "42".to_string(),
-                    name: "MyStruct".to_string(),
-                    kind: "struct".to_string(),
-                    path: vec!["my_mod".to_string()],
-                }
-            ],
+            items: vec![ItemPreview {
+                id: "42".to_string(),
+                name: "MyStruct".to_string(),
+                kind: "struct".to_string(),
+                path: vec!["my_mod".to_string()],
+            }],
             pagination: PaginationInfo {
                 total: 1,
                 limit: 10,
@@ -249,15 +245,15 @@ mod tests {
                 has_more: false,
             },
         };
-        
+
         let json = output.to_json();
         let deserialized: SearchItemsPreviewOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(output, deserialized);
     }
-    
+
     #[test]
     fn test_item_details_output() {
-        let success = GetItemDetailsOutput::Success(DetailedItem {
+        let success = GetItemDetailsOutput::Success(Box::new(DetailedItem {
             info: ItemInfo {
                 id: "1".to_string(),
                 name: "test".to_string(),
@@ -272,15 +268,15 @@ mod tests {
             variants: None,
             methods: None,
             source_location: None,
-        });
-        
+        }));
+
         assert!(success.is_success());
         assert!(!success.is_error());
-        
+
         let error = GetItemDetailsOutput::Error {
             error: "Not found".to_string(),
         };
-        
+
         assert!(!error.is_success());
         assert!(error.is_error());
     }

@@ -6,7 +6,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
-use crate::deps::{process_cargo_metadata, outputs::{GetDependenciesOutput, DepsErrorOutput, CrateIdentifier, Dependency}};
+use crate::deps::{
+    outputs::{CrateIdentifier, Dependency, DepsErrorOutput, GetDependenciesOutput},
+    process_cargo_metadata,
+};
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetDependenciesParams {
@@ -36,7 +39,10 @@ impl DepsTools {
         Self { cache }
     }
 
-    pub async fn get_dependencies(&self, params: GetDependenciesParams) -> Result<GetDependenciesOutput, DepsErrorOutput> {
+    pub async fn get_dependencies(
+        &self,
+        params: GetDependenciesParams,
+    ) -> Result<GetDependenciesOutput, DepsErrorOutput> {
         let cache = self.cache.write().await;
 
         // First ensure the crate is cached
@@ -68,7 +74,9 @@ impl DepsTools {
                                     name: dep_info.crate_info.name,
                                     version: dep_info.crate_info.version,
                                 },
-                                direct_dependencies: dep_info.direct_dependencies.into_iter()
+                                direct_dependencies: dep_info
+                                    .direct_dependencies
+                                    .into_iter()
                                     .map(|d| Dependency {
                                         name: d.name,
                                         version_req: d.version_req,
@@ -82,18 +90,18 @@ impl DepsTools {
                                 dependency_tree: dep_info.dependency_tree,
                                 total_dependencies: dep_info.total_dependencies,
                             }),
-                            Err(e) => Err(DepsErrorOutput::new(
-                                format!("Failed to process dependency metadata: {e}")
-                            )),
+                            Err(e) => Err(DepsErrorOutput::new(format!(
+                                "Failed to process dependency metadata: {e}"
+                            ))),
                         }
                     }
                     Err(e) => Err(DepsErrorOutput::new(format!(
                         "Dependencies not available for {}-{}. Error: {}",
                         params.crate_name, params.version, e
-                    )))
+                    ))),
                 }
             }
-            Err(e) => Err(DepsErrorOutput::new(format!("Failed to cache crate: {e}")))
+            Err(e) => Err(DepsErrorOutput::new(format!("Failed to cache crate: {e}"))),
         }
     }
 }

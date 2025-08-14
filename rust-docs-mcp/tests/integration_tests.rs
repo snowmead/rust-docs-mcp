@@ -8,25 +8,28 @@
 use anyhow::Result;
 use rmcp::handler::server::tool::Parameters;
 use rust_docs_mcp::RustDocsService;
+use rust_docs_mcp::analysis::outputs::StructureOutput;
+use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
+use rust_docs_mcp::cache::outputs::{
+    CacheCrateOutput, GetCratesMetadataOutput, ListCachedCratesOutput, ListCrateVersionsOutput,
+    RemoveCrateOutput,
+};
 use rust_docs_mcp::cache::tools::{
     CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-    ListCrateVersionsParams, GetCratesMetadataParams, CrateMetadataQuery,
+    CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
 };
-use rust_docs_mcp::cache::outputs::{CacheCrateOutput, ListCrateVersionsOutput, GetCratesMetadataOutput, ListCachedCratesOutput, RemoveCrateOutput};
-use rust_docs_mcp::docs::tools::{
-    ListItemsParams, SearchItemsParams, SearchItemsPreviewParams, 
-    GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams,
-};
-use rust_docs_mcp::docs::outputs::{
-    ListCrateItemsOutput, SearchItemsOutput, SearchItemsPreviewOutput,
-    GetItemDetailsOutput, GetItemDocsOutput, GetItemSourceOutput,
-};
-use rust_docs_mcp::deps::tools::GetDependenciesParams;
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
-use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
-use rust_docs_mcp::analysis::outputs::StructureOutput;
-use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use rust_docs_mcp::deps::tools::GetDependenciesParams;
+use rust_docs_mcp::docs::outputs::{
+    GetItemDetailsOutput, GetItemDocsOutput, GetItemSourceOutput, ListCrateItemsOutput,
+    SearchItemsOutput, SearchItemsPreviewOutput,
+};
+use rust_docs_mcp::docs::tools::{
+    GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
+    SearchItemsParams, SearchItemsPreviewParams,
+};
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
+use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -40,8 +43,13 @@ const CLIPPY_BRANCH: &str = "master";
 
 // Response validation helpers
 fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
-    serde_json::from_str(response)
-        .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {}\nResponse: {}", e, response))
+    serde_json::from_str(response).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to parse cache response: {}\nResponse: {}",
+            e,
+            response
+        )
+    })
 }
 
 fn is_binary_only_response(response: &str) -> bool {
@@ -97,14 +105,13 @@ async fn get_test_item_id(service: &RustDocsService) -> Result<i32> {
 
     let response = service.search_items_preview(Parameters(params)).await;
     let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
-    
+
     if let Some(item) = output.items.first() {
         return Ok(item.id.parse::<i32>()?);
     }
-    
+
     Err(anyhow::anyhow!("Could not find test item ID in response"))
 }
-
 
 #[tokio::test]
 async fn test_cache_from_crates_io() -> Result<()> {
@@ -123,14 +130,18 @@ async fn test_cache_from_crates_io() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params)),
     )
     .await?;
-    
+
     let output = parse_cache_response(&response)?;
     match &output {
-        CacheCrateOutput::Success { crate_name, version, .. } => {
+        CacheCrateOutput::Success {
+            crate_name,
+            version,
+            ..
+        } => {
             assert_eq!(crate_name, "semver");
             assert_eq!(version, SEMVER_VERSION);
         }
-        _ => panic!("Expected success response, got: {:?}", output)
+        _ => panic!("Expected success response, got: {:?}", output),
     }
 
     // Verify it's in the cache by listing versions
@@ -142,7 +153,10 @@ async fn test_cache_from_crates_io() -> Result<()> {
     let versions_output: ListCrateVersionsOutput = serde_json::from_str(&versions_response)?;
     assert_eq!(versions_output.crate_name, "semver");
     assert!(
-        versions_output.versions.iter().any(|v| v.version == SEMVER_VERSION),
+        versions_output
+            .versions
+            .iter()
+            .any(|v| v.version == SEMVER_VERSION),
         "Version not found in cache: {:?}",
         versions_output
     );
@@ -169,7 +183,7 @@ async fn test_cache_from_github() -> Result<()> {
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
-    
+
     // Serde is a workspace, so we should get a workspace detection response
     let output = parse_cache_response(&response)?;
     assert!(
@@ -186,7 +200,10 @@ async fn test_cache_from_github() -> Result<()> {
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
     let versions_output: ListCrateVersionsOutput = serde_json::from_str(&versions_response)?;
     assert!(
-        versions_output.versions.iter().any(|v| v.version == SERDE_VERSION),
+        versions_output
+            .versions
+            .iter()
+            .any(|v| v.version == SERDE_VERSION),
         "Version not found: {:?}",
         versions_output
     );
@@ -200,7 +217,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
     let _ = tracing_subscriber::fmt()
         .with_env_filter("rust_docs_mcp=debug")
         .try_init();
-        
+
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache from GitHub using a branch
@@ -218,10 +235,10 @@ async fn test_cache_from_github_branch() -> Result<()> {
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
-    
+
     // Print the response for debugging
     println!("Response: {}", response);
-    
+
     // Clippy is a binary-only package, so we should expect an appropriate error
     assert!(
         is_binary_only_response(&response),
@@ -353,8 +370,11 @@ serde = {{ workspace = true }}
         "Response should indicate workspace detection: {:?}",
         output
     );
-    
-    if let CacheCrateOutput::WorkspaceDetected { workspace_members, .. } = &output {
+
+    if let CacheCrateOutput::WorkspaceDetected {
+        workspace_members, ..
+    } = &output
+    {
         assert!(workspace_members.contains(&"crate-a".to_string()));
         assert!(workspace_members.contains(&"crate-b".to_string()));
     }
@@ -380,11 +400,7 @@ async fn test_cache_update() -> Result<()> {
     )
     .await?;
     let output1 = parse_cache_response(&response1)?;
-    assert!(
-        output1.is_success(),
-        "Initial cache failed: {:?}",
-        output1
-    );
+    assert!(output1.is_success(), "Initial cache failed: {:?}", output1);
 
     // Cache again with update flag
     let params2 = CacheCrateFromCratesIOParams {
@@ -401,12 +417,8 @@ async fn test_cache_update() -> Result<()> {
     .await?;
     // Update should return "Successfully updated" message
     let output2 = parse_cache_response(&response2)?;
-    assert!(
-        output2.is_success(),
-        "Update cache failed: {:?}",
-        output2
-    );
-    
+    assert!(output2.is_success(), "Update cache failed: {:?}", output2);
+
     if let CacheCrateOutput::Success { updated, .. } = &output2 {
         assert_eq!(*updated, Some(true), "Should have updated flag set");
     }
@@ -431,7 +443,7 @@ async fn test_invalid_inputs() -> Result<()> {
         service.cache_crate_from_cratesio(Parameters(params)),
     )
     .await?;
-    
+
     // crates.io returns 403 Forbidden for non-existent crates
     let output = parse_cache_response(&response)?;
     assert!(
@@ -587,9 +599,7 @@ async fn test_concurrent_caching() -> Result<()> {
         assert!(
             is_valid,
             "Cache integrity check failed for {} {}: {:?}",
-            name,
-            version,
-            output
+            name, version, output
         );
     }
 
@@ -646,8 +656,8 @@ edition = "2021"
     let response1 = service.cache_crate_from_local(Parameters(params1)).await;
     let output1 = parse_cache_response(&response1)?;
     assert!(
-        matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. } 
-            if workspace_members.contains(&"lib-a".to_string()) 
+        matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. }
+            if workspace_members.contains(&"lib-a".to_string())
             && workspace_members.contains(&"lib-b".to_string())),
         "Should detect workspace and list members: {:?}",
         output1
@@ -692,7 +702,7 @@ async fn test_list_crate_items() -> Result<()> {
 
     let response = service.list_crate_items(Parameters(params)).await;
     let output: ListCrateItemsOutput = serde_json::from_str(&response)?;
-    
+
     assert!(!output.items.is_empty(), "Should have items");
     assert_eq!(output.pagination.limit, 50, "Limit should match request");
     assert_eq!(output.pagination.offset, 0, "Offset should match request");
@@ -709,7 +719,7 @@ async fn test_list_crate_items() -> Result<()> {
 
     let response = service.list_crate_items(Parameters(params)).await;
     let output: ListCrateItemsOutput = serde_json::from_str(&response)?;
-    
+
     // Check all items are structs
     for item in &output.items {
         assert_eq!(item.kind, "struct", "All items should be structs");
@@ -737,9 +747,12 @@ async fn test_search_items_preview() -> Result<()> {
 
     let response = service.search_items_preview(Parameters(params)).await;
     let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
-    
-    assert!(!output.items.is_empty(), "Should find items matching 'Version'");
-    
+
+    assert!(
+        !output.items.is_empty(),
+        "Should find items matching 'Version'"
+    );
+
     // Verify preview format (only id, name, kind, path)
     if let Some(item) = output.items.first() {
         assert!(!item.id.is_empty(), "Item should have id");
@@ -762,7 +775,7 @@ async fn test_search_items_preview() -> Result<()> {
 
     let response = service.search_items_preview(Parameters(params)).await;
     let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
-    
+
     // Check all items are functions
     for item in &output.items {
         assert_eq!(item.kind, "function", "All items should be functions");
@@ -790,9 +803,9 @@ async fn test_search_items_full() -> Result<()> {
 
     let response = service.search_items(Parameters(params)).await;
     let output: SearchItemsOutput = serde_json::from_str(&response)?;
-    
+
     assert!(!output.items.is_empty(), "Should find items");
-    
+
     // Verify full format includes documentation
     if let Some(item) = output.items.first() {
         assert!(!item.id.is_empty(), "Item should have id");
@@ -809,7 +822,7 @@ async fn test_search_items_full() -> Result<()> {
 async fn test_get_item_details() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
-    
+
     let item_id = get_test_item_id(&service).await?;
 
     // Test getting complete item details
@@ -822,14 +835,20 @@ async fn test_get_item_details() -> Result<()> {
 
     let response = service.get_item_details(Parameters(params)).await;
     let output: GetItemDetailsOutput = serde_json::from_str(&response)?;
-    
+
     assert!(output.is_success(), "Should be a success response");
-    
+
     if let GetItemDetailsOutput::Success(detailed_item) = output {
         // Should contain detailed information about the item
         assert!(!detailed_item.info.id.is_empty(), "Details should have id");
-        assert!(!detailed_item.info.name.is_empty(), "Details should have name");
-        assert!(!detailed_item.info.kind.is_empty(), "Details should have kind");
+        assert!(
+            !detailed_item.info.name.is_empty(),
+            "Details should have name"
+        );
+        assert!(
+            !detailed_item.info.kind.is_empty(),
+            "Details should have kind"
+        );
     }
 
     Ok(())
@@ -839,7 +858,7 @@ async fn test_get_item_details() -> Result<()> {
 async fn test_get_item_docs_and_source() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
-    
+
     let item_id = get_test_item_id(&service).await?;
 
     // Test getting just documentation
@@ -852,11 +871,14 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 
     let docs_response = service.get_item_docs(Parameters(docs_params)).await;
     let docs_output: GetItemDocsOutput = serde_json::from_str(&docs_response)?;
-    
+
     // Documentation is optional - the item may not have docs
     // If it has documentation, it should be in the documentation field
     if let Some(doc) = docs_output.documentation {
-        assert!(!doc.is_empty(), "If documentation exists, it should not be empty");
+        assert!(
+            !doc.is_empty(),
+            "If documentation exists, it should not be empty"
+        );
     }
 
     // Test getting source code
@@ -870,13 +892,20 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 
     let source_response = service.get_item_source(Parameters(source_params)).await;
     let source_output: GetItemSourceOutput = serde_json::from_str(&source_response)?;
-    
+
     assert!(source_output.is_success(), "Should be a success response");
-    
+
     if let GetItemSourceOutput::Success(source_info) = source_output {
         assert!(!source_info.code.is_empty(), "Should contain source code");
-        assert!(!source_info.location.filename.is_empty(), "Should have filename");
-        assert_eq!(source_info.context_lines, Some(5), "Context lines should match request");
+        assert!(
+            !source_info.location.filename.is_empty(),
+            "Should have filename"
+        );
+        assert_eq!(
+            source_info.context_lines,
+            Some(5),
+            "Context lines should match request"
+        );
     }
 
     Ok(())
@@ -903,7 +932,7 @@ async fn test_search_items_fuzzy() -> Result<()> {
 
     let response = service.search_items_fuzzy(Parameters(params)).await;
     let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
-    
+
     assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
     assert_eq!(output.query, "Versoin", "Query should match request");
     assert_eq!(output.crate_name, "semver", "Crate name should match");
@@ -923,9 +952,9 @@ async fn test_search_items_fuzzy() -> Result<()> {
 
     let response = service.search_items_fuzzy(Parameters(params)).await;
     let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
-    
+
     assert!(!output.fuzzy_enabled, "Fuzzy should be disabled");
-    
+
     // Check all results are structs if any results were found
     for result in &output.results {
         assert_eq!(result.kind, "struct", "All results should be structs");
@@ -964,7 +993,7 @@ async fn test_structure() -> Result<()> {
 
     let response = service.structure(Parameters(params)).await;
     let output: StructureOutput = serde_json::from_str(&response)?;
-    
+
     assert!(output.is_success(), "Structure analysis should succeed");
     assert_eq!(output.status, "success", "Status should be success");
     assert!(!output.message.is_empty(), "Should have a message");
@@ -994,8 +1023,11 @@ async fn test_structure() -> Result<()> {
 
     let response = service.structure(Parameters(params)).await;
     let output: StructureOutput = serde_json::from_str(&response)?;
-    
-    assert!(output.is_success(), "Filtered structure analysis should succeed");
+
+    assert!(
+        output.is_success(),
+        "Filtered structure analysis should succeed"
+    );
 
     Ok(())
 }
@@ -1018,11 +1050,17 @@ async fn test_get_dependencies() -> Result<()> {
 
     let response = service.get_dependencies(Parameters(params)).await;
     let output: GetDependenciesOutput = serde_json::from_str(&response)?;
-    
+
     assert_eq!(output.crate_info.name, "semver", "Crate name should match");
-    assert_eq!(output.crate_info.version, SEMVER_VERSION, "Version should match");
+    assert_eq!(
+        output.crate_info.version, SEMVER_VERSION,
+        "Version should match"
+    );
     // Direct dependencies is a list, could be empty
-    assert!(output.direct_dependencies.len() >= 0, "Should have dependencies list");
+    assert!(
+        output.direct_dependencies.len() >= 0,
+        "Should have dependencies list"
+    );
 
     // Test full dependency tree
     let params = GetDependenciesParams {
@@ -1035,9 +1073,12 @@ async fn test_get_dependencies() -> Result<()> {
 
     let response = service.get_dependencies(Parameters(params)).await;
     let output: GetDependenciesOutput = serde_json::from_str(&response)?;
-    
+
     // When include_tree is true, dependency_tree should be populated
-    assert!(output.dependency_tree.is_some(), "Should include dependency tree when requested");
+    assert!(
+        output.dependency_tree.is_some(),
+        "Should include dependency tree when requested"
+    );
 
     // Test with filter
     let params = GetDependenciesParams {
@@ -1050,10 +1091,13 @@ async fn test_get_dependencies() -> Result<()> {
 
     let response = service.get_dependencies(Parameters(params)).await;
     let output: GetDependenciesOutput = serde_json::from_str(&response)?;
-    
+
     // Filter might return empty results, but that's OK
     // Just verify the response is valid
-    assert_eq!(output.crate_info.name, "semver", "Crate name should match even with filter");
+    assert_eq!(
+        output.crate_info.name, "semver",
+        "Crate name should match even with filter"
+    );
 
     Ok(())
 }
@@ -1083,14 +1127,14 @@ async fn test_get_crates_metadata() -> Result<()> {
 
     let response = service.get_crates_metadata(Parameters(params)).await;
     let output: GetCratesMetadataOutput = serde_json::from_str(&response)?;
-    
+
     assert_eq!(output.total_queried, 2, "Should query 2 crates");
     assert_eq!(output.metadata.len(), 2, "Should have 2 metadata entries");
-    
+
     // First query should show semver as cached
     assert_eq!(output.metadata[0].crate_name, "semver");
     assert_eq!(output.metadata[0].cached, true);
-    
+
     // Second query should show nonexistent crate as not cached
     assert_eq!(output.metadata[1].crate_name, "nonexistent-crate");
     assert_eq!(output.metadata[1].cached, false);
@@ -1114,8 +1158,11 @@ async fn test_invalid_item_ids() -> Result<()> {
     };
 
     let response = service.get_item_details(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("not found"), 
-            "Should return error for invalid ID: {}", response);
+    assert!(
+        response.contains("error") || response.contains("not found"),
+        "Should return error for invalid ID: {}",
+        response
+    );
 
     // Test docs with invalid ID
     let params = GetItemDocsParams {
@@ -1126,8 +1173,11 @@ async fn test_invalid_item_ids() -> Result<()> {
     };
 
     let response = service.get_item_docs(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("not found"),
-            "Should return error for invalid docs ID: {}", response);
+    assert!(
+        response.contains("error") || response.contains("not found"),
+        "Should return error for invalid docs ID: {}",
+        response
+    );
 
     // Test source with invalid ID
     let params = GetItemSourceParams {
@@ -1139,8 +1189,11 @@ async fn test_invalid_item_ids() -> Result<()> {
     };
 
     let response = service.get_item_source(Parameters(params)).await;
-    assert!(response.contains("error") || response.contains("not found"),
-            "Should return error for invalid source ID: {}", response);
+    assert!(
+        response.contains("error") || response.contains("not found"),
+        "Should return error for invalid source ID: {}",
+        response
+    );
 
     Ok(())
 }
@@ -1164,9 +1217,15 @@ async fn test_empty_search_results() -> Result<()> {
 
     let response = service.search_items_preview(Parameters(params)).await;
     let output: SearchItemsPreviewOutput = serde_json::from_str(&response)?;
-    
-    assert!(output.items.is_empty(), "Should return empty results for non-existent pattern");
-    assert_eq!(output.pagination.total, 0, "Total should be 0 for no results");
+
+    assert!(
+        output.items.is_empty(),
+        "Should return empty results for non-existent pattern"
+    );
+    assert_eq!(
+        output.pagination.total, 0,
+        "Total should be 0 for no results"
+    );
 
     // Test fuzzy search with no results
     let params = SearchItemsFuzzyParams {
@@ -1182,12 +1241,18 @@ async fn test_empty_search_results() -> Result<()> {
 
     let response = service.search_items_fuzzy(Parameters(params)).await;
     let output: SearchItemsFuzzyOutput = serde_json::from_str(&response)?;
-    
+
     // Fuzzy search might return some results even for non-existent patterns, but should be valid
-    assert_eq!(output.query, "XyZabc123NonExistent", "Query should match request");
+    assert_eq!(
+        output.query, "XyZabc123NonExistent",
+        "Query should match request"
+    );
     assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
     // Results could be empty or have some fuzzy matches
-    assert!(output.total_results >= 0, "Total results should be non-negative");
+    assert!(
+        output.total_results >= 0,
+        "Total results should be non-negative"
+    );
 
     Ok(())
 }

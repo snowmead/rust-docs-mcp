@@ -9,11 +9,10 @@ use crate::cache::CrateCache;
 use crate::docs::{
     DocQuery,
     outputs::{
-        ListCrateItemsOutput, SearchItemsOutput, SearchItemsPreviewOutput, 
-        GetItemDetailsOutput, GetItemDocsOutput, GetItemSourceOutput,
-        DocsErrorOutput, ItemInfo, ItemPreview, PaginationInfo, 
-        DetailedItem, SourceInfo, SourceLocation
-    }
+        DetailedItem, DocsErrorOutput, GetItemDetailsOutput, GetItemDocsOutput,
+        GetItemSourceOutput, ItemInfo, ItemPreview, ListCrateItemsOutput, PaginationInfo,
+        SearchItemsOutput, SearchItemsPreviewOutput, SourceInfo, SourceLocation,
+    },
 };
 
 /// Maximum size for response in bytes (roughly 25k tokens * 4 bytes/token)
@@ -146,7 +145,10 @@ impl DocsTools {
         serde_json::to_string(data).map(|s| s.len()).unwrap_or(0)
     }
 
-    pub async fn list_crate_items(&self, params: ListItemsParams) -> Result<ListCrateItemsOutput, DocsErrorOutput> {
+    pub async fn list_crate_items(
+        &self,
+        params: ListItemsParams,
+    ) -> Result<ListCrateItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -165,7 +167,10 @@ impl DocsTools {
                 let offset = params.offset.unwrap_or(0).max(0) as usize;
 
                 // Apply pagination
-                let paginated_items: Vec<_> = items.into_iter().skip(offset).take(limit)
+                let paginated_items: Vec<_> = items
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
                     .map(|item| ItemInfo {
                         id: item.id.to_string(),
                         name: item.name.clone(),
@@ -186,11 +191,16 @@ impl DocsTools {
                     },
                 })
             }
-            Err(e) => Err(DocsErrorOutput::new(format!("Failed to get crate docs: {e}"))),
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn search_items(&self, params: SearchItemsParams) -> Result<SearchItemsOutput, DocsErrorOutput> {
+    pub async fn search_items(
+        &self,
+        params: SearchItemsParams,
+    ) -> Result<SearchItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -261,7 +271,8 @@ impl DocsTools {
                 };
 
                 Ok(SearchItemsOutput {
-                    items: paginated_items.into_iter()
+                    items: paginated_items
+                        .into_iter()
                         .map(|item| ItemInfo {
                             id: item.id.to_string(),
                             name: item.name.clone(),
@@ -280,11 +291,16 @@ impl DocsTools {
                     warning,
                 })
             }
-            Err(e) => Err(DocsErrorOutput::new(format!("Failed to get crate docs: {e}"))),
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn search_items_preview(&self, params: SearchItemsPreviewParams) -> Result<SearchItemsPreviewOutput, DocsErrorOutput> {
+    pub async fn search_items_preview(
+        &self,
+        params: SearchItemsPreviewParams,
+    ) -> Result<SearchItemsPreviewOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -331,15 +347,19 @@ impl DocsTools {
                     .collect();
 
                 Ok(SearchItemsPreviewOutput {
-                    items: preview_items.into_iter()
+                    items: preview_items
+                        .into_iter()
                         .map(|item| ItemPreview {
                             id: item["id"].as_str().unwrap_or("").to_string(),
                             name: item["name"].as_str().unwrap_or("").to_string(),
                             kind: item["kind"].as_str().unwrap_or("").to_string(),
-                            path: item["path"].as_array()
-                                .map(|arr| arr.iter()
-                                    .filter_map(|v| v.as_str().map(String::from))
-                                    .collect())
+                            path: item["path"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect()
+                                })
                                 .unwrap_or_default(),
                         })
                         .collect(),
@@ -351,7 +371,9 @@ impl DocsTools {
                     },
                 })
             }
-            Err(e) => Err(DocsErrorOutput::new(format!("Failed to get crate docs: {e}"))),
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
@@ -370,7 +392,7 @@ impl DocsTools {
                 match query.get_item_details(params.item_id.max(0) as u32) {
                     Ok(details) => {
                         // Convert the details to our output format
-                        GetItemDetailsOutput::Success(DetailedItem {
+                        GetItemDetailsOutput::Success(Box::new(DetailedItem {
                             info: ItemInfo {
                                 id: details.info.id.clone(),
                                 name: details.info.name.clone(),
@@ -381,36 +403,45 @@ impl DocsTools {
                             },
                             signature: details.signature.clone(),
                             generics: details.generics.clone(),
-                            fields: details.fields.map(|fields| fields.into_iter()
-                                .map(|f| ItemInfo {
-                                    id: f.id,
-                                    name: f.name,
-                                    kind: f.kind,
-                                    path: f.path,
-                                    docs: f.docs,
-                                    visibility: f.visibility,
-                                })
-                                .collect()),
-                            variants: details.variants.map(|variants| variants.into_iter()
-                                .map(|v| ItemInfo {
-                                    id: v.id,
-                                    name: v.name,
-                                    kind: v.kind,
-                                    path: v.path,
-                                    docs: v.docs,
-                                    visibility: v.visibility,
-                                })
-                                .collect()),
-                            methods: details.methods.map(|methods| methods.into_iter()
-                                .map(|m| ItemInfo {
-                                    id: m.id,
-                                    name: m.name,
-                                    kind: m.kind,
-                                    path: m.path,
-                                    docs: m.docs,
-                                    visibility: m.visibility,
-                                })
-                                .collect()),
+                            fields: details.fields.map(|fields| {
+                                fields
+                                    .into_iter()
+                                    .map(|f| ItemInfo {
+                                        id: f.id,
+                                        name: f.name,
+                                        kind: f.kind,
+                                        path: f.path,
+                                        docs: f.docs,
+                                        visibility: f.visibility,
+                                    })
+                                    .collect()
+                            }),
+                            variants: details.variants.map(|variants| {
+                                variants
+                                    .into_iter()
+                                    .map(|v| ItemInfo {
+                                        id: v.id,
+                                        name: v.name,
+                                        kind: v.kind,
+                                        path: v.path,
+                                        docs: v.docs,
+                                        visibility: v.visibility,
+                                    })
+                                    .collect()
+                            }),
+                            methods: details.methods.map(|methods| {
+                                methods
+                                    .into_iter()
+                                    .map(|m| ItemInfo {
+                                        id: m.id,
+                                        name: m.name,
+                                        kind: m.kind,
+                                        path: m.path,
+                                        docs: m.docs,
+                                        visibility: m.visibility,
+                                    })
+                                    .collect()
+                            }),
                             source_location: details.source_location.map(|loc| SourceLocation {
                                 filename: loc.filename,
                                 line_start: loc.line_start,
@@ -418,8 +449,8 @@ impl DocsTools {
                                 line_end: loc.line_end,
                                 column_end: loc.column_end,
                             }),
-                        })
-                    },
+                        }))
+                    }
                     Err(e) => GetItemDetailsOutput::Error {
                         error: format!("Item not found: {e}"),
                     },
@@ -431,7 +462,10 @@ impl DocsTools {
         }
     }
 
-    pub async fn get_item_docs(&self, params: GetItemDocsParams) -> Result<GetItemDocsOutput, DocsErrorOutput> {
+    pub async fn get_item_docs(
+        &self,
+        params: GetItemDocsParams,
+    ) -> Result<GetItemDocsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -454,11 +488,13 @@ impl DocsTools {
                             documentation: docs,
                             message,
                         })
-                    },
+                    }
                     Err(e) => Err(DocsErrorOutput::new(format!("Failed to get docs: {e}"))),
                 }
             }
-            Err(e) => Err(DocsErrorOutput::new(format!("Failed to get crate docs: {e}"))),
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
@@ -466,9 +502,11 @@ impl DocsTools {
         let cache = self.cache.write().await;
         let source_base_path = match cache.get_source_path(&params.crate_name, &params.version) {
             Ok(path) => path,
-            Err(e) => return GetItemSourceOutput::Error {
-                error: format!("Failed to get source path: {e}"),
-            },
+            Err(e) => {
+                return GetItemSourceOutput::Error {
+                    error: format!("Failed to get source path: {e}"),
+                };
+            }
         };
 
         match cache
@@ -506,7 +544,7 @@ impl DocsTools {
             }
             Err(e) => GetItemSourceOutput::Error {
                 error: format!("Failed to get crate docs: {e}"),
-            }
+            },
         }
     }
 }

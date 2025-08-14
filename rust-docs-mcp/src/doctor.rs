@@ -397,7 +397,10 @@ async fn check_optional_dependencies() -> DiagnosticResult {
             messages.push("GITHUB_TOKEN set (enables authenticated GitHub access)".to_string());
         }
         Err(_) => {
-            messages.push("GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)".to_string());
+            messages.push(
+                "GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)"
+                    .to_string(),
+            );
         }
     }
 

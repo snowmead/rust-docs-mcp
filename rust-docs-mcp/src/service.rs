@@ -326,11 +326,11 @@ impl RustDocsService {
                     Please analyze the Cargo.toml file{} and cache every dependency using the rust-docs MCP caching tools.",
                     args.project_path
                         .as_ref()
-                        .map(|p| format!(" at {}", p))
+                        .map(|p| format!(" at {p}"))
                         .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
-                        .map(|m| format!(" (focusing on member: {})", m))
+                        .map(|m| format!(" (focusing on member: {m})"))
                         .unwrap_or_default(),
                     if args.force_update {
                         " and force update existing cached dependencies"
@@ -355,11 +355,11 @@ impl RustDocsService {
                     Let me start by examining the Cargo.toml file to identify all dependencies.",
                     args.project_path
                         .as_ref()
-                        .map(|p| format!(" at '{}'", p))
+                        .map(|p| format!(" at '{p}'"))
                         .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
-                        .map(|m| format!(" (member: {})", m))
+                        .map(|m| format!(" (member: {m})"))
                         .unwrap_or_default()
                 ),
             ),

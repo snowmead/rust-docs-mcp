@@ -52,7 +52,7 @@ impl SearchItemsFuzzyOutput {
         serde_json::to_string(self)
             .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
     }
-    
+
     /// Check if there are any results
     pub fn has_results(&self) -> bool {
         !self.results.is_empty()
@@ -72,7 +72,7 @@ impl SearchErrorOutput {
             error: message.into(),
         }
     }
-    
+
     /// Convert to JSON string for MCP response
     pub fn to_json(&self) -> String {
         serde_json::to_string(self)
@@ -83,24 +83,22 @@ impl SearchErrorOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_search_fuzzy_output_serialization() {
         let output = SearchItemsFuzzyOutput {
-            results: vec![
-                SearchResult {
-                    score: 0.95,
-                    item_id: 42,
-                    name: "deserialize".to_string(),
-                    path: "serde::de".to_string(),
-                    kind: "function".to_string(),
-                    crate_name: "serde".to_string(),
-                    version: "1.0.0".to_string(),
-                    visibility: "public".to_string(),
-                    doc_preview: Some("Deserialize a value".to_string()),
-                    member: None,
-                }
-            ],
+            results: vec![SearchResult {
+                score: 0.95,
+                item_id: 42,
+                name: "deserialize".to_string(),
+                path: "serde::de".to_string(),
+                kind: "function".to_string(),
+                crate_name: "serde".to_string(),
+                version: "1.0.0".to_string(),
+                visibility: "public".to_string(),
+                doc_preview: Some("Deserialize a value".to_string()),
+                member: None,
+            }],
             query: "deserialize".to_string(),
             total_results: 1,
             fuzzy_enabled: true,
@@ -108,14 +106,14 @@ mod tests {
             version: "1.0.0".to_string(),
             member: None,
         };
-        
+
         assert!(output.has_results());
-        
+
         let json = output.to_json();
         let deserialized: SearchItemsFuzzyOutput = serde_json::from_str(&json).unwrap();
         assert_eq!(output, deserialized);
     }
-    
+
     #[test]
     fn test_search_error_output() {
         let output = SearchErrorOutput::new("Search failed");
