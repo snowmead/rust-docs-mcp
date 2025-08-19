@@ -1,7 +1,4 @@
 use anyhow::Result;
-use dirs;
-use fs4;
-use reqwest;
 use rust_docs_mcp::rustdoc;
 use serde::Serialize;
 use std::fs;
@@ -77,13 +74,13 @@ async fn check_rust_toolchain() -> DiagnosticResult {
 }
 
 async fn check_nightly_toolchain() -> DiagnosticResult {
-    match Command::new("rustup").args(&["toolchain", "list"]).output() {
+    match Command::new("rustup").args(["toolchain", "list"]).output() {
         Ok(output) if output.status.success() => {
             let toolchains = String::from_utf8_lossy(&output.stdout);
             if toolchains.contains("nightly") {
                 // Try to get nightly version
                 match Command::new("rustc")
-                    .args(&["+nightly", "--version"])
+                    .args(["+nightly", "--version"])
                     .output()
                 {
                     Ok(nightly_output) if nightly_output.status.success() => {
@@ -144,7 +141,7 @@ async fn check_rustdoc_json() -> DiagnosticResult {
                     DiagnosticResult::new(
                         "Rustdoc JSON".to_string(),
                         false,
-                        format!("JSON generation failed: {}", e),
+                        format!("JSON generation failed: {e}"),
                         false,
                     )
                 }
@@ -191,7 +188,7 @@ async fn check_network_connectivity() -> DiagnosticResult {
             return DiagnosticResult::new(
                 "Network".to_string(),
                 false,
-                format!("Failed to create HTTP client: {}", e),
+                format!("Failed to create HTTP client: {e}"),
                 false,
             );
         }
@@ -226,8 +223,7 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                         "Network".to_string(),
                                         true,
                                         format!(
-                                            "crates.io ({}) and GitHub ({}) reachable",
-                                            status, gh_status
+                                            "crates.io ({status}) and GitHub ({gh_status}) reachable"
                                         ),
                                         false,
                                     )
@@ -236,21 +232,19 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                         "Network".to_string(),
                                         false,
                                         format!(
-                                            "crates.io reachable ({}) but GitHub unreachable ({})",
-                                            status, gh_status
+                                            "crates.io reachable ({status}) but GitHub unreachable ({gh_status})"
                                         ),
                                         false,
                                     )
                                 }
                             }
                             Err(e) => {
-                                eprintln!("DEBUG: GitHub request error: {}", e);
+                                eprintln!("DEBUG: GitHub request error: {e}");
                                 DiagnosticResult::new(
                                     "Network".to_string(),
                                     false,
                                     format!(
-                                        "crates.io reachable ({}) but GitHub error: {}",
-                                        status, e
+                                        "crates.io reachable ({status}) but GitHub error: {e}"
                                     ),
                                     false,
                                 )
@@ -258,13 +252,12 @@ async fn check_network_connectivity() -> DiagnosticResult {
                         }
                     }
                     Err(e) => {
-                        eprintln!("DEBUG: Failed to read crates.io response body: {}", e);
+                        eprintln!("DEBUG: Failed to read crates.io response body: {e}");
                         DiagnosticResult::new(
                             "Network".to_string(),
                             false,
                             format!(
-                                "crates.io responded ({}) but failed to read response: {}",
-                                status, e
+                                "crates.io responded ({status}) but failed to read response: {e}"
                             ),
                             false,
                         )
@@ -274,17 +267,17 @@ async fn check_network_connectivity() -> DiagnosticResult {
                 DiagnosticResult::new(
                     "Network".to_string(),
                     false,
-                    format!("crates.io returned error status: {}", status),
+                    format!("crates.io returned error status: {status}"),
                     false,
                 )
             }
         }
         Err(e) => {
-            eprintln!("DEBUG: crates.io request error: {}", e);
+            eprintln!("DEBUG: crates.io request error: {e}");
             DiagnosticResult::new(
                 "Network".to_string(),
                 false,
-                format!("Unable to reach crates.io: {}", e),
+                format!("Unable to reach crates.io: {e}"),
                 false,
             )
         }
@@ -315,7 +308,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
                 return DiagnosticResult::new(
                     "Cache directory".to_string(),
                     false,
-                    format!("Cannot create cache directory: {}", e),
+                    format!("Cannot create cache directory: {e}"),
                     false,
                 );
             }
@@ -372,7 +365,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
         Err(e) => DiagnosticResult::new(
             "Cache directory".to_string(),
             false,
-            format!("Directory not writable: {}", e),
+            format!("Directory not writable: {e}"),
             false,
         ),
     }
@@ -400,7 +393,10 @@ async fn check_optional_dependencies() -> DiagnosticResult {
             messages.push("GITHUB_TOKEN set (enables authenticated GitHub access)".to_string());
         }
         Err(_) => {
-            messages.push("GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)".to_string());
+            messages.push(
+                "GITHUB_TOKEN not set (optional: enables private repos and higher rate limits)"
+                    .to_string(),
+            );
         }
     }
 

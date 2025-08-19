@@ -13,11 +13,11 @@ use crate::cache::utils::copy_directory_contents;
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
-use git2::{FetchOptions, RemoteCallbacks, Cred};
+use git2::{Cred, FetchOptions, RemoteCallbacks};
+use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::env;
 use tar::Archive;
 
 /// Unified crate source enum that reuses the parameter structs from tools
@@ -181,29 +181,26 @@ impl CrateDownloader {
 
         // Set up GitHub authentication if token is available
         let github_token = env::var("GITHUB_TOKEN").ok();
-        
+
         // Configure git authentication callbacks
         let mut fetch_options = FetchOptions::new();
         let mut callbacks = RemoteCallbacks::new();
-        
+
         if let Some(token) = &github_token {
             tracing::debug!("Using GITHUB_TOKEN for authentication");
             callbacks.credentials(move |_url, username_from_url, _allowed_types| {
-                Cred::userpass_plaintext(
-                    username_from_url.unwrap_or("git"),
-                    token
-                )
+                Cred::userpass_plaintext(username_from_url.unwrap_or("git"), token)
             });
         } else {
             tracing::debug!("No GITHUB_TOKEN found, using unauthenticated access");
         }
-        
+
         fetch_options.remote_callbacks(callbacks);
 
         // Clone the repository with authentication
         let mut builder = git2::build::RepoBuilder::new();
         builder.fetch_options(fetch_options);
-        
+
         let repo = builder
             .clone(repo_url, &temp_dir)
             .with_context(|| {
@@ -373,12 +370,12 @@ mod tests {
         match downloader.download_crate("serde", "1.0.0").await {
             Ok(path) => {
                 assert!(path.exists());
-                println!("Successfully downloaded crate to: {:?}", path);
+                println!("Successfully downloaded crate to: {path:?}");
             }
             Err(e) => {
                 // If it fails, it should not be a 403 error
-                let error_msg = format!("{}", e);
-                assert!(!error_msg.contains("403"), "Got 403 error: {}", error_msg);
+                let error_msg = format!("{e}");
+                assert!(!error_msg.contains("403"), "Got 403 error: {error_msg}");
             }
         }
     }
@@ -402,12 +399,11 @@ mod tests {
             Ok(path) => {
                 assert!(path.exists());
                 println!(
-                    "Successfully downloaded google-sheets4-6.0.0+20240621 to: {:?}",
-                    path
+                    "Successfully downloaded google-sheets4-6.0.0+20240621 to: {path:?}"
                 );
             }
             Err(e) => {
-                panic!("Failed to download google-sheets4: {}", e);
+                panic!("Failed to download google-sheets4: {e}");
             }
         }
     }

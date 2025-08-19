@@ -28,8 +28,12 @@ impl DocGenerator {
     fn cleanup_target_directory(&self, source_path: &Path) -> Result<()> {
         let target_dir = source_path.join(TARGET_DIR);
         if target_dir.exists() {
-            std::fs::remove_dir_all(&target_dir)
-                .with_context(|| format!("Failed to clean up target directory: {}", target_dir.display()))?;
+            std::fs::remove_dir_all(&target_dir).with_context(|| {
+                format!(
+                    "Failed to clean up target directory: {}",
+                    target_dir.display()
+                )
+            })?;
             tracing::info!("Cleaned up target directory to save disk space");
         }
         Ok(())

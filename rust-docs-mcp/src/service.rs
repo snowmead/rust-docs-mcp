@@ -1,3 +1,4 @@
+use rmcp::handler::server::wrapper::Parameters;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -84,9 +85,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_cratesio(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            CacheCrateFromCratesIOParams,
-        >,
+        Parameters(params): Parameters<CacheCrateFromCratesIOParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_cratesio(params).await
     }
@@ -96,9 +95,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_github(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            CacheCrateFromGitHubParams,
-        >,
+        Parameters(params): Parameters<CacheCrateFromGitHubParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_github(params).await
     }
@@ -108,9 +105,7 @@ impl RustDocsService {
     )]
     pub async fn cache_crate_from_local(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            CacheCrateFromLocalParams,
-        >,
+        Parameters(params): Parameters<CacheCrateFromLocalParams>,
     ) -> String {
         self.cache_tools.cache_crate_from_local(params).await
     }
@@ -118,12 +113,7 @@ impl RustDocsService {
     #[tool(
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
-    pub async fn remove_crate(
-        &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            RemoveCrateParams,
-        >,
-    ) -> String {
+    pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
         self.cache_tools.remove_crate(params).await
     }
 
@@ -139,9 +129,7 @@ impl RustDocsService {
     )]
     pub async fn list_crate_versions(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            ListCrateVersionsParams,
-        >,
+        Parameters(params): Parameters<ListCrateVersionsParams>,
     ) -> String {
         self.cache_tools.list_crate_versions(params).await
     }
@@ -151,9 +139,7 @@ impl RustDocsService {
     )]
     pub async fn get_crates_metadata(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            GetCratesMetadataParams,
-        >,
+        Parameters(params): Parameters<GetCratesMetadataParams>,
     ) -> String {
         self.cache_tools.get_crates_metadata(params).await
     }
@@ -164,9 +150,7 @@ impl RustDocsService {
     )]
     pub async fn list_crate_items(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            ListItemsParams,
-        >,
+        Parameters(params): Parameters<ListItemsParams>,
     ) -> String {
         self.docs_tools.list_crate_items(params).await
     }
@@ -174,12 +158,7 @@ impl RustDocsService {
     #[tool(
         description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn search_items(
-        &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            SearchItemsParams,
-        >,
-    ) -> String {
+    pub async fn search_items(&self, Parameters(params): Parameters<SearchItemsParams>) -> String {
         self.docs_tools.search_items(params).await
     }
 
@@ -188,9 +167,7 @@ impl RustDocsService {
     )]
     pub async fn search_items_preview(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            SearchItemsPreviewParams,
-        >,
+        Parameters(params): Parameters<SearchItemsPreviewParams>,
     ) -> String {
         self.docs_tools.search_items_preview(params).await
     }
@@ -200,9 +177,7 @@ impl RustDocsService {
     )]
     pub async fn get_item_details(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            GetItemDetailsParams,
-        >,
+        Parameters(params): Parameters<GetItemDetailsParams>,
     ) -> String {
         self.docs_tools.get_item_details(params).await
     }
@@ -210,12 +185,7 @@ impl RustDocsService {
     #[tool(
         description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
-    pub async fn get_item_docs(
-        &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            GetItemDocsParams,
-        >,
-    ) -> String {
+    pub async fn get_item_docs(&self, Parameters(params): Parameters<GetItemDocsParams>) -> String {
         self.docs_tools.get_item_docs(params).await
     }
 
@@ -224,9 +194,7 @@ impl RustDocsService {
     )]
     pub async fn get_item_source(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            GetItemSourceParams,
-        >,
+        Parameters(params): Parameters<GetItemSourceParams>,
     ) -> String {
         self.docs_tools.get_item_source(params).await
     }
@@ -237,9 +205,7 @@ impl RustDocsService {
     )]
     pub async fn get_dependencies(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            GetDependenciesParams,
-        >,
+        Parameters(params): Parameters<GetDependenciesParams>,
     ) -> String {
         self.deps_tools.get_dependencies(params).await
     }
@@ -250,9 +216,7 @@ impl RustDocsService {
     )]
     pub async fn structure(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            AnalyzeCrateStructureParams,
-        >,
+        Parameters(params): Parameters<AnalyzeCrateStructureParams>,
     ) -> String {
         self.analysis_tools.structure(params).await
     }
@@ -263,9 +227,7 @@ impl RustDocsService {
     )]
     pub async fn search_items_fuzzy(
         &self,
-        rmcp::handler::server::tool::Parameters(params): rmcp::handler::server::tool::Parameters<
-            SearchItemsFuzzyParams,
-        >,
+        Parameters(params): Parameters<SearchItemsFuzzyParams>,
     ) -> String {
         self.search_tools.search_items_fuzzy(params).await
     }
@@ -279,9 +241,7 @@ impl RustDocsService {
     )]
     pub async fn cache_dependencies(
         &self,
-        rmcp::handler::server::prompt::Parameters(args): rmcp::handler::server::prompt::Parameters<
-            CacheDependenciesArgs,
-        >,
+        Parameters(args): Parameters<CacheDependenciesArgs>,
         _ctx: RequestContext<RoleServer>,
     ) -> Result<Vec<PromptMessage>, ErrorData> {
         let messages = vec![
@@ -292,11 +252,11 @@ impl RustDocsService {
                     Please analyze the Cargo.toml file{} and cache every dependency using the rust-docs MCP caching tools.",
                     args.project_path
                         .as_ref()
-                        .map(|p| format!(" at {}", p))
+                        .map(|p| format!(" at {p}"))
                         .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
-                        .map(|m| format!(" (focusing on member: {})", m))
+                        .map(|m| format!(" (focusing on member: {m})"))
                         .unwrap_or_default(),
                     if args.force_update {
                         " and force update existing cached dependencies"
@@ -321,11 +281,11 @@ impl RustDocsService {
                     Let me start by examining the Cargo.toml file to identify all dependencies.",
                     args.project_path
                         .as_ref()
-                        .map(|p| format!(" at '{}'", p))
+                        .map(|p| format!(" at '{p}'"))
                         .unwrap_or_else(|| " in the current working directory".to_string()),
                     args.member_name
                         .as_ref()
-                        .map(|m| format!(" (member: {})", m))
+                        .map(|m| format!(" (member: {m})"))
                         .unwrap_or_default()
                 ),
             ),

@@ -1,4 +1,4 @@
-use serde::{de, Deserializer};
+use serde::{Deserializer, de};
 use std::fmt;
 
 /// Custom deserializer that can handle boolean values from strings, booleans, or numbers
@@ -31,7 +31,7 @@ where
             match value.to_lowercase().as_str() {
                 "true" | "1" | "yes" | "on" => Ok(true),
                 "false" | "0" | "no" | "off" | "" => Ok(false),
-                _ => Err(E::custom(format!("cannot parse '{}' as boolean", value))),
+                _ => Err(E::custom(format!("cannot parse '{value}' as boolean"))),
             }
         }
 

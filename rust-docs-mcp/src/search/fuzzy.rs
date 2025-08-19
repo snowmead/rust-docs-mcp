@@ -222,7 +222,8 @@ impl FuzzySearcher {
         // Add member filter if specified
         if let Some(member_name) = &options.member_filter {
             let member_term = Term::from_field_text(self.fields.member, member_name);
-            let member_query = TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
+            let member_query =
+                TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
             main_clauses.push((Occur::Must, Box::new(member_query) as Box<dyn Query>));
         }
 
@@ -255,7 +256,8 @@ impl FuzzySearcher {
         // Add member filter if specified
         if let Some(member_name) = &options.member_filter {
             let member_term = Term::from_field_text(self.fields.member, member_name);
-            let member_query = TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
+            let member_query =
+                TermQuery::new(member_term, tantivy::schema::IndexRecordOption::Basic);
             clauses.push((Occur::Must, Box::new(member_query) as Box<dyn Query>));
         }
 
