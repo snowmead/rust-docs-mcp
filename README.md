@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289DA?logo=discord&logoColor=white)](https://discord.gg/ak2yTNN7)
 [![Build Status](https://github.com/snowmead/rust-docs-mcp/workflows/Rust/badge.svg)](https://github.com/snowmead/rust-docs-mcp/actions)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/snowmead/rust-docs-mcp
 
 _Rust is the language of AI_
 
