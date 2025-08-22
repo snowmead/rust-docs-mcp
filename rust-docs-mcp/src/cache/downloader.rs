@@ -560,12 +560,12 @@ mod tests {
         match downloader.download_crate("serde", "1.0.0").await {
             Ok(path) => {
                 assert!(path.exists());
-                println!("Successfully downloaded crate to: {:?}", path);
+                println!("Successfully downloaded crate to: {path:?}");
             }
             Err(e) => {
                 // If it fails, it should not be a 403 error
-                let error_msg = format!("{}", e);
-                assert!(!error_msg.contains("403"), "Got 403 error: {}", error_msg);
+                let error_msg = format!("{e}");
+                assert!(!error_msg.contains("403"), "Got 403 error: {error_msg}");
             }
         }
     }
@@ -589,12 +589,11 @@ mod tests {
             Ok(path) => {
                 assert!(path.exists());
                 println!(
-                    "Successfully downloaded google-sheets4-6.0.0+20240621 to: {:?}",
-                    path
+                    "Successfully downloaded google-sheets4-6.0.0+20240621 to: {path:?}"
                 );
             }
             Err(e) => {
-                panic!("Failed to download google-sheets4: {}", e);
+                panic!("Failed to download google-sheets4: {e}");
             }
         }
     }

@@ -141,7 +141,7 @@ async fn check_rustdoc_json() -> DiagnosticResult {
                     DiagnosticResult::new(
                         "Rustdoc JSON".to_string(),
                         false,
-                        format!("JSON generation failed: {}", e),
+                        format!("JSON generation failed: {e}"),
                         false,
                     )
                 }
@@ -188,7 +188,7 @@ async fn check_network_connectivity() -> DiagnosticResult {
             return DiagnosticResult::new(
                 "Network".to_string(),
                 false,
-                format!("Failed to create HTTP client: {}", e),
+                format!("Failed to create HTTP client: {e}"),
                 false,
             );
         }
@@ -223,8 +223,7 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                         "Network".to_string(),
                                         true,
                                         format!(
-                                            "crates.io ({}) and GitHub ({}) reachable",
-                                            status, gh_status
+                                            "crates.io ({status}) and GitHub ({gh_status}) reachable"
                                         ),
                                         false,
                                     )
@@ -233,21 +232,19 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                         "Network".to_string(),
                                         false,
                                         format!(
-                                            "crates.io reachable ({}) but GitHub unreachable ({})",
-                                            status, gh_status
+                                            "crates.io reachable ({status}) but GitHub unreachable ({gh_status})"
                                         ),
                                         false,
                                     )
                                 }
                             }
                             Err(e) => {
-                                eprintln!("DEBUG: GitHub request error: {}", e);
+                                eprintln!("DEBUG: GitHub request error: {e}");
                                 DiagnosticResult::new(
                                     "Network".to_string(),
                                     false,
                                     format!(
-                                        "crates.io reachable ({}) but GitHub error: {}",
-                                        status, e
+                                        "crates.io reachable ({status}) but GitHub error: {e}"
                                     ),
                                     false,
                                 )
@@ -255,13 +252,12 @@ async fn check_network_connectivity() -> DiagnosticResult {
                         }
                     }
                     Err(e) => {
-                        eprintln!("DEBUG: Failed to read crates.io response body: {}", e);
+                        eprintln!("DEBUG: Failed to read crates.io response body: {e}");
                         DiagnosticResult::new(
                             "Network".to_string(),
                             false,
                             format!(
-                                "crates.io responded ({}) but failed to read response: {}",
-                                status, e
+                                "crates.io responded ({status}) but failed to read response: {e}"
                             ),
                             false,
                         )
@@ -271,17 +267,17 @@ async fn check_network_connectivity() -> DiagnosticResult {
                 DiagnosticResult::new(
                     "Network".to_string(),
                     false,
-                    format!("crates.io returned error status: {}", status),
+                    format!("crates.io returned error status: {status}"),
                     false,
                 )
             }
         }
         Err(e) => {
-            eprintln!("DEBUG: crates.io request error: {}", e);
+            eprintln!("DEBUG: crates.io request error: {e}");
             DiagnosticResult::new(
                 "Network".to_string(),
                 false,
-                format!("Unable to reach crates.io: {}", e),
+                format!("Unable to reach crates.io: {e}"),
                 false,
             )
         }
@@ -312,7 +308,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
                 return DiagnosticResult::new(
                     "Cache directory".to_string(),
                     false,
-                    format!("Cannot create cache directory: {}", e),
+                    format!("Cannot create cache directory: {e}"),
                     false,
                 );
             }
@@ -369,7 +365,7 @@ async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> Diagnos
         Err(e) => DiagnosticResult::new(
             "Cache directory".to_string(),
             false,
-            format!("Directory not writable: {}", e),
+            format!("Directory not writable: {e}"),
             false,
         ),
     }
