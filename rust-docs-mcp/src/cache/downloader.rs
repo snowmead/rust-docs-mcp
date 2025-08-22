@@ -244,7 +244,8 @@ impl CrateDownloader {
                     }
                 } else if let Some(parent) = dest_path.parent() {
                     // For files that don't exist yet, check the parent
-                    if matches!(parent.canonicalize(), Ok(canonical_parent) if !canonical_parent.starts_with(&canonical_source)) {
+                    if matches!(parent.canonicalize(), Ok(canonical_parent) if !canonical_parent.starts_with(&canonical_source))
+                    {
                         tracing::warn!(
                             "Skipping entry with parent outside destination: {}",
                             path.display()
@@ -588,9 +589,7 @@ mod tests {
         {
             Ok(path) => {
                 assert!(path.exists());
-                println!(
-                    "Successfully downloaded google-sheets4-6.0.0+20240621 to: {path:?}"
-                );
+                println!("Successfully downloaded google-sheets4-6.0.0+20240621 to: {path:?}");
             }
             Err(e) => {
                 panic!("Failed to download google-sheets4: {e}");

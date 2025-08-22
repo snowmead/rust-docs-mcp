@@ -6,13 +6,12 @@
 //! - Local paths
 
 use anyhow::Result;
-use rmcp::handler::server::tool::Parameters;
+use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheCrateOutput, GetCratesMetadataOutput, ListCachedCratesOutput, ListCrateVersionsOutput,
-    RemoveCrateOutput,
+    CacheCrateOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
@@ -141,7 +140,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
             assert_eq!(crate_name, "semver");
             assert_eq!(version, SEMVER_VERSION);
         }
-        _ => panic!("Expected success response, got: {:?}", output),
+        _ => panic!("Expected success response, got: {output:?}"),
     }
 
     // Verify it's in the cache by listing versions
@@ -157,8 +156,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
             .versions
             .iter()
             .any(|v| v.version == SEMVER_VERSION),
-        "Version not found in cache: {:?}",
-        versions_output
+        "Version not found in cache: {versions_output:?}"
     );
 
     Ok(())
@@ -188,8 +186,7 @@ async fn test_cache_from_github() -> Result<()> {
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_workspace_detected(),
-        "Expected workspace detection for serde: {:?}",
-        output
+        "Expected workspace detection for serde: {output:?}"
     );
 
     // Verify cached (workspace metadata should be cached)
@@ -204,8 +201,7 @@ async fn test_cache_from_github() -> Result<()> {
             .versions
             .iter()
             .any(|v| v.version == SERDE_VERSION),
-        "Version not found: {:?}",
-        versions_output
+        "Version not found: {versions_output:?}"
     );
 
     Ok(())
@@ -237,13 +233,12 @@ async fn test_cache_from_github_branch() -> Result<()> {
     .await?;
 
     // Print the response for debugging
-    println!("Response: {}", response);
+    println!("Response: {response}");
 
     // Clippy is a binary-only package, so we should expect an appropriate error
     assert!(
         is_binary_only_response(&response),
-        "Expected binary-only package response, got: {}",
-        response
+        "Expected binary-only package response, got: {response}"
     );
 
     Ok(())
@@ -289,8 +284,7 @@ edition = "2021"
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_success(),
-        "Failed to cache from local path: {:?}",
-        output
+        "Failed to cache from local path: {output:?}"
     );
 
     // Verify cached
@@ -301,8 +295,7 @@ edition = "2021"
     let versions_response = service.list_crate_versions(Parameters(list_params)).await;
     assert!(
         versions_response.contains("0.1.0"),
-        "Version not found: {}",
-        versions_response
+        "Version not found: {versions_response}"
     );
 
     Ok(())
@@ -336,20 +329,19 @@ serde = "1.0"
             format!(
                 r#"
 [package]
-name = "{}"
+name = "{member}"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
 serde = {{ workspace = true }}
-        "#,
-                member
+        "#
             ),
         )?;
 
         let src_dir = member_dir.join("src");
         std::fs::create_dir(&src_dir)?;
-        std::fs::write(src_dir.join("lib.rs"), format!("//! {} crate", member))?;
+        std::fs::write(src_dir.join("lib.rs"), format!("//! {member} crate"))?;
     }
 
     // Cache the workspace - should detect it's a workspace
@@ -367,8 +359,7 @@ serde = {{ workspace = true }}
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_workspace_detected(),
-        "Response should indicate workspace detection: {:?}",
-        output
+        "Response should indicate workspace detection: {output:?}"
     );
 
     if let CacheCrateOutput::WorkspaceDetected {
@@ -400,7 +391,7 @@ async fn test_cache_update() -> Result<()> {
     )
     .await?;
     let output1 = parse_cache_response(&response1)?;
-    assert!(output1.is_success(), "Initial cache failed: {:?}", output1);
+    assert!(output1.is_success(), "Initial cache failed: {output1:?}");
 
     // Cache again with update flag
     let params2 = CacheCrateFromCratesIOParams {
@@ -417,7 +408,7 @@ async fn test_cache_update() -> Result<()> {
     .await?;
     // Update should return "Successfully updated" message
     let output2 = parse_cache_response(&response2)?;
-    assert!(output2.is_success(), "Update cache failed: {:?}", output2);
+    assert!(output2.is_success(), "Update cache failed: {output2:?}");
 
     if let CacheCrateOutput::Success { updated, .. } = &output2 {
         assert_eq!(*updated, Some(true), "Should have updated flag set");
@@ -448,8 +439,7 @@ async fn test_invalid_inputs() -> Result<()> {
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_error(),
-        "Expected error response, got: {:?}",
-        output
+        "Expected error response, got: {output:?}"
     );
 
     // Test invalid GitHub URL
@@ -466,8 +456,7 @@ async fn test_invalid_inputs() -> Result<()> {
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_error(),
-        "Expected error response, got: {:?}",
-        output
+        "Expected error response, got: {output:?}"
     );
 
     // Test non-existent local path
@@ -483,8 +472,7 @@ async fn test_invalid_inputs() -> Result<()> {
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_error(),
-        "Expected error response, got: {:?}",
-        output
+        "Expected error response, got: {output:?}"
     );
 
     Ok(())
@@ -532,7 +520,7 @@ async fn test_concurrent_caching() -> Result<()> {
     let mut results = vec![];
     for handle in handles {
         let (name, version, result, duration) = handle.await?;
-        println!("Cached {} {} in {:?}", name, version, duration);
+        println!("Cached {name} {version} in {duration:?}");
 
         let success = if let Ok(output) = parse_cache_response(&result) {
             output.is_success()
@@ -540,20 +528,17 @@ async fn test_concurrent_caching() -> Result<()> {
             false
         };
         if !success {
-            eprintln!("Concurrent cache failed for {}: {}", name, result);
+            eprintln!("Concurrent cache failed for {name}: {result}");
         }
         results.push((name, version, result));
     }
 
     // Verify all operations succeeded
     for (name, version, result) in &results {
-        let output = parse_cache_response(&result)?;
+        let output = parse_cache_response(result)?;
         assert!(
             output.is_success(),
-            "Failed to cache {} {}: {:?}",
-            name,
-            version,
-            output
+            "Failed to cache {name} {version}: {output:?}"
         );
     }
 
@@ -562,8 +547,7 @@ async fn test_concurrent_caching() -> Result<()> {
     for (name, version) in &test_crates {
         assert!(
             cached_crates_response.contains(name),
-            "{} not found in cache listing",
-            name
+            "{name} not found in cache listing"
         );
 
         // Also verify specific version is cached
@@ -573,9 +557,7 @@ async fn test_concurrent_caching() -> Result<()> {
         let versions_response = service.list_crate_versions(Parameters(list_params)).await;
         assert!(
             versions_response.contains(version),
-            "Version {} of {} not found in cache",
-            version,
-            name
+            "Version {version} of {name} not found in cache"
         );
     }
 
@@ -598,8 +580,7 @@ async fn test_concurrent_caching() -> Result<()> {
         };
         assert!(
             is_valid,
-            "Cache integrity check failed for {} {}: {:?}",
-            name, version, output
+            "Cache integrity check failed for {name} {version}: {output:?}"
         );
     }
 
@@ -631,17 +612,16 @@ resolver = "2"
             format!(
                 r#"
 [package]
-name = "{}"
-version = "{}"
+name = "{member}"
+version = "{version}"
 edition = "2021"
-        "#,
-                member, version
+        "#
             ),
         )?;
 
         let src_dir = member_dir.join("src");
         std::fs::create_dir(&src_dir)?;
-        std::fs::write(src_dir.join("lib.rs"), format!("//! {} library", member))?;
+        std::fs::write(src_dir.join("lib.rs"), format!("//! {member} library"))?;
     }
 
     // First attempt without specifying members - should get workspace detection
@@ -659,8 +639,7 @@ edition = "2021"
         matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. }
             if workspace_members.contains(&"lib-a".to_string())
             && workspace_members.contains(&"lib-b".to_string())),
-        "Should detect workspace and list members: {:?}",
-        output1
+        "Should detect workspace and list members: {output1:?}"
     );
 
     // Now cache with specific members
@@ -676,8 +655,7 @@ edition = "2021"
     let output2 = parse_cache_response(&response2)?;
     assert!(
         matches!(&output2, CacheCrateOutput::Success { .. }),
-        "Should successfully cache workspace members: {:?}",
-        output2
+        "Should successfully cache workspace members: {output2:?}"
     );
 
     Ok(())
@@ -1057,10 +1035,7 @@ async fn test_get_dependencies() -> Result<()> {
         "Version should match"
     );
     // Direct dependencies is a list, could be empty
-    assert!(
-        output.direct_dependencies.len() >= 0,
-        "Should have dependencies list"
-    );
+    // No need to check >= 0 as len() returns usize which is always >= 0
 
     // Test full dependency tree
     let params = GetDependenciesParams {
@@ -1133,11 +1108,11 @@ async fn test_get_crates_metadata() -> Result<()> {
 
     // First query should show semver as cached
     assert_eq!(output.metadata[0].crate_name, "semver");
-    assert_eq!(output.metadata[0].cached, true);
+    assert!(output.metadata[0].cached);
 
     // Second query should show nonexistent crate as not cached
     assert_eq!(output.metadata[1].crate_name, "nonexistent-crate");
-    assert_eq!(output.metadata[1].cached, false);
+    assert!(!output.metadata[1].cached);
 
     Ok(())
 }
@@ -1160,8 +1135,7 @@ async fn test_invalid_item_ids() -> Result<()> {
     let response = service.get_item_details(Parameters(params)).await;
     assert!(
         response.contains("error") || response.contains("not found"),
-        "Should return error for invalid ID: {}",
-        response
+        "Should return error for invalid ID: {response}"
     );
 
     // Test docs with invalid ID
@@ -1175,8 +1149,7 @@ async fn test_invalid_item_ids() -> Result<()> {
     let response = service.get_item_docs(Parameters(params)).await;
     assert!(
         response.contains("error") || response.contains("not found"),
-        "Should return error for invalid docs ID: {}",
-        response
+        "Should return error for invalid docs ID: {response}"
     );
 
     // Test source with invalid ID
@@ -1191,8 +1164,7 @@ async fn test_invalid_item_ids() -> Result<()> {
     let response = service.get_item_source(Parameters(params)).await;
     assert!(
         response.contains("error") || response.contains("not found"),
-        "Should return error for invalid source ID: {}",
-        response
+        "Should return error for invalid source ID: {response}"
     );
 
     Ok(())
@@ -1249,10 +1221,7 @@ async fn test_empty_search_results() -> Result<()> {
     );
     assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
     // Results could be empty or have some fuzzy matches
-    assert!(
-        output.total_results >= 0,
-        "Total results should be non-negative"
-    );
+    // No need to check >= 0 as total_results is u64 which is always >= 0
 
     Ok(())
 }

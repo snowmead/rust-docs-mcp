@@ -690,9 +690,8 @@ impl CrateCache {
 
                     // Return a generic workspace response indicating we couldn't parse the members
                     let error_msg = format!(
-                        "Detected workspace but failed to parse members: {}. \
-                        Please check the Cargo.toml syntax or cache specific members manually.",
-                        e
+                        "Detected workspace but failed to parse members: {e}. \
+                        Please check the Cargo.toml syntax or cache specific members manually."
                     );
                     Ok(CacheResponse::error(error_msg))
                 } else {
@@ -928,25 +927,32 @@ impl CrateCache {
                         "cache_crate_with_source: ERROR - workspace detection failed, error came from rustdoc generation"
                     );
                 }
-                
+
                 // Extract more specific error context based on the source type
                 let error_msg = match &source {
                     CrateSource::CratesIO(_) => {
-                        format!("Failed to cache crate '{}' version '{}' from crates.io: {}", 
-                            crate_name, version, e)
+                        format!(
+                            "Failed to cache crate '{crate_name}' version '{version}' from crates.io: {e}"
+                        )
                     }
                     CrateSource::GitHub(params) => {
-                        let ref_info = params.branch.as_ref()
-                            .map(|b| format!("branch '{}'", b))
-                            .or_else(|| params.tag.as_ref().map(|t| format!("tag '{}'", t)))
+                        let ref_info = params
+                            .branch
+                            .as_ref()
+                            .map(|b| format!("branch '{b}'"))
+                            .or_else(|| params.tag.as_ref().map(|t| format!("tag '{t}'")))
                             .unwrap_or_else(|| "default branch".to_string());
-                        
-                        format!("Failed to cache crate '{}' from GitHub repository '{}' ({}): {}", 
-                            crate_name, params.github_url, ref_info, e)
+
+                        format!(
+                            "Failed to cache crate '{}' from GitHub repository '{}' ({}): {}",
+                            crate_name, params.github_url, ref_info, e
+                        )
                     }
                     CrateSource::LocalPath(params) => {
-                        format!("Failed to cache crate '{}' from local path '{}': {}", 
-                            crate_name, params.path, e)
+                        format!(
+                            "Failed to cache crate '{}' from local path '{}': {}",
+                            crate_name, params.path, e
+                        )
                     }
                 };
                 CacheResponse::error(error_msg).to_json()

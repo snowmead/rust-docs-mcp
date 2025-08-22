@@ -227,10 +227,7 @@ impl CacheTools {
                         members,
                     };
 
-                    grouped
-                        .entry(crate_name)
-                        .or_default()
-                        .push(version_info);
+                    grouped.entry(crate_name).or_default().push(version_info);
                 }
 
                 Ok(ListCachedCratesOutput {

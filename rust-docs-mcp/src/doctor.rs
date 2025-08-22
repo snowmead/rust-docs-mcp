@@ -243,9 +243,7 @@ async fn check_network_connectivity() -> DiagnosticResult {
                                 DiagnosticResult::new(
                                     "Network".to_string(),
                                     false,
-                                    format!(
-                                        "crates.io reachable ({status}) but GitHub error: {e}"
-                                    ),
+                                    format!("crates.io reachable ({status}) but GitHub error: {e}"),
                                     false,
                                 )
                             }
