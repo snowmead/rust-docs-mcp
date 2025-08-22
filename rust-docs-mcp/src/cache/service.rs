@@ -723,7 +723,29 @@ impl CrateCache {
             .await
         {
             Ok(response) => response.to_json(),
-            Err(e) => CacheResponse::error(format!("Failed to cache crate: {e}")).to_json(),
+            Err(e) => {
+                // Extract more specific error context based on the source type
+                let error_msg = match &source {
+                    CrateSource::CratesIO(_) => {
+                        format!("Failed to cache crate '{}' version '{}' from crates.io: {}", 
+                            crate_name, version, e)
+                    }
+                    CrateSource::GitHub(params) => {
+                        let ref_info = params.branch.as_ref()
+                            .map(|b| format!("branch '{}'", b))
+                            .or_else(|| params.tag.as_ref().map(|t| format!("tag '{}'", t)))
+                            .unwrap_or_else(|| "default branch".to_string());
+                        
+                        format!("Failed to cache crate '{}' from GitHub repository '{}' ({}): {}", 
+                            crate_name, params.github_url, ref_info, e)
+                    }
+                    CrateSource::LocalPath(params) => {
+                        format!("Failed to cache crate '{}' from local path '{}': {}", 
+                            crate_name, params.path, e)
+                    }
+                };
+                CacheResponse::error(error_msg).to_json()
+            }
         }
     }
 

@@ -3067,7 +3067,7 @@ dependencies = [
 [[package]]
 name = "rmcp"
 version = "0.6.0"
-source = "git+https://github.com/snowmead/rust-sdk?branch=feature%2Fprompt-support#26562a1268cc8d61c42288f6db950e87978f2ffa"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#9349f5cb2604b3f87f453e230f98b8c9ac314e1f"
 dependencies = [
  "base64",
  "chrono",
@@ -3087,7 +3087,7 @@ dependencies = [
 [[package]]
 name = "rmcp-macros"
 version = "0.6.0"
-source = "git+https://github.com/snowmead/rust-sdk?branch=feature%2Fprompt-support#26562a1268cc8d61c42288f6db950e87978f2ffa"
+source = "git+https://github.com/modelcontextprotocol/rust-sdk?branch=main#9349f5cb2604b3f87f453e230f98b8c9ac314e1f"
 dependencies = [
  "darling 0.21.2",
  "proc-macro2",
