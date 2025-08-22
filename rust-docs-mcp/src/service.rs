@@ -117,7 +117,10 @@ impl RustDocsService {
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
     pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
-        self.cache_tools.remove_crate(params).await
+        match self.cache_tools.remove_crate(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -172,7 +175,10 @@ impl RustDocsService {
         description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
     pub async fn search_items(&self, Parameters(params): Parameters<SearchItemsParams>) -> String {
-        self.docs_tools.search_items(params).await
+        match self.docs_tools.search_items(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
@@ -202,7 +208,10 @@ impl RustDocsService {
         description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
     pub async fn get_item_docs(&self, Parameters(params): Parameters<GetItemDocsParams>) -> String {
-        self.docs_tools.get_item_docs(params).await
+        match self.docs_tools.get_item_docs(params).await {
+            Ok(output) => output.to_json(),
+            Err(error) => error.to_json(),
+        }
     }
 
     #[tool(
