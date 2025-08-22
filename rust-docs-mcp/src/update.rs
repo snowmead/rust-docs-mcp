@@ -194,7 +194,7 @@ fn handle_macos_signing(target_dir: &Path) -> Result<()> {
 
 /// No-op for non-macOS systems
 #[cfg(not(target_os = "macos"))]
-fn handle_macos_signing(_target_dir: &PathBuf) -> Result<()> {
+fn handle_macos_signing(_target_dir: &Path) -> Result<()> {
     Ok(())
 }
 
