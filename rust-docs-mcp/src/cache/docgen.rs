@@ -41,8 +41,24 @@ impl DocGenerator {
 
     /// Generate documentation for a crate
     pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
+        tracing::info!(
+            "DocGenerator::generate_docs starting for {}-{}",
+            name,
+            version
+        );
+
         let source_path = self.storage.source_path(name, version)?;
         let docs_path = self.storage.docs_path(name, version, None)?;
+
+        // Check if docs already exist (another thread might have generated them)
+        if docs_path.exists() {
+            tracing::info!(
+                "Docs already exist for {}-{}, skipping generation",
+                name,
+                version
+            );
+            return Ok(docs_path);
+        }
 
         if !source_path.exists() {
             bail!(
@@ -80,6 +96,11 @@ impl DocGenerator {
 
         tracing::info!(
             "Successfully generated documentation for {}-{}",
+            name,
+            version
+        );
+        tracing::info!(
+            "DocGenerator::generate_docs completed for {}-{}",
             name,
             version
         );

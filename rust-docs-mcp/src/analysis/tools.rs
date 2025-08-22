@@ -5,18 +5,10 @@ use tokio::sync::RwLock;
 use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::outputs::{AnalysisErrorOutput, StructureNode, StructureOutput};
 use crate::cache::{CrateCache, workspace::WorkspaceHandler};
 
-/// Enhanced node structure for better readability
-#[derive(Debug, Serialize)]
-struct EnhancedNode {
-    kind: String,
-    name: String,
-    path: String,
-    visibility: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    children: Option<Vec<EnhancedNode>>,
-}
+// Use StructureNode from outputs module instead
 
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AnalyzeCrateStructureParams {
@@ -88,7 +80,10 @@ impl AnalysisTools {
         Self { cache }
     }
 
-    pub async fn structure(&self, params: AnalyzeCrateStructureParams) -> String {
+    pub async fn structure(
+        &self,
+        params: AnalyzeCrateStructureParams,
+    ) -> Result<StructureOutput, AnalysisErrorOutput> {
         let cache = self.cache.write().await;
 
         // Ensure the crate source is available (without requiring docs)
@@ -118,9 +113,9 @@ impl AnalysisTools {
                 // Run the analysis
                 analyze_with_cargo_modules(manifest_path, package, params).await
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to ensure crate source is available: {e}"}}"#)
-            }
+            Err(e) => Err(AnalysisErrorOutput::new(format!(
+                "Failed to ensure crate source is available: {e}"
+            ))),
         }
     }
 }
@@ -129,7 +124,7 @@ async fn analyze_with_cargo_modules(
     manifest_path: PathBuf,
     package: Option<String>,
     params: AnalyzeCrateStructureParams,
-) -> String {
+) -> Result<StructureOutput, AnalysisErrorOutput> {
     use cargo_modules::{
         analyzer::LoadOptions,
         options::{GeneralOptions, ProjectOptions},
@@ -154,7 +149,7 @@ async fn analyze_with_cargo_modules(
     };
 
     // Run the analysis synchronously in a blocking task
-    let result = tokio::task::spawn_blocking(move || -> Result<String, String> {
+    let result = tokio::task::spawn_blocking(move || -> Result<StructureOutput, String> {
         // Load the workspace
         let (crate_id, analysis_host, _vfs, edition) = cargo_modules::analyzer::load_workspace(
             &general_options,
@@ -172,22 +167,21 @@ async fn analyze_with_cargo_modules(
             .build()
             .map_err(|e| format!("Failed to build tree: {e}"))?;
 
-        // Format the tree structure as JSON
-        let result = serde_json::json!({
-            "status": "success",
-            "message": "Module structure analysis completed",
-            "tree": format_tree(&tree, db, edition),
-            "usage_hint": "Use the 'path' and 'name' fields to search for items with search_items_preview tool"
-        });
-
-        Ok(serde_json::to_string_pretty(&result).unwrap())
+        // Format the tree structure
+        let tree_node = format_tree(&tree, db, edition);
+        Ok(StructureOutput {
+            status: "success".to_string(),
+            message: "Module structure analysis completed".to_string(),
+            tree: tree_node,
+            usage_hint: "Use the 'path' and 'name' fields to search for items with search_items_preview tool".to_string(),
+        })
     })
     .await;
 
     match result {
-        Ok(Ok(output)) => output,
-        Ok(Err(e)) => format!(r#"{{"error": "Analysis failed: {e}"}}"#),
-        Err(e) => format!(r#"{{"error": "Task failed: {e}"}}"#),
+        Ok(Ok(output)) => Ok(output),
+        Ok(Err(e)) => Err(AnalysisErrorOutput::new(format!("Analysis failed: {e}"))),
+        Err(e) => Err(AnalysisErrorOutput::new(format!("Task failed: {e}"))),
     }
 }
 
@@ -196,14 +190,14 @@ fn format_tree(
     tree: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
     db: &ra_ap_ide::RootDatabase,
     edition: ra_ap_ide::Edition,
-) -> serde_json::Value {
+) -> StructureNode {
     use ra_ap_ide as ide;
 
     fn format_node(
         node: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
         db: &ra_ap_ide::RootDatabase,
         edition: ide::Edition,
-    ) -> EnhancedNode {
+    ) -> StructureNode {
         let item = &node.node;
 
         // Extract readable information
@@ -212,7 +206,7 @@ fn format_tree(
         let path = item.display_path(db, edition);
         let visibility = item.visibility(db, edition).to_string();
 
-        EnhancedNode {
+        StructureNode {
             kind,
             name,
             path,
@@ -230,5 +224,5 @@ fn format_tree(
         }
     }
 
-    serde_json::to_value(format_node(tree, db, edition)).unwrap()
+    format_node(tree, db, edition)
 }

@@ -164,9 +164,12 @@ impl CacheStorage {
 
     /// Check if a crate version is cached
     pub fn is_cached(&self, name: &str, version: &str) -> bool {
-        self.crate_path(name, version)
+        let result = self
+            .crate_path(name, version)
             .map(|p| p.exists())
-            .unwrap_or(false)
+            .unwrap_or(false);
+        tracing::debug!("is_cached({}-{}) = {}", name, version, result);
+        result
     }
 
     /// Check if a workspace member is cached

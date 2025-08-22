@@ -20,6 +20,7 @@
 pub mod config;
 pub mod fuzzy;
 pub mod indexer;
+pub mod outputs;
 pub mod tools;
 
 pub use fuzzy::{FuzzySearchOptions, FuzzySearcher, SearchResult};

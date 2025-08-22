@@ -12,7 +12,7 @@ use toml::Value;
 pub struct WorkspaceHandler;
 
 impl WorkspaceHandler {
-    /// Check if a Cargo.toml represents a virtual manifest (workspace without [package])
+    /// Check if a Cargo.toml represents a workspace (virtual or mixed)
     pub fn is_workspace(cargo_toml_path: &Path) -> Result<bool> {
         let content = fs::read_to_string(cargo_toml_path).with_context(|| {
             format!("Failed to read Cargo.toml at {}", cargo_toml_path.display())
@@ -25,11 +25,16 @@ impl WorkspaceHandler {
             )
         })?;
 
-        // A virtual manifest has [workspace] but no [package]
-        let has_workspace = parsed.get("workspace").is_some();
-        let has_package = parsed.get("package").is_some();
+        // Check if this is a workspace by looking for [workspace] section with members
+        if let Some(workspace) = parsed.get("workspace")
+            && let Some(members) = workspace.get("members")
+            && let Some(members_arr) = members.as_array()
+        {
+            // It's a workspace if it has workspace.members with at least one member
+            return Ok(!members_arr.is_empty());
+        }
 
-        Ok(has_workspace && !has_package)
+        Ok(false)
     }
 
     /// Get workspace members from a workspace Cargo.toml
@@ -197,7 +202,7 @@ version = "0.1.0"
         )?;
         assert!(!WorkspaceHandler::is_workspace(&crate_toml)?);
 
-        // Test workspace with package (not a virtual manifest)
+        // Test workspace with package (mixed workspace)
         let mixed_toml = temp_dir.path().join("mixed.toml");
         fs::write(
             &mixed_toml,
@@ -210,7 +215,7 @@ version = "0.1.0"
 members = ["sub-crate"]
 "#,
         )?;
-        assert!(!WorkspaceHandler::is_workspace(&mixed_toml)?);
+        assert!(WorkspaceHandler::is_workspace(&mixed_toml)?); // Mixed workspaces should be detected as workspaces
 
         Ok(())
     }

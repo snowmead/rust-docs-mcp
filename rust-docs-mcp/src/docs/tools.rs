@@ -6,7 +6,14 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
-use crate::docs::DocQuery;
+use crate::docs::{
+    DocQuery,
+    outputs::{
+        DetailedItem, DocsErrorOutput, GetItemDetailsOutput, GetItemDocsOutput,
+        GetItemSourceOutput, ItemInfo, ItemPreview, ListCrateItemsOutput, PaginationInfo,
+        SearchItemsOutput, SearchItemsPreviewOutput, SourceInfo, SourceLocation,
+    },
+};
 
 /// Maximum size for response in bytes (roughly 25k tokens * 4 bytes/token)
 const MAX_RESPONSE_SIZE: usize = 100_000;
@@ -138,7 +145,10 @@ impl DocsTools {
         serde_json::to_string(data).map(|s| s.len()).unwrap_or(0)
     }
 
-    pub async fn list_crate_items(&self, params: ListItemsParams) -> String {
+    pub async fn list_crate_items(
+        &self,
+        params: ListItemsParams,
+    ) -> Result<ListCrateItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -157,28 +167,40 @@ impl DocsTools {
                 let offset = params.offset.unwrap_or(0).max(0) as usize;
 
                 // Apply pagination
-                let paginated_items: Vec<_> = items.into_iter().skip(offset).take(limit).collect();
+                let paginated_items: Vec<_> = items
+                    .into_iter()
+                    .skip(offset)
+                    .take(limit)
+                    .map(|item| ItemInfo {
+                        id: item.id.to_string(),
+                        name: item.name.clone(),
+                        kind: item.kind.clone(),
+                        path: item.path.clone(),
+                        docs: item.docs.clone(),
+                        visibility: item.visibility.clone(),
+                    })
+                    .collect();
 
-                let response = serde_json::json!({
-                    "items": paginated_items,
-                    "pagination": {
-                        "total": total_count,
-                        "limit": limit,
-                        "offset": offset,
-                        "has_more": offset + paginated_items.len() < total_count
-                    }
-                });
-
-                serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
+                Ok(ListCrateItemsOutput {
+                    items: paginated_items,
+                    pagination: PaginationInfo {
+                        total: total_count,
+                        limit,
+                        offset,
+                        has_more: offset + limit < total_count,
+                    },
+                })
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn search_items(&self, params: SearchItemsParams) -> String {
+    pub async fn search_items(
+        &self,
+        params: SearchItemsParams,
+    ) -> Result<SearchItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -242,32 +264,43 @@ impl DocsTools {
                     truncated = true;
                 }
 
-                let mut response = serde_json::json!({
-                    "items": paginated_items,
-                    "pagination": {
-                        "total": total_count,
-                        "limit": actual_limit,
-                        "offset": offset,
-                        "has_more": offset + paginated_items.len() < total_count
-                    }
-                });
+                let warning = if truncated {
+                    Some("Response was truncated to stay within size limits. Use smaller limit or preview mode.".to_string())
+                } else {
+                    None
+                };
 
-                if truncated {
-                    response["warning"] = serde_json::json!(
-                        "Response was truncated to stay within size limits. Use smaller limit or preview mode."
-                    );
-                }
-
-                serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
+                Ok(SearchItemsOutput {
+                    items: paginated_items
+                        .into_iter()
+                        .map(|item| ItemInfo {
+                            id: item.id.to_string(),
+                            name: item.name.clone(),
+                            kind: item.kind.clone(),
+                            path: item.path.clone(),
+                            docs: item.docs.clone(),
+                            visibility: item.visibility.clone(),
+                        })
+                        .collect(),
+                    pagination: PaginationInfo {
+                        total: total_count,
+                        limit: actual_limit,
+                        offset,
+                        has_more: offset + actual_limit < total_count,
+                    },
+                    warning,
+                })
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn search_items_preview(&self, params: SearchItemsPreviewParams) -> String {
+    pub async fn search_items_preview(
+        &self,
+        params: SearchItemsPreviewParams,
+    ) -> Result<SearchItemsPreviewOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -313,26 +346,38 @@ impl DocsTools {
                     })
                     .collect();
 
-                let response = serde_json::json!({
-                    "items": preview_items,
-                    "pagination": {
-                        "total": total_count,
-                        "limit": limit,
-                        "offset": offset,
-                        "has_more": offset + preview_items.len() < total_count
-                    }
-                });
-
-                serde_json::to_string_pretty(&response)
-                    .unwrap_or_else(|e| format!(r#"{{"error": "Failed to serialize items: {e}"}}"#))
+                Ok(SearchItemsPreviewOutput {
+                    items: preview_items
+                        .into_iter()
+                        .map(|item| ItemPreview {
+                            id: item["id"].as_str().unwrap_or("").to_string(),
+                            name: item["name"].as_str().unwrap_or("").to_string(),
+                            kind: item["kind"].as_str().unwrap_or("").to_string(),
+                            path: item["path"]
+                                .as_array()
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str().map(String::from))
+                                        .collect()
+                                })
+                                .unwrap_or_default(),
+                        })
+                        .collect(),
+                    pagination: PaginationInfo {
+                        total: total_count,
+                        limit,
+                        offset,
+                        has_more: offset + limit < total_count,
+                    },
+                })
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn get_item_details(&self, params: GetItemDetailsParams) -> String {
+    pub async fn get_item_details(&self, params: GetItemDetailsParams) -> GetItemDetailsOutput {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -345,19 +390,82 @@ impl DocsTools {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
                 match query.get_item_details(params.item_id.max(0) as u32) {
-                    Ok(details) => serde_json::to_string_pretty(&details).unwrap_or_else(|e| {
-                        format!(r#"{{"error": "Failed to serialize details: {e}"}}"#)
-                    }),
-                    Err(e) => format!(r#"{{"error": "Item not found: {e}"}}"#),
+                    Ok(details) => {
+                        // Convert the details to our output format
+                        GetItemDetailsOutput::Success(Box::new(DetailedItem {
+                            info: ItemInfo {
+                                id: details.info.id.clone(),
+                                name: details.info.name.clone(),
+                                kind: details.info.kind.clone(),
+                                path: details.info.path.clone(),
+                                docs: details.info.docs.clone(),
+                                visibility: details.info.visibility.clone(),
+                            },
+                            signature: details.signature.clone(),
+                            generics: details.generics.clone(),
+                            fields: details.fields.map(|fields| {
+                                fields
+                                    .into_iter()
+                                    .map(|f| ItemInfo {
+                                        id: f.id,
+                                        name: f.name,
+                                        kind: f.kind,
+                                        path: f.path,
+                                        docs: f.docs,
+                                        visibility: f.visibility,
+                                    })
+                                    .collect()
+                            }),
+                            variants: details.variants.map(|variants| {
+                                variants
+                                    .into_iter()
+                                    .map(|v| ItemInfo {
+                                        id: v.id,
+                                        name: v.name,
+                                        kind: v.kind,
+                                        path: v.path,
+                                        docs: v.docs,
+                                        visibility: v.visibility,
+                                    })
+                                    .collect()
+                            }),
+                            methods: details.methods.map(|methods| {
+                                methods
+                                    .into_iter()
+                                    .map(|m| ItemInfo {
+                                        id: m.id,
+                                        name: m.name,
+                                        kind: m.kind,
+                                        path: m.path,
+                                        docs: m.docs,
+                                        visibility: m.visibility,
+                                    })
+                                    .collect()
+                            }),
+                            source_location: details.source_location.map(|loc| SourceLocation {
+                                filename: loc.filename,
+                                line_start: loc.line_start,
+                                column_start: loc.column_start,
+                                line_end: loc.line_end,
+                                column_end: loc.column_end,
+                            }),
+                        }))
+                    }
+                    Err(e) => GetItemDetailsOutput::Error {
+                        error: format!("Item not found: {e}"),
+                    },
                 }
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => GetItemDetailsOutput::Error {
+                error: format!("Failed to get crate docs: {e}"),
+            },
         }
     }
 
-    pub async fn get_item_docs(&self, params: GetItemDocsParams) -> String {
+    pub async fn get_item_docs(
+        &self,
+        params: GetItemDocsParams,
+    ) -> Result<GetItemDocsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
         match cache
             .ensure_crate_or_member_docs(
@@ -370,29 +478,35 @@ impl DocsTools {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
                 match query.get_item_docs(params.item_id.max(0) as u32) {
-                    Ok(Some(docs)) => serde_json::json!({
-                        "documentation": docs
-                    })
-                    .to_string(),
-                    Ok(None) => serde_json::json!({
-                        "documentation": null,
-                        "message": "No documentation available for this item"
-                    })
-                    .to_string(),
-                    Err(e) => format!(r#"{{"error": "Failed to get docs: {e}"}}"#),
+                    Ok(docs) => {
+                        let message = if docs.is_none() {
+                            Some("No documentation available for this item".to_string())
+                        } else {
+                            None
+                        };
+                        Ok(GetItemDocsOutput {
+                            documentation: docs,
+                            message,
+                        })
+                    }
+                    Err(e) => Err(DocsErrorOutput::new(format!("Failed to get docs: {e}"))),
                 }
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => Err(DocsErrorOutput::new(format!(
+                "Failed to get crate docs: {e}"
+            ))),
         }
     }
 
-    pub async fn get_item_source(&self, params: GetItemSourceParams) -> String {
+    pub async fn get_item_source(&self, params: GetItemSourceParams) -> GetItemSourceOutput {
         let cache = self.cache.write().await;
         let source_base_path = match cache.get_source_path(&params.crate_name, &params.version) {
             Ok(path) => path,
-            Err(e) => return format!(r#"{{"error": "Failed to get source path: {e}"}}"#),
+            Err(e) => {
+                return GetItemSourceOutput::Error {
+                    error: format!("Failed to get source path: {e}"),
+                };
+            }
         };
 
         match cache
@@ -412,17 +526,25 @@ impl DocsTools {
                     &source_base_path,
                     context_lines,
                 ) {
-                    Ok(source_info) => {
-                        serde_json::to_string_pretty(&source_info).unwrap_or_else(|e| {
-                            format!(r#"{{"error": "Failed to serialize source info: {e}"}}"#)
-                        })
-                    }
-                    Err(e) => format!(r#"{{"error": "Failed to get source: {e}"}}"#),
+                    Ok(source_info) => GetItemSourceOutput::Success(SourceInfo {
+                        location: SourceLocation {
+                            filename: source_info.location.filename,
+                            line_start: source_info.location.line_start,
+                            column_start: source_info.location.column_start,
+                            line_end: source_info.location.line_end,
+                            column_end: source_info.location.column_end,
+                        },
+                        code: source_info.code,
+                        context_lines: source_info.context_lines,
+                    }),
+                    Err(e) => GetItemSourceOutput::Error {
+                        error: format!("Failed to get source: {e}"),
+                    },
                 }
             }
-            Err(e) => {
-                format!(r#"{{"error": "Failed to get crate docs: {e}"}}"#)
-            }
+            Err(e) => GetItemSourceOutput::Error {
+                error: format!("Failed to get crate docs: {e}"),
+            },
         }
     }
 }

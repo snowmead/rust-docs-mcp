@@ -48,6 +48,7 @@ use crate::cache::{CrateCache, storage::CacheStorage};
 use crate::search::config::{
     DEFAULT_FUZZY_DISTANCE, DEFAULT_SEARCH_LIMIT, MAX_FUZZY_DISTANCE, MAX_SEARCH_LIMIT,
 };
+use crate::search::outputs::{SearchErrorOutput, SearchItemsFuzzyOutput};
 use crate::search::{FuzzySearchOptions, FuzzySearcher, SearchIndexer, SearchResult};
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -143,7 +144,10 @@ impl SearchTools {
     }
 
     /// Perform fuzzy search on crate items
-    pub async fn search_items_fuzzy(&self, params: SearchItemsFuzzyParams) -> String {
+    pub async fn search_items_fuzzy(
+        &self,
+        params: SearchItemsFuzzyParams,
+    ) -> Result<SearchItemsFuzzyOutput, SearchErrorOutput> {
         let query = params.query.clone();
         let fuzzy_enabled = params.fuzzy_enabled.unwrap_or(true);
         let crate_name = params.crate_name.clone();
@@ -228,23 +232,32 @@ impl SearchTools {
 
         match result {
             Ok(results) => {
-                let response = serde_json::json!({
-                    "results": results,
-                    "query": query,
-                    "total_results": results.len(),
-                    "fuzzy_enabled": fuzzy_enabled,
-                    "crate_name": crate_name,
-                    "version": version,
-                    "member": member
-                });
-
-                serde_json::to_string_pretty(&response).unwrap_or_else(|e| {
-                    format!(r#"{{"error": "Failed to serialize search results: {e}"}}"#)
+                let total = results.len();
+                Ok(SearchItemsFuzzyOutput {
+                    results: results
+                        .into_iter()
+                        .map(|r| crate::search::outputs::SearchResult {
+                            score: r.score,
+                            item_id: r.item_id,
+                            name: r.name,
+                            path: r.path,
+                            kind: r.kind,
+                            crate_name: r.crate_name,
+                            version: r.version,
+                            visibility: r.visibility,
+                            doc_preview: None, // fuzzy::SearchResult doesn't have doc_preview
+                            member: r.member,
+                        })
+                        .collect(),
+                    query,
+                    total_results: total,
+                    fuzzy_enabled,
+                    crate_name,
+                    version,
+                    member,
                 })
             }
-            Err(e) => {
-                format!(r#"{{"error": "Search failed: {e}"}}"#)
-            }
+            Err(e) => Err(SearchErrorOutput::new(format!("Search failed: {e}"))),
         }
     }
 }

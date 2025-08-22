@@ -3,6 +3,7 @@
 //! This module contains shared utilities used across the cache implementation,
 //! including file operations, error handling, and response formatting.
 
+use super::outputs::CacheCrateOutput;
 use anyhow::{Context, Result, bail};
 use std::fs;
 use std::path::Path;
@@ -70,50 +71,8 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// Response types for cache operations
-#[derive(Debug, serde::Serialize)]
-#[serde(untagged)]
-pub enum CacheResponse {
-    Success {
-        status: &'static str,
-        message: String,
-        #[serde(rename = "crate")]
-        crate_name: String,
-        version: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        members: Option<Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        results: Option<Vec<String>>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        updated: Option<bool>,
-    },
-    PartialSuccess {
-        status: &'static str,
-        message: String,
-        #[serde(rename = "crate")]
-        crate_name: String,
-        version: String,
-        members: Vec<String>,
-        results: Vec<String>,
-        errors: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        updated: Option<bool>,
-    },
-    WorkspaceDetected {
-        status: &'static str,
-        message: &'static str,
-        #[serde(rename = "crate")]
-        crate_name: String,
-        version: String,
-        workspace_members: Vec<String>,
-        example_usage: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        updated: Option<bool>,
-    },
-    Error {
-        error: String,
-    },
-}
+/// Response types for cache operations - now using the outputs module
+pub type CacheResponse = CacheCrateOutput;
 
 impl CacheResponse {
     /// Create a success response
@@ -121,7 +80,6 @@ impl CacheResponse {
         let crate_name = crate_name.into();
         let version = version.into();
         Self::Success {
-            status: "success",
             message: format!("Successfully cached {crate_name}-{version}"),
             crate_name,
             version,
@@ -136,7 +94,6 @@ impl CacheResponse {
         let crate_name = crate_name.into();
         let version = version.into();
         Self::Success {
-            status: "success",
             message: format!("Successfully updated {crate_name}-{version}"),
             crate_name,
             version,
@@ -162,7 +119,6 @@ impl CacheResponse {
         };
 
         Self::Success {
-            status: "success",
             message,
             crate_name: crate_name.into(),
             version: version.into(),
@@ -196,7 +152,6 @@ impl CacheResponse {
         };
 
         Self::PartialSuccess {
-            status: "partial_success",
             message,
             crate_name: crate_name.into(),
             version: version.into(),
@@ -220,8 +175,7 @@ impl CacheResponse {
         let example_members = members.get(0..2.min(members.len())).unwrap_or(&[]).to_vec();
 
         Self::WorkspaceDetected {
-            status: "workspace_detected",
-            message: "This is a workspace crate. Please specify which members to cache using the 'members' parameter.",
+            message: "This is a workspace crate. Please specify which members to cache using the 'members' parameter.".to_string(),
             crate_name: crate_name.clone(),
             version: version.clone(),
             workspace_members: members,
@@ -237,12 +191,6 @@ impl CacheResponse {
         Self::Error {
             error: message.into(),
         }
-    }
-
-    /// Convert to JSON string
-    pub fn to_json(&self) -> String {
-        serde_json::to_string(self)
-            .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
     }
 }
 
@@ -307,8 +255,8 @@ mod tests {
         let error = CacheResponse::error("Something went wrong");
         let json_str = error.to_json();
         let json: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(json["status"], "error");
         assert_eq!(json["error"], "Something went wrong");
-        assert!(json.get("status").is_none());
 
         // Test workspace detected
         let workspace = CacheResponse::workspace_detected(
