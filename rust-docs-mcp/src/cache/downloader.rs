@@ -19,6 +19,7 @@ use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tar::Archive;
+use zeroize::Zeroizing;
 
 /// Constants for download operations
 const LOCK_TIMEOUT_SECS: u64 = 60;
@@ -338,16 +339,17 @@ impl CrateDownloader {
         }
 
         // Set up GitHub authentication if token is available
-        let github_token = env::var("GITHUB_TOKEN").ok();
+        let github_token = env::var("GITHUB_TOKEN").ok().map(Zeroizing::new);
+        let has_token = github_token.is_some();
 
         // Configure git authentication callbacks
         let mut fetch_options = FetchOptions::new();
         let mut callbacks = RemoteCallbacks::new();
 
-        if let Some(token) = &github_token {
+        if let Some(token) = github_token {
             tracing::debug!("Using GITHUB_TOKEN for authentication");
             callbacks.credentials(move |_url, username_from_url, _allowed_types| {
-                Cred::userpass_plaintext(username_from_url.unwrap_or("git"), token)
+                Cred::userpass_plaintext(username_from_url.unwrap_or("git"), &token)
             });
         } else {
             tracing::debug!("No GITHUB_TOKEN found, using unauthenticated access");
@@ -363,7 +365,7 @@ impl CrateDownloader {
             .clone(repo_url, &temp_dir)
             .with_context(|| {
                 let mut msg = format!("Failed to clone repository: {repo_url}");
-                if github_token.is_none() && repo_url.contains("github.com") {
+                if !has_token && repo_url.contains("github.com") {
                     msg.push_str("\nNote: Set GITHUB_TOKEN environment variable for private repositories and higher rate limits");
                 }
                 msg
