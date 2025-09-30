@@ -143,9 +143,13 @@ curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.
 curl -sSL https://raw.githubusercontent.com/snowmead/rust-docs-mcp/main/install.sh | bash -s -- --install-dir /usr/local/bin
 ```
 
-#### Building from Source
+#### Cargo Install
 
-> **Note:** This crate is not yet published to crates.io because it depends on `rmcp` which is awaiting its first release.
+```bash
+cargo install rust-docs-mcp
+```
+
+#### Building from Source
 
 ##### Requirements
 
