@@ -2,6 +2,7 @@
 
 # Rustdocs MCP Server
 
+[![Crates.io](https://img.shields.io/crates/v/rust-docs-mcp.svg)](https://crates.io/crates/rust-docs-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-7289DA?logo=discord&logoColor=white)](https://discord.gg/ak2yTNN7)
 [![Build Status](https://github.com/snowmead/rust-docs-mcp/workflows/Rust/badge.svg)](https://github.com/snowmead/rust-docs-mcp/actions)
