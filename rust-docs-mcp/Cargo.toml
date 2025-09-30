@@ -13,15 +13,11 @@ keywords = ["mcp", "rust", "documentation", "rustdoc", "cache"]
 categories = ["development-tools", "command-line-utilities"]
 
 [dependencies]
-cargo-modules = { path = "../cargo-modules" }
+cargo-modules = { version = "0.24.2", path = "../cargo-modules" }
 ra_ap_ide = "=0.0.285"
 
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main", features = [
-    "server",
-    "macros",
-    "transport-io",
-] }
-rmcp-macros = { git = "https://github.com/modelcontextprotocol/rust-sdk", branch = "main" }
+rmcp = { version = "0.7.0", features = ["server", "macros", "transport-io"] }
+rmcp-macros = "0.7.0"
 
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
