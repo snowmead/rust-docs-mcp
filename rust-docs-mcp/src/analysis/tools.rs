@@ -125,10 +125,7 @@ async fn analyze_with_cargo_modules(
     package: Option<String>,
     params: AnalyzeCrateStructureParams,
 ) -> Result<StructureOutput, AnalysisErrorOutput> {
-    use cargo_modules::{
-        analyzer::LoadOptions,
-        options::{GeneralOptions, ProjectOptions},
-    };
+    use cargo_modules::{GeneralOptions, LoadOptions, ProjectOptions, TreeBuilder};
 
     let general_options = GeneralOptions { verbose: false };
 
@@ -150,18 +147,18 @@ async fn analyze_with_cargo_modules(
 
     // Run the analysis synchronously in a blocking task
     let result = tokio::task::spawn_blocking(move || -> Result<StructureOutput, String> {
-        // Load the workspace
-        let (crate_id, analysis_host, _vfs, edition) = cargo_modules::analyzer::load_workspace(
-            &general_options,
-            &project_options,
-            &load_options,
-        )
-        .map_err(|e| format!("Failed to load workspace: {e}"))?;
+        // Load the workspace using the public API
+        let (crate_id, analysis_host, _vfs, edition) =
+            cargo_modules::analyzer::load_workspace(
+                &general_options,
+                &project_options,
+                &load_options,
+            )
+            .map_err(|e| format!("Failed to load workspace: {e}"))?;
 
         let db = analysis_host.raw_database();
 
-        // Build the tree using cargo_modules internal logic
-        use cargo_modules::tree::TreeBuilder;
+        // Build the tree using the public API
         let builder = TreeBuilder::new(db, crate_id);
         let tree = builder
             .build()
@@ -185,18 +182,16 @@ async fn analyze_with_cargo_modules(
     }
 }
 
-// Helper function to format the tree structure with enhanced information
+/// Helper function to format the tree structure with enhanced information
 fn format_tree(
-    tree: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
+    tree: &cargo_modules::Tree<cargo_modules::Item>,
     db: &ra_ap_ide::RootDatabase,
     edition: ra_ap_ide::Edition,
 ) -> StructureNode {
-    use ra_ap_ide as ide;
-
     fn format_node(
-        node: &cargo_modules::tree::Tree<cargo_modules::item::Item>,
+        node: &cargo_modules::Tree<cargo_modules::Item>,
         db: &ra_ap_ide::RootDatabase,
-        edition: ide::Edition,
+        edition: ra_ap_ide::Edition,
     ) -> StructureNode {
         let item = &node.node;
 
