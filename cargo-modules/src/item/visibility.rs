@@ -48,6 +48,7 @@ impl ItemVisibility {
                 }
             }
             hir::Visibility::Public => Self::Public,
+            hir::Visibility::PubCrate(_) => Self::Crate,
         }
     }
 

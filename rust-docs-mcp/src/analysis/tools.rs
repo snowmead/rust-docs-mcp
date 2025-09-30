@@ -125,41 +125,29 @@ async fn analyze_with_cargo_modules(
     package: Option<String>,
     params: AnalyzeCrateStructureParams,
 ) -> Result<StructureOutput, AnalysisErrorOutput> {
-    use cargo_modules::{GeneralOptions, LoadOptions, ProjectOptions, TreeBuilder};
-
-    let general_options = GeneralOptions { verbose: false };
-
-    let project_options = ProjectOptions {
-        lib: params.lib.unwrap_or(false),
-        bin: params.bin,
-        package,
-        no_default_features: params.no_default_features.unwrap_or(false),
-        all_features: params.all_features.unwrap_or(false),
-        features: params.features.unwrap_or_default(),
-        target: params.target,
-        manifest_path,
-    };
-
-    let load_options = LoadOptions {
-        cfg_test: params.cfg_test.unwrap_or(false),
-        sysroot: false,
-    };
-
     // Run the analysis synchronously in a blocking task
     let result = tokio::task::spawn_blocking(move || -> Result<StructureOutput, String> {
-        // Load the workspace using the public API
-        let (crate_id, analysis_host, _vfs, edition) =
-            cargo_modules::analyzer::load_workspace(
-                &general_options,
-                &project_options,
-                &load_options,
-            )
-            .map_err(|e| format!("Failed to load workspace: {e}"))?;
+        // Configure analysis settings
+        let config = cargo_modules::AnalysisConfig {
+            cfg_test: params.cfg_test.unwrap_or(false),
+            sysroot: false,
+            no_default_features: params.no_default_features.unwrap_or(false),
+            all_features: params.all_features.unwrap_or(false),
+            features: params.features.unwrap_or_default(),
+        };
+
+        // Analyze the crate using the public API
+        let (crate_id, analysis_host, edition) = cargo_modules::analyze_crate(
+            &manifest_path.parent().unwrap(),
+            package.as_deref(),
+            config,
+        )
+        .map_err(|e| format!("Failed to analyze crate: {e}"))?;
 
         let db = analysis_host.raw_database();
 
         // Build the tree using the public API
-        let builder = TreeBuilder::new(db, crate_id);
+        let builder = cargo_modules::TreeBuilder::new(db, crate_id);
         let tree = builder
             .build()
             .map_err(|e| format!("Failed to build tree: {e}"))?;
