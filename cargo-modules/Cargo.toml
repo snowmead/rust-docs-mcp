@@ -1,17 +1,17 @@
 [package]
-authors = ["Vincent Esche <regexident@gmail.com>", "Hmvp <github@hmvp.nl>"]
+authors = ["Vincent Esche <regexident@gmail.com>", "Hmvp <github@hmvp.nl>", "Michael Assaf <michael@snowmead.com>"]
 categories = ["development-tools", "rust-patterns"]
-description = "A library for analyzing a Rust crate's module structure and dependencies."
-documentation = "https://docs.rs/crate/cargo-modules/"
-homepage = "https://github.com/regexident/cargo-modules"
+description = "A library for analyzing a Rust crate's module structure and dependencies (fork with rust-analyzer 0.0.289 support)."
+documentation = "https://docs.rs/rust-analyzer-modules"
+homepage = "https://github.com/snowmead/rust-docs-mcp"
 keywords = ["module", "analysis", "structure", "dependencies", "tree"]
 license = "MPL-2.0"
 edition = "2024"
-name = "cargo-modules"
+name = "rust-analyzer-modules"
 readme = "README.md"
-repository = "https://github.com/regexident/cargo-modules"
+repository = "https://github.com/snowmead/rust-docs-mcp"
 rust-version = "1.86.0"
-version = "0.24.4"
+version = "0.1.0"
 
 [dependencies]
 

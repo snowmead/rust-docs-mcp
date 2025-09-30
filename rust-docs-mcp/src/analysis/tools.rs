@@ -128,7 +128,7 @@ async fn analyze_with_cargo_modules(
     // Run the analysis synchronously in a blocking task
     let result = tokio::task::spawn_blocking(move || -> Result<StructureOutput, String> {
         // Configure analysis settings
-        let config = cargo_modules::AnalysisConfig {
+        let config = rust_analyzer_modules::AnalysisConfig {
             cfg_test: params.cfg_test.unwrap_or(false),
             sysroot: false,
             no_default_features: params.no_default_features.unwrap_or(false),
@@ -137,7 +137,7 @@ async fn analyze_with_cargo_modules(
         };
 
         // Analyze the crate using the public API
-        let (crate_id, analysis_host, edition) = cargo_modules::analyze_crate(
+        let (crate_id, analysis_host, edition) = rust_analyzer_modules::analyze_crate(
             &manifest_path.parent().unwrap(),
             package.as_deref(),
             config,
@@ -147,7 +147,7 @@ async fn analyze_with_cargo_modules(
         let db = analysis_host.raw_database();
 
         // Build the tree using the public API
-        let builder = cargo_modules::TreeBuilder::new(db, crate_id);
+        let builder = rust_analyzer_modules::TreeBuilder::new(db, crate_id);
         let tree = builder
             .build()
             .map_err(|e| format!("Failed to build tree: {e}"))?;
@@ -172,12 +172,12 @@ async fn analyze_with_cargo_modules(
 
 /// Helper function to format the tree structure with enhanced information
 fn format_tree(
-    tree: &cargo_modules::Tree<cargo_modules::Item>,
+    tree: &rust_analyzer_modules::Tree<rust_analyzer_modules::Item>,
     db: &ra_ap_ide::RootDatabase,
     edition: ra_ap_ide::Edition,
 ) -> StructureNode {
     fn format_node(
-        node: &cargo_modules::Tree<cargo_modules::Item>,
+        node: &rust_analyzer_modules::Tree<rust_analyzer_modules::Item>,
         db: &ra_ap_ide::RootDatabase,
         edition: ra_ap_ide::Edition,
     ) -> StructureNode {
