@@ -24,7 +24,8 @@ use crate::cache::{
     CrateCache,
     tools::{
         CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams, RemoveCrateParams,
+        CacheTools, GetCratesMetadataParams, ListCachedCratesParams, ListCrateVersionsParams,
+        RemoveCrateParams,
     },
 };
 use crate::deps::tools::{DepsTools, GetDependenciesParams};
@@ -126,7 +127,10 @@ impl RustDocsService {
     #[tool(
         description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
     )]
-    pub async fn list_cached_crates(&self) -> String {
+    pub async fn list_cached_crates(
+        &self,
+        Parameters(_params): Parameters<ListCachedCratesParams>,
+    ) -> String {
         match self.cache_tools.list_cached_crates().await {
             Ok(output) => output.to_json(),
             Err(error) => error.to_json(),
@@ -336,7 +340,7 @@ impl ServerHandler for RustDocsService {
         ServerInfo {
             server_info: rmcp::model::Implementation {
                 name: "rust-docs-mcp".to_string(),
-                version: "0.1.0".to_string(),
+                version: "0.1.1".to_string(),
                 title: None,
                 website_url: None,
                 icons: None,

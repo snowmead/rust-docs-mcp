@@ -1,6 +1,6 @@
 [package]
 name = "rust-docs-mcp"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 authors = ["Michael Assaf <michael@snowmead.com>"]
 description = "MCP server providing comprehensive Rust crate analysis: documentation search, source code access, dependency trees, and module structure visualization with multi-source caching"
