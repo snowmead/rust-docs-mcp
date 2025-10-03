@@ -5,7 +5,7 @@
 //! - GitHub
 //! - Local paths
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
@@ -1222,6 +1222,75 @@ async fn test_empty_search_results() -> Result<()> {
     assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
     // Results could be empty or have some fuzzy matches
     // No need to check >= 0 as total_results is u64 which is always >= 0
+
+    Ok(())
+}
+
+// ===== PLATFORM-SPECIFIC COMPILATION TESTS =====
+
+/// Timeout for large crate compilation
+///
+/// Uses longer timeout in debug mode for CI environments
+const LARGE_CRATE_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 300 } else { 180 };
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "Test designed for macOS platform-specific compilation issues"
+)]
+async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
+    // Initialize tracing for this test
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rust_docs_mcp=info")
+        .try_init();
+
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Test caching bevy 0.17.1 which has known compilation issues on macOS with --all-features
+    // This should succeed using the feature fallback strategy (default features or no-default-features)
+    let params = CacheCrateFromCratesIOParams {
+        crate_name: "bevy".to_string(),
+        version: "0.17.1".to_string(),
+        members: None,
+        update: None,
+    };
+
+    // Use a longer timeout for bevy as it's a large crate
+    let response = tokio::time::timeout(
+        Duration::from_secs(LARGE_CRATE_TIMEOUT_SECS),
+        service.cache_crate_from_cratesio(Parameters(params)),
+    )
+    .await
+    .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TIMEOUT_SECS")?;
+
+    let output = parse_cache_response(&response)?;
+
+    // On macOS, bevy should succeed with the fallback strategy
+    assert!(
+        output.is_success(),
+        "Bevy should cache successfully with feature fallback strategy: {:?}",
+        output
+    );
+
+    // Verify the response mentions which strategy was used
+    let response_lower = response.to_lowercase();
+    let used_fallback = response_lower.contains("default features")
+        || response_lower.contains("no default features");
+
+    if used_fallback {
+        eprintln!("✓ Successfully used fallback feature strategy for bevy on macOS");
+    }
+
+    // Verify it's actually cached
+    let list_params = ListCrateVersionsParams {
+        crate_name: "bevy".to_string(),
+    };
+
+    let versions_response = service.list_crate_versions(Parameters(list_params)).await;
+    assert!(
+        versions_response.contains("0.17.1"),
+        "Bevy 0.17.1 should be in cache"
+    );
 
     Ok(())
 }
