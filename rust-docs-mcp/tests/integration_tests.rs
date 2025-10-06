@@ -15,7 +15,7 @@ use rust_docs_mcp::cache::outputs::{
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-    CrateMetadataQuery, GetCratesMetadataParams, ListCachedCratesParams, ListCrateVersionsParams,
+    CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
 };
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
@@ -543,9 +543,7 @@ async fn test_concurrent_caching() -> Result<()> {
     }
 
     // Verify cache consistency - all crates should be present
-    let cached_crates_response = service
-        .list_cached_crates(Parameters(ListCachedCratesParams {}))
-        .await;
+    let cached_crates_response = service.list_cached_crates().await;
     for (name, version) in &test_crates {
         assert!(
             cached_crates_response.contains(name),

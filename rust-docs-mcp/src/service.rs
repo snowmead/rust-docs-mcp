@@ -24,7 +24,7 @@ use crate::cache::{
     CrateCache,
     tools::{
         CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools, GetCratesMetadataParams, ListCachedCratesParams, ListCrateVersionsParams,
+        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams,
         RemoveCrateParams,
     },
 };
@@ -127,10 +127,7 @@ impl RustDocsService {
     #[tool(
         description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
     )]
-    pub async fn list_cached_crates(
-        &self,
-        Parameters(_params): Parameters<ListCachedCratesParams>,
-    ) -> String {
+    pub async fn list_cached_crates(&self) -> String {
         match self.cache_tools.list_cached_crates().await {
             Ok(output) => output.to_json(),
             Err(error) => error.to_json(),
