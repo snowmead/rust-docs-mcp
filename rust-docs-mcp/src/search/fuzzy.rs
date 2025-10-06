@@ -146,8 +146,7 @@ impl FuzzySearcher {
         // Validate query length
         if query.len() > MAX_QUERY_LENGTH {
             return Err(anyhow::anyhow!(
-                "Query too long (max {} characters)",
-                MAX_QUERY_LENGTH
+                "Query too long (max {MAX_QUERY_LENGTH} characters)"
             ));
         }
 

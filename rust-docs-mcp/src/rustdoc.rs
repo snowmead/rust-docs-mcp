@@ -24,9 +24,7 @@ pub async fn validate_toolchain() -> Result<()> {
     let toolchains = String::from_utf8_lossy(&output.stdout);
     if !toolchains.contains(REQUIRED_TOOLCHAIN) {
         bail!(
-            "Required toolchain {} is not installed. Please run: rustup toolchain install {}",
-            REQUIRED_TOOLCHAIN,
-            REQUIRED_TOOLCHAIN
+            "Required toolchain {REQUIRED_TOOLCHAIN} is not installed. Please run: rustup toolchain install {REQUIRED_TOOLCHAIN}"
         );
     }
 
@@ -73,7 +71,7 @@ pub async fn test_rustdoc_json() -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("JSON generation failed: {}", stderr);
+        bail!("JSON generation failed: {stderr}");
     }
 
     tracing::debug!("Successfully tested rustdoc JSON generation");
@@ -164,7 +162,7 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                     bail!("This is a binary-only package");
                 }
 
-                bail!("Failed to generate documentation: {}", stderr_with_lib);
+                bail!("Failed to generate documentation: {stderr_with_lib}");
             }
 
             // Success with --lib
@@ -178,7 +176,7 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
             );
         }
 
-        bail!("Failed to generate documentation: {}", stderr);
+        bail!("Failed to generate documentation: {stderr}");
     }
 
     Ok(())

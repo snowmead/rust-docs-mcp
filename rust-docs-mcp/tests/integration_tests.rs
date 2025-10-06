@@ -42,13 +42,8 @@ const CLIPPY_BRANCH: &str = "master";
 
 // Response validation helpers
 fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
-    serde_json::from_str(response).map_err(|e| {
-        anyhow::anyhow!(
-            "Failed to parse cache response: {}\nResponse: {}",
-            e,
-            response
-        )
-    })
+    serde_json::from_str(response)
+        .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {e}\nResponse: {response}"))
 }
 
 fn is_binary_only_response(response: &str) -> bool {
@@ -84,7 +79,7 @@ async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
 
     let output = parse_cache_response(&response)?;
     if !output.is_success() {
-        return Err(anyhow::anyhow!("Failed to cache test crate: {:?}", output));
+        return Err(anyhow::anyhow!("Failed to cache test crate: {output:?}"));
     }
     Ok(())
 }

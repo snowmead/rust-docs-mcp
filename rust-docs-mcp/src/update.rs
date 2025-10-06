@@ -56,7 +56,7 @@ pub async fn update_executable(
 
     if !clone_output.status.success() {
         let stderr = String::from_utf8_lossy(&clone_output.stderr);
-        anyhow::bail!("Failed to clone repository: {}", stderr);
+        anyhow::bail!("Failed to clone repository: {stderr}");
     }
 
     // Build the project
@@ -70,7 +70,7 @@ pub async fn update_executable(
 
     if !build_output.status.success() {
         let stderr = String::from_utf8_lossy(&build_output.stderr);
-        anyhow::bail!("Failed to build rust-docs-mcp: {}", stderr);
+        anyhow::bail!("Failed to build rust-docs-mcp: {stderr}");
     }
 
     // Install using the built binary's install command
@@ -89,7 +89,7 @@ pub async fn update_executable(
 
     if !install_output.status.success() {
         let stderr = String::from_utf8_lossy(&install_output.stderr);
-        anyhow::bail!("Failed to install rust-docs-mcp: {}", stderr);
+        anyhow::bail!("Failed to install rust-docs-mcp: {stderr}");
     }
 
     // Handle macOS code signing
@@ -121,7 +121,7 @@ fn check_command_exists(command: &str) -> Result<()> {
         .context("Failed to check command existence")?;
 
     if !output.status.success() {
-        anyhow::bail!("{} is required but not installed", command);
+        anyhow::bail!("{command} is required but not installed");
     }
 
     Ok(())
@@ -149,7 +149,7 @@ fn check_nightly_toolchain() -> Result<()> {
 
         if !install_output.status.success() {
             let stderr = String::from_utf8_lossy(&install_output.stderr);
-            anyhow::bail!("Failed to install Rust nightly toolchain: {}", stderr);
+            anyhow::bail!("Failed to install Rust nightly toolchain: {stderr}");
         }
 
         println!("✅ Rust nightly toolchain installed");
