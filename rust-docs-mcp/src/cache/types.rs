@@ -14,8 +14,7 @@ fn validate_crate_name(name: &str) -> Result<()> {
     // Check for path traversal attempts
     if name.contains("..") || name.contains("/") || name.contains("\\") {
         bail!(
-            "Invalid crate name '{}': contains path separators or traversal sequences",
-            name
+            "Invalid crate name '{name}': contains path separators or traversal sequences"
         );
     }
 
@@ -25,8 +24,7 @@ fn validate_crate_name(name: &str) -> Result<()> {
         || (name.len() > 2 && name.chars().nth(1) == Some(':'))
     {
         bail!(
-            "Invalid crate name '{}': appears to be an absolute path",
-            name
+            "Invalid crate name '{name}': appears to be an absolute path"
         );
     }
 
@@ -36,8 +34,7 @@ fn validate_crate_name(name: &str) -> Result<()> {
         .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     {
         bail!(
-            "Invalid crate name '{}': contains invalid characters. Only alphanumeric, underscore, and dash are allowed",
-            name
+            "Invalid crate name '{name}': contains invalid characters. Only alphanumeric, underscore, and dash are allowed"
         );
     }
 

@@ -115,8 +115,7 @@ impl SearchTools {
         let fuzzy_distance = params.fuzzy_distance.unwrap_or(DEFAULT_FUZZY_DISTANCE);
         if fuzzy_distance > MAX_FUZZY_DISTANCE {
             return Err(anyhow::anyhow!(
-                "Fuzzy distance must be between 0 and {}",
-                MAX_FUZZY_DISTANCE
+                "Fuzzy distance must be between 0 and {MAX_FUZZY_DISTANCE}"
             ));
         }
 
@@ -124,8 +123,7 @@ impl SearchTools {
         let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
         if limit > MAX_SEARCH_LIMIT {
             return Err(anyhow::anyhow!(
-                "Limit must not exceed {}",
-                MAX_SEARCH_LIMIT
+                "Limit must not exceed {MAX_SEARCH_LIMIT}"
             ));
         }
 

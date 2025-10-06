@@ -138,7 +138,7 @@ async fn analyze_with_cargo_modules(
 
         // Analyze the crate using the public API
         let (crate_id, analysis_host, edition) = rust_analyzer_modules::analyze_crate(
-            &manifest_path.parent().unwrap(),
+            manifest_path.parent().unwrap(),
             package.as_deref(),
             config,
         )

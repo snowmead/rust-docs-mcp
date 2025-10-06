@@ -73,9 +73,7 @@ pub fn process_cargo_metadata(
         })
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "Package {}-{} not found in metadata",
-                crate_name,
-                crate_version
+                "Package {crate_name}-{crate_version} not found in metadata"
             )
         })?;
 

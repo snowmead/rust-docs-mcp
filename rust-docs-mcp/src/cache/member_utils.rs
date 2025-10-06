@@ -29,32 +29,28 @@ pub fn validate_member_path(member_path: &str) -> Result<()> {
     // Reject absolute paths
     if member_path.starts_with('/') || member_path.starts_with('\\') {
         bail!(
-            "Invalid member path '{}': absolute paths not allowed",
-            member_path
+            "Invalid member path '{member_path}': absolute paths not allowed"
         );
     }
 
     // Check for Windows absolute paths (e.g., C:\)
     if member_path.len() > 2 && member_path.chars().nth(1) == Some(':') {
         bail!(
-            "Invalid member path '{}': absolute paths not allowed",
-            member_path
+            "Invalid member path '{member_path}': absolute paths not allowed"
         );
     }
 
     // Reject path traversal
     if member_path.contains("..") {
         bail!(
-            "Invalid member path '{}': path traversal not allowed",
-            member_path
+            "Invalid member path '{member_path}': path traversal not allowed"
         );
     }
 
     // Reject backslashes (Windows paths)
     if member_path.contains('\\') {
         bail!(
-            "Invalid member path '{}': backslashes not allowed",
-            member_path
+            "Invalid member path '{member_path}': backslashes not allowed"
         );
     }
 

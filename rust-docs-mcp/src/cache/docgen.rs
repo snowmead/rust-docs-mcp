@@ -62,9 +62,7 @@ impl DocGenerator {
 
         if !source_path.exists() {
             bail!(
-                "Source not found for {}-{}. Download it first.",
-                name,
-                version
+                "Source not found for {name}-{version}. Download it first."
             );
         }
 
@@ -119,9 +117,7 @@ impl DocGenerator {
 
         if !source_path.exists() {
             bail!(
-                "Source not found for {}-{}. Download it first.",
-                name,
-                version
+                "Source not found for {name}-{version}. Download it first."
             );
         }
 
@@ -234,7 +230,7 @@ impl DocGenerator {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate dependency metadata: {}", stderr);
+            bail!("Failed to generate dependency metadata: {stderr}");
         }
 
         // Save the raw metadata output
@@ -282,7 +278,7 @@ impl DocGenerator {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate dependency metadata: {}", stderr);
+            bail!("Failed to generate dependency metadata: {stderr}");
         }
 
         // Ensure the member directory exists
@@ -308,7 +304,7 @@ impl DocGenerator {
         let deps_path = self.storage.dependencies_path(name, version, None)?;
 
         if !deps_path.exists() {
-            bail!("Dependencies not found for {}-{}", name, version);
+            bail!("Dependencies not found for {name}-{version}");
         }
 
         let json_string = tokio::fs::read_to_string(&deps_path)
@@ -333,13 +329,10 @@ impl DocGenerator {
         if !docs_path.exists() {
             if let Some(member) = member_name {
                 bail!(
-                    "Documentation not found for workspace member {} in {}-{}",
-                    member,
-                    name,
-                    version
+                    "Documentation not found for workspace member {member} in {name}-{version}"
                 );
             } else {
-                bail!("Documentation not found for {}-{}", name, version);
+                bail!("Documentation not found for {name}-{version}");
             }
         }
 

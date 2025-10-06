@@ -116,10 +116,9 @@ impl CrateCache {
             Err(e) if e.to_string().contains("This is a binary-only package") => {
                 // This is a binary-only package, return appropriate error
                 bail!(
-                    "Cannot generate documentation for binary-only package '{}'. \
+                    "Cannot generate documentation for binary-only package '{name}'. \
                     This package contains only binary targets and no library to document. \
-                    rustdoc can only generate documentation for library targets.",
-                    name
+                    rustdoc can only generate documentation for library targets."
                 )
             }
             Err(e) => Err(e),
@@ -351,11 +350,8 @@ impl CrateCache {
 
             if !member_cargo_toml.exists() {
                 bail!(
-                    "Workspace member '{}' not found in {}-{}. \
-                    Make sure the member path is correct.",
-                    member_path,
-                    name,
-                    version
+                    "Workspace member '{member_path}' not found in {name}-{version}. \
+                    Make sure the member path is correct."
                 );
             }
 
@@ -405,7 +401,7 @@ impl CrateCache {
             } = &response
                 && results.is_empty()
             {
-                bail!("Failed to update any workspace members: {:?}", errors);
+                bail!("Failed to update any workspace members: {errors:?}");
             }
 
             return Ok(response);
@@ -755,9 +751,7 @@ impl CrateCache {
                     // Version was provided, validate it matches
                     if provided_version != &actual_version {
                         bail!(
-                            "Version mismatch: provided version '{}' does not match actual version '{}' in Cargo.toml",
-                            provided_version,
-                            actual_version
+                            "Version mismatch: provided version '{provided_version}' does not match actual version '{actual_version}' in Cargo.toml"
                         );
                     }
                     Ok((actual_version, false)) // Version was validated, not auto-detected
