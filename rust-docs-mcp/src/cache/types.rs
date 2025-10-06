@@ -13,9 +13,7 @@ use std::str::FromStr;
 fn validate_crate_name(name: &str) -> Result<()> {
     // Check for path traversal attempts
     if name.contains("..") || name.contains("/") || name.contains("\\") {
-        bail!(
-            "Invalid crate name '{name}': contains path separators or traversal sequences"
-        );
+        bail!("Invalid crate name '{name}': contains path separators or traversal sequences");
     }
 
     // Check for absolute paths
@@ -23,9 +21,7 @@ fn validate_crate_name(name: &str) -> Result<()> {
         || name.starts_with('\\')
         || (name.len() > 2 && name.chars().nth(1) == Some(':'))
     {
-        bail!(
-            "Invalid crate name '{name}': appears to be an absolute path"
-        );
+        bail!("Invalid crate name '{name}': appears to be an absolute path");
     }
 
     // Ensure it's a valid crate name pattern (alphanumeric, underscore, dash)

@@ -122,9 +122,7 @@ impl SearchTools {
         // Validate limit
         let limit = params.limit.unwrap_or(DEFAULT_SEARCH_LIMIT);
         if limit > MAX_SEARCH_LIMIT {
-            return Err(anyhow::anyhow!(
-                "Limit must not exceed {MAX_SEARCH_LIMIT}"
-            ));
+            return Err(anyhow::anyhow!("Limit must not exceed {MAX_SEARCH_LIMIT}"));
         }
 
         // Build search options

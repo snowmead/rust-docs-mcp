@@ -61,9 +61,7 @@ impl DocGenerator {
         }
 
         if !source_path.exists() {
-            bail!(
-                "Source not found for {name}-{version}. Download it first."
-            );
+            bail!("Source not found for {name}-{version}. Download it first.");
         }
 
         tracing::info!("Generating documentation for {}-{}", name, version);
@@ -116,9 +114,7 @@ impl DocGenerator {
         let member_full_path = source_path.join(member_path);
 
         if !source_path.exists() {
-            bail!(
-                "Source not found for {name}-{version}. Download it first."
-            );
+            bail!("Source not found for {name}-{version}. Download it first.");
         }
 
         if !member_full_path.exists() {
@@ -328,9 +324,7 @@ impl DocGenerator {
 
         if !docs_path.exists() {
             if let Some(member) = member_name {
-                bail!(
-                    "Documentation not found for workspace member {member} in {name}-{version}"
-                );
+                bail!("Documentation not found for workspace member {member} in {name}-{version}");
             } else {
                 bail!("Documentation not found for {name}-{version}");
             }

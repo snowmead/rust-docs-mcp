@@ -72,9 +72,7 @@ pub fn process_cargo_metadata(
             p["name"].as_str() == Some(crate_name) && p["version"].as_str() == Some(crate_version)
         })
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Package {crate_name}-{crate_version} not found in metadata"
-            )
+            anyhow::anyhow!("Package {crate_name}-{crate_version} not found in metadata")
         })?;
 
     // Extract direct dependencies
