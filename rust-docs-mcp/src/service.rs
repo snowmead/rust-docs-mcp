@@ -24,8 +24,7 @@ use crate::cache::{
     CrateCache,
     tools::{
         CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams,
-        RemoveCrateParams,
+        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams, RemoveCrateParams,
     },
 };
 use crate::deps::tools::{DepsTools, GetDependenciesParams};
