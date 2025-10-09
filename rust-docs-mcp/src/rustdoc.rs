@@ -6,9 +6,20 @@
 use anyhow::{Context, Result, bail};
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
 
 /// The pinned nightly toolchain version compatible with rustdoc-types 0.53.0
 pub const REQUIRED_TOOLCHAIN: &str = "nightly-2025-06-23";
+
+/// Number of lines to preview from error messages in diagnostic output
+const ERROR_MESSAGE_PREVIEW_LINES: usize = 10;
+
+/// Maximum characters to store in error messages to prevent memory issues
+const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
+
+/// Timeout for individual rustdoc execution attempts (in seconds)
+const RUSTDOC_TIMEOUT_SECS: u64 = 1800;
 
 /// Check if the required nightly toolchain is available
 pub async fn validate_toolchain() -> Result<()> {
@@ -83,6 +94,7 @@ pub async fn test_rustdoc_json() -> Result<()> {
 /// Get rustdoc version information
 pub async fn get_rustdoc_version() -> Result<String> {
     let output = Command::new("rustdoc")
+        .arg(format!("+{}", REQUIRED_TOOLCHAIN))
         .arg("--version")
         .output()
         .context("Failed to run rustdoc --version")?;
@@ -105,6 +117,7 @@ pub async fn get_rustdoc_version() -> Result<String> {
 /// The recommended order is: [`AllFeatures`](Self::AllFeatures) →
 /// [`DefaultFeatures`](Self::DefaultFeatures) → [`NoDefaultFeatures`](Self::NoDefaultFeatures)
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::enum_variant_names)]
 enum FeatureStrategy {
     /// Use --all-features (most comprehensive)
     AllFeatures,
@@ -149,21 +162,53 @@ struct FailedAttempt {
     error: String,
 }
 
+impl FailedAttempt {
+    /// Create a new failed attempt with error message truncation
+    fn new(strategy: String, error: String) -> Self {
+        let truncated_error = if error.len() > MAX_ERROR_MESSAGE_CHARS {
+            format!(
+                "{}... (truncated {} chars)",
+                &error[..MAX_ERROR_MESSAGE_CHARS],
+                error.len() - MAX_ERROR_MESSAGE_CHARS
+            )
+        } else {
+            error
+        };
+
+        Self {
+            strategy,
+            error: truncated_error,
+        }
+    }
+}
+
 /// Execute cargo rustdoc with the given arguments
 ///
 /// This is a helper to avoid duplicating the execution logic for both
 /// standard and --lib retry cases.
+///
+/// Returns an error if the command times out after [`RUSTDOC_TIMEOUT_SECS`] seconds.
 async fn execute_rustdoc(args: &[String], source_path: &Path) -> Result<std::process::Output> {
-    Command::new("cargo")
-        .args(args)
-        .current_dir(source_path)
-        .output()
-        .context("Failed to run cargo rustdoc")
+    tokio::time::timeout(
+        Duration::from_secs(RUSTDOC_TIMEOUT_SECS),
+        TokioCommand::new("cargo")
+            .args(args)
+            .current_dir(source_path)
+            .output()
+    )
+    .await
+    .context(format!("Rustdoc execution timed out after {} seconds", RUSTDOC_TIMEOUT_SECS))?
+    .context("Failed to run cargo rustdoc")
 }
 
 /// Run cargo rustdoc with JSON output for a crate or specific package
 pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -> Result<()> {
     validate_toolchain().await?;
+
+    // Logging strategy:
+    // - debug: Strategy attempts and retries
+    // - warn: Non-fatal failures that trigger fallback
+    // - info: Final success
 
     let log_msg = match package {
         Some(pkg) => format!(
@@ -259,10 +304,10 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                             "Compilation failed with {}, will try next strategy",
                             strategy.description()
                         );
-                        failed_attempts.push(FailedAttempt {
-                            strategy: strategy.description().to_string(),
-                            error: stderr_with_lib.to_string(),
-                        });
+                        failed_attempts.push(FailedAttempt::new(
+                            strategy.description().to_string(),
+                            stderr_with_lib.to_string(),
+                        ));
                         continue; // Try next strategy
                     }
 
@@ -283,10 +328,10 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                     "Compilation failed with {}, will try next strategy",
                     strategy.description()
                 );
-                failed_attempts.push(FailedAttempt {
-                    strategy: strategy.description().to_string(),
-                    error: stderr.to_string(),
-                });
+                failed_attempts.push(FailedAttempt::new(
+                    strategy.description().to_string(),
+                    stderr.to_string(),
+                ));
                 continue; // Try next strategy
             }
 
@@ -314,7 +359,7 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                 attempt
                     .error
                     .lines()
-                    .take(3)
+                    .take(ERROR_MESSAGE_PREVIEW_LINES)
                     .collect::<Vec<_>>()
                     .join("\n     ")
             )

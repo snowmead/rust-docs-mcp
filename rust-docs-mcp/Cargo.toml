@@ -39,6 +39,8 @@ tokio = { version = "1", features = [
     "rt-multi-thread",
     "io-std",
     "signal",
+    "process",
+    "time",
 ] }
 toml = "0.8"
 tracing = "0.1"

@@ -1239,6 +1239,17 @@ const LARGE_CRATE_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 300 } else { 1
     ignore = "Test designed for macOS platform-specific compilation issues"
 )]
 async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
+    // NOTE: This test depends on external resources and may fail due to:
+    // - Network connectivity issues
+    // - crates.io downtime or rate limiting
+    // - Bevy crate removal, version change, or dependency updates
+    // - Platform-specific build environment issues
+    //
+    // If this test becomes unreliable in CI, consider:
+    // - Mocking the crate download mechanism
+    // - Using a smaller, more stable test crate
+    // - Adding #[cfg_attr(env = "CI", ignore)] to skip on CI
+
     // Initialize tracing for this test
     let _ = tracing_subscriber::fmt()
         .with_env_filter("rust_docs_mcp=info")
