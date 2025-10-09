@@ -16,8 +16,8 @@ categories = ["development-tools", "command-line-utilities"]
 rust-analyzer-modules = { version = "0.1", path = "../cargo-modules" }
 ra_ap_ide = "=0.0.289"
 
-rmcp = { version = "0.7.0", features = ["server", "macros", "transport-io"] }
-rmcp-macros = "0.7.0"
+rmcp = { version = "0.8.0", features = ["server", "macros", "transport-io"] }
+rmcp-macros = "0.8.0"
 
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }

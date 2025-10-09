@@ -35,9 +35,7 @@ pub async fn validate_toolchain() -> Result<()> {
     let toolchains = String::from_utf8_lossy(&output.stdout);
     if !toolchains.contains(REQUIRED_TOOLCHAIN) {
         bail!(
-            "Required toolchain {} is not installed. Please run: rustup toolchain install {}",
-            REQUIRED_TOOLCHAIN,
-            REQUIRED_TOOLCHAIN
+            "Required toolchain {REQUIRED_TOOLCHAIN} is not installed. Please run: rustup toolchain install {REQUIRED_TOOLCHAIN}"
         );
     }
 
@@ -84,7 +82,7 @@ pub async fn test_rustdoc_json() -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("JSON generation failed: {}", stderr);
+        bail!("JSON generation failed: {stderr}");
     }
 
     tracing::debug!("Successfully tested rustdoc JSON generation");

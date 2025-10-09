@@ -109,10 +109,6 @@ pub struct ListCrateVersionsParams {
     pub crate_name: String,
 }
 
-/// Empty params struct for list_cached_crates tool
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ListCachedCratesParams {}
-
 #[derive(Debug, Clone)]
 pub struct CacheTools {
     cache: Arc<RwLock<CrateCache>>,

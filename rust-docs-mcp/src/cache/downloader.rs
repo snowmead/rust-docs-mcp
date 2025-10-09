@@ -376,7 +376,7 @@ impl CrateDownloader {
         if version != "main" && version != "master" {
             // Validate git reference name to prevent potential issues
             if !Self::is_valid_git_ref(version) {
-                bail!("Invalid git reference name: {}", version);
+                bail!("Invalid git reference name: {version}");
             }
 
             // Try to checkout as a branch first
@@ -401,7 +401,7 @@ impl CrateDownloader {
                     repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
                         .with_context(|| format!("Failed to checkout tag: {version}"))?;
                 } else {
-                    bail!("Could not find branch or tag: {}", version);
+                    bail!("Could not find branch or tag: {version}");
                 }
             }
         }
