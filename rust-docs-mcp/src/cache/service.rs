@@ -480,6 +480,9 @@ impl CrateCache {
     }
 
     /// Handle caching workspace members
+    ///
+    /// NOTE: Each workspace member uses a unique target directory to avoid conflicts when
+    /// building concurrently. See [`DocGenerator::generate_workspace_member_docs`] for details.
     async fn cache_workspace_members(
         &self,
         crate_name: &str,
@@ -509,7 +512,7 @@ impl CrateCache {
             })
             .collect();
 
-        // Execute all futures concurrently
+        // Execute all futures concurrently (safe because each member uses a unique target directory)
         let results_with_members = join_all(member_futures).await;
 
         // Collect results and errors

@@ -117,7 +117,7 @@ pub async fn get_rustdoc_version() -> Result<String> {
 #[derive(Debug, Clone, Copy)]
 #[allow(clippy::enum_variant_names)]
 enum FeatureStrategy {
-    /// Use --all-features (most comprehensive)
+    /// Use --all-features (enables all feature flags)
     AllFeatures,
     /// Use default features only
     DefaultFeatures,
@@ -149,8 +149,8 @@ impl FeatureStrategy {
 fn is_compilation_error(stderr: &str) -> bool {
     stderr.contains("error[E")
         || stderr.contains("error: could not compile")
-        || stderr.contains("Compiling")
-            && (stderr.contains("error:") || stderr.contains("failed to compile"))
+        || stderr.contains("error: aborting due to")
+        || (stderr.contains("error:") && stderr.contains("failed to compile"))
 }
 
 /// Stores information about a failed rustdoc attempt for diagnostics
@@ -164,10 +164,17 @@ impl FailedAttempt {
     /// Create a new failed attempt with error message truncation
     fn new(strategy: String, error: String) -> Self {
         let truncated_error = if error.len() > MAX_ERROR_MESSAGE_CHARS {
+            // Safely truncate at a UTF-8 character boundary
+            let truncate_at = error
+                .char_indices()
+                .take_while(|(idx, _)| *idx < MAX_ERROR_MESSAGE_CHARS)
+                .last()
+                .map(|(idx, ch)| idx + ch.len_utf8())
+                .unwrap_or(0);
             format!(
                 "{}... (truncated {} chars)",
-                &error[..MAX_ERROR_MESSAGE_CHARS],
-                error.len() - MAX_ERROR_MESSAGE_CHARS
+                &error[..truncate_at],
+                error.len() - truncate_at
             )
         } else {
             error
@@ -186,21 +193,44 @@ impl FailedAttempt {
 /// standard and --lib retry cases.
 ///
 /// Returns an error if the command times out after [`RUSTDOC_TIMEOUT_SECS`] seconds.
-async fn execute_rustdoc(args: &[String], source_path: &Path) -> Result<std::process::Output> {
-    tokio::time::timeout(
-        Duration::from_secs(RUSTDOC_TIMEOUT_SECS),
-        TokioCommand::new("cargo")
-            .args(args)
-            .current_dir(source_path)
-            .output()
-    )
-    .await
-    .context(format!("Rustdoc execution timed out after {} seconds", RUSTDOC_TIMEOUT_SECS))?
-    .context("Failed to run cargo rustdoc")
+async fn execute_rustdoc(
+    args: &[String],
+    source_path: &Path,
+    target_dir: Option<&Path>,
+) -> Result<std::process::Output> {
+    let mut command = TokioCommand::new("cargo");
+    command.args(args).current_dir(source_path);
+
+    // Set custom target directory if provided to avoid conflicts when building
+    // multiple workspace members concurrently
+    if let Some(dir) = target_dir {
+        command.env("CARGO_TARGET_DIR", dir);
+    }
+
+    tokio::time::timeout(Duration::from_secs(RUSTDOC_TIMEOUT_SECS), command.output())
+        .await
+        .context(format!(
+            "Rustdoc execution timed out after {} seconds",
+            RUSTDOC_TIMEOUT_SECS
+        ))?
+        .context("Failed to run cargo rustdoc")
 }
 
 /// Run cargo rustdoc with JSON output for a crate or specific package
-pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -> Result<()> {
+///
+/// # Parameters
+/// - `source_path`: The root directory containing Cargo.toml
+/// - `package`: Optional package name for workspace members
+/// - `target_dir`: Optional custom target directory to avoid conflicts when building
+///   multiple workspace members concurrently. When building multiple workspace members
+///   in parallel, each must use a unique target directory to prevent cargo from
+///   conflicting with itself. See [`DocGenerator::generate_workspace_member_docs`](crate::cache::docgen::DocGenerator::generate_workspace_member_docs)
+///   for the implementation pattern.
+pub async fn run_cargo_rustdoc_json(
+    source_path: &Path,
+    package: Option<&str>,
+    target_dir: Option<&Path>,
+) -> Result<()> {
     validate_toolchain().await?;
 
     // Logging strategy:
@@ -208,13 +238,24 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
     // - warn: Non-fatal failures that trigger fallback
     // - info: Final success
 
-    let log_msg = match package {
-        Some(pkg) => format!(
+    let log_msg = match (package, target_dir) {
+        (Some(pkg), Some(target)) => format!(
+            "Running cargo rustdoc with JSON output for package {} in {} (target: {})",
+            pkg,
+            source_path.display(),
+            target.display()
+        ),
+        (Some(pkg), None) => format!(
             "Running cargo rustdoc with JSON output for package {} in {}",
             pkg,
             source_path.display()
         ),
-        None => format!(
+        (None, Some(target)) => format!(
+            "Running cargo rustdoc with JSON output in {} (target: {})",
+            source_path.display(),
+            target.display()
+        ),
+        (None, None) => format!(
             "Running cargo rustdoc with JSON output in {}",
             source_path.display()
         ),
@@ -259,7 +300,7 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
         args.extend_from_slice(&feature_args);
         args.extend_from_slice(&rustdoc_args);
 
-        let output = execute_rustdoc(&args, source_path).await?;
+        let output = execute_rustdoc(&args, source_path, target_dir).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -270,7 +311,11 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
             }
 
             // Check for workspace error - this is not retryable
-            if stderr.contains("could not find `Cargo.toml` in") || stderr.contains("workspace") {
+            // Only bail if we get a specific workspace root error, not just any error mentioning workspaces
+            if stderr.contains("could not find `Cargo.toml` in")
+                || stderr.contains("current package believes it's in a workspace")
+                || (stderr.contains("workspace") && stderr.contains("manifest not found"))
+            {
                 bail!(
                     "This appears to be a workspace. Please use workspace member caching instead of trying to cache the root workspace."
                 );
@@ -286,7 +331,8 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                 args_with_lib.extend_from_slice(&feature_args);
                 args_with_lib.extend_from_slice(&rustdoc_args);
 
-                let output_with_lib = execute_rustdoc(&args_with_lib, source_path).await?;
+                let output_with_lib =
+                    execute_rustdoc(&args_with_lib, source_path, target_dir).await?;
 
                 if !output_with_lib.status.success() {
                     let stderr_with_lib = String::from_utf8_lossy(&output_with_lib.stderr);
@@ -309,7 +355,11 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
                         continue; // Try next strategy
                     }
 
-                    bail!("Failed to generate documentation: {}", stderr_with_lib);
+                    bail!(
+                        "Failed to generate documentation with {}: {}",
+                        strategy.description(),
+                        stderr_with_lib
+                    );
                 }
 
                 // Success with --lib
@@ -334,7 +384,11 @@ pub async fn run_cargo_rustdoc_json(source_path: &Path, package: Option<&str>) -
             }
 
             // Other errors or last strategy failed
-            bail!("Failed to generate documentation: {}", stderr);
+            bail!(
+                "Failed to generate documentation with {}: {}",
+                strategy.description(),
+                stderr
+            );
         }
 
         // Success
@@ -438,14 +492,14 @@ mod tests {
     }
 
     #[test]
-    fn test_is_compilation_error_with_compiling_and_error() {
-        let stderr = "Compiling my-crate v0.1.0\nerror: expected one of `!` or `::`, found `{`";
+    fn test_is_compilation_error_with_aborting_due_to() {
+        let stderr = "error: aborting due to 3 previous errors";
         assert!(is_compilation_error(stderr));
     }
 
     #[test]
     fn test_is_compilation_error_with_failed_to_compile() {
-        let stderr = "Compiling my-crate v0.1.0\nfailed to compile my-crate";
+        let stderr = "error: failed to compile `my-crate` due to previous error";
         assert!(is_compilation_error(stderr));
     }
 

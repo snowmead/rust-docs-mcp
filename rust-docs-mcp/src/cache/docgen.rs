@@ -67,7 +67,7 @@ impl DocGenerator {
         tracing::info!("Generating documentation for {}-{}", name, version);
 
         // Run cargo rustdoc with JSON output using unified function
-        rustdoc::run_cargo_rustdoc_json(&source_path, None).await?;
+        rustdoc::run_cargo_rustdoc_json(&source_path, None, None).await?;
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
@@ -139,11 +139,30 @@ impl DocGenerator {
             version
         );
 
-        // Run cargo rustdoc with JSON output for the specific package using unified function
-        rustdoc::run_cargo_rustdoc_json(&source_path, Some(&package_name)).await?;
+        // Create a unique target directory for this member to avoid conflicts when
+        // building multiple workspace members concurrently. Use a hash to ensure uniqueness
+        // and avoid potential collisions from paths like "foo/bar" and "foo-bar"
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
-        // Find the generated JSON file in target/doc
-        let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
+        let mut hasher = DefaultHasher::new();
+        member_path.hash(&mut hasher);
+        let path_hash = hasher.finish();
+
+        let sanitized_member = member_path.replace(['/', '\\'], "-");
+        let member_target_dir =
+            source_path.join(format!("target-{}-{:x}", sanitized_member, path_hash));
+
+        // Run cargo rustdoc with JSON output for the specific package using unified function
+        rustdoc::run_cargo_rustdoc_json(
+            &source_path,
+            Some(&package_name),
+            Some(&member_target_dir),
+        )
+        .await?;
+
+        // Find the generated JSON file in the member-specific target/doc directory
+        let doc_dir = member_target_dir.join(DOC_DIR);
         let json_file = self.find_json_doc(&doc_dir, &package_name)?;
 
         // Ensure the member directory exists in cache
@@ -169,8 +188,11 @@ impl DocGenerator {
             .await
             .context("Failed to create search index for workspace member")?;
 
-        // Clean up the target directory to save space
-        self.cleanup_target_directory(&source_path)?;
+        // Clean up the member-specific target directory to save space
+        if member_target_dir.exists() {
+            std::fs::remove_dir_all(&member_target_dir)
+                .context("Failed to remove member target directory")?;
+        }
 
         tracing::info!(
             "Successfully generated documentation for workspace member {} in {}-{}",

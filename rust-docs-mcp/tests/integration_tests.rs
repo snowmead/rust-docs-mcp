@@ -34,6 +34,7 @@ use tempfile::TempDir;
 
 // Test constants
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+const LARGE_CRATE_TEST_TIMEOUT: Duration = Duration::from_secs(120);
 const SEMVER_VERSION: &str = "1.0.0";
 const SERDE_VERSION: &str = "v1.0.136";
 const SERDE_GITHUB_URL: &str = "https://github.com/serde-rs/serde";
@@ -1223,11 +1224,6 @@ async fn test_empty_search_results() -> Result<()> {
 
 // ===== PLATFORM-SPECIFIC COMPILATION TESTS =====
 
-/// Timeout for large crate compilation
-///
-/// Uses longer timeout in debug mode for CI environments
-const LARGE_CRATE_TIMEOUT_SECS: u64 = if cfg!(debug_assertions) { 300 } else { 180 };
-
 #[tokio::test]
 #[cfg_attr(
     not(target_os = "macos"),
@@ -1263,11 +1259,11 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 
     // Use a longer timeout for bevy as it's a large crate
     let response = tokio::time::timeout(
-        Duration::from_secs(LARGE_CRATE_TIMEOUT_SECS),
+        LARGE_CRATE_TEST_TIMEOUT,
         service.cache_crate_from_cratesio(Parameters(params)),
     )
     .await
-    .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TIMEOUT_SECS")?;
+    .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
 
     let output = parse_cache_response(&response)?;
 
