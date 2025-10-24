@@ -14,8 +14,7 @@ use rust_docs_mcp::cache::outputs::{
     CacheCrateOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
-    CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-    CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
+    CacheCrateParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
 };
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
@@ -65,18 +64,20 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
 
 /// Helper to setup and cache the semver test crate
 async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
-    let params = CacheCrateFromCratesIOParams {
+    let params = CacheCrateParams {
         crate_name: "semver".to_string(),
-        version: SEMVER_VERSION.to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some(SEMVER_VERSION.to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: None,
     };
 
-    let response = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params)),
-    )
-    .await?;
+    let response =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
 
     let output = parse_cache_response(&response)?;
     if !output.is_success() {
@@ -113,18 +114,20 @@ async fn test_cache_from_crates_io() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache a small, stable crate from crates.io
-    let params = CacheCrateFromCratesIOParams {
+    let params = CacheCrateParams {
         crate_name: "semver".to_string(),
-        version: SEMVER_VERSION.to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some(SEMVER_VERSION.to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: None,
     };
 
-    let response = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params)),
-    )
-    .await?;
+    let response =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
 
     let output = parse_cache_response(&response)?;
     match &output {
@@ -163,20 +166,20 @@ async fn test_cache_from_github() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache a crate from GitHub using a tag
-    let params = CacheCrateFromGitHubParams {
+    let params = CacheCrateParams {
         crate_name: "serde-test".to_string(),
-        github_url: SERDE_GITHUB_URL.to_string(),
+        source_type: "github".to_string(),
+        version: None,
+        github_url: Some(SERDE_GITHUB_URL.to_string()),
         branch: None,
         tag: Some(SERDE_VERSION.to_string()),
+        path: None,
         members: None,
         update: None,
     };
 
-    let response = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_github(Parameters(params)),
-    )
-    .await?;
+    let response =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
 
     // Serde is a workspace, so we should get a workspace detection response
     let output = parse_cache_response(&response)?;
@@ -213,18 +216,21 @@ async fn test_cache_from_github_branch() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache from GitHub using a branch
-    let params = CacheCrateFromGitHubParams {
+    let params = CacheCrateParams {
         crate_name: "clippy-test".to_string(),
-        github_url: CLIPPY_GITHUB_URL.to_string(),
+        source_type: "github".to_string(),
+        version: None,
+        github_url: Some(CLIPPY_GITHUB_URL.to_string()),
         branch: Some(CLIPPY_BRANCH.to_string()),
         tag: None,
+        path: None,
         members: None,
         update: None,
     };
 
     let response = tokio::time::timeout(
         LARGE_CRATE_TEST_TIMEOUT,
-        service.cache_crate_from_github(Parameters(params)),
+        service.cache_crate(Parameters(params)),
     )
     .await?;
 
@@ -268,15 +274,19 @@ edition = "2021"
     )?;
 
     // Cache from local path
-    let params = CacheCrateFromLocalParams {
+    let params = CacheCrateParams {
         crate_name: "test-local".to_string(),
+        source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
-        path: test_crate_dir.path().to_str().unwrap().to_string(),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(test_crate_dir.path().to_str().unwrap().to_string()),
         members: None,
         update: None,
     };
 
-    let response = service.cache_crate_from_local(Parameters(params)).await;
+    let response = service.cache_crate(Parameters(params)).await;
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_success(),
@@ -341,15 +351,19 @@ serde = {{ workspace = true }}
     }
 
     // Cache the workspace - should detect it's a workspace
-    let params = CacheCrateFromLocalParams {
+    let params = CacheCrateParams {
         crate_name: "test-workspace".to_string(),
+        source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
-        path: workspace_dir.path().to_str().unwrap().to_string(),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: None, // Should detect workspace and return member list
         update: None,
     };
 
-    let response = service.cache_crate_from_local(Parameters(params)).await;
+    let response = service.cache_crate(Parameters(params)).await;
 
     // Response should indicate workspace detection
     let output = parse_cache_response(&response)?;
@@ -374,34 +388,38 @@ async fn test_cache_update() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     // Cache initially
-    let params1 = CacheCrateFromCratesIOParams {
+    let params1 = CacheCrateParams {
         crate_name: "once_cell".to_string(),
-        version: "1.17.0".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.17.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: None,
     };
 
-    let response1 = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params1)),
-    )
-    .await?;
+    let response1 =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params1))).await?;
     let output1 = parse_cache_response(&response1)?;
     assert!(output1.is_success(), "Initial cache failed: {output1:?}");
 
     // Cache again with update flag
-    let params2 = CacheCrateFromCratesIOParams {
+    let params2 = CacheCrateParams {
         crate_name: "once_cell".to_string(),
-        version: "1.17.0".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.17.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: Some(true),
     };
 
-    let response2 = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params2)),
-    )
-    .await?;
+    let response2 =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params2))).await?;
     // Update should return "Successfully updated" message
     let output2 = parse_cache_response(&response2)?;
     assert!(output2.is_success(), "Update cache failed: {output2:?}");
@@ -418,18 +436,20 @@ async fn test_invalid_inputs() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     // Test non-existent crate from crates.io
-    let params = CacheCrateFromCratesIOParams {
+    let params = CacheCrateParams {
         crate_name: "this-crate-definitely-does-not-exist-123456".to_string(),
-        version: "1.0.0".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: None,
     };
 
-    let response = tokio::time::timeout(
-        TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params)),
-    )
-    .await?;
+    let response =
+        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
 
     // crates.io returns 403 Forbidden for non-existent crates
     let output = parse_cache_response(&response)?;
@@ -439,16 +459,19 @@ async fn test_invalid_inputs() -> Result<()> {
     );
 
     // Test invalid GitHub URL
-    let params = CacheCrateFromGitHubParams {
+    let params = CacheCrateParams {
         crate_name: "invalid".to_string(),
-        github_url: "not-a-valid-url".to_string(),
+        source_type: "github".to_string(),
+        version: None,
+        github_url: Some("not-a-valid-url".to_string()),
         branch: None,
         tag: Some("v1.0.0".to_string()),
+        path: None,
         members: None,
         update: None,
     };
 
-    let response = service.cache_crate_from_github(Parameters(params)).await;
+    let response = service.cache_crate(Parameters(params)).await;
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_error(),
@@ -456,15 +479,19 @@ async fn test_invalid_inputs() -> Result<()> {
     );
 
     // Test non-existent local path
-    let params = CacheCrateFromLocalParams {
+    let params = CacheCrateParams {
         crate_name: "invalid".to_string(),
+        source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
-        path: "/this/path/does/not/exist".to_string(),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some("/this/path/does/not/exist".to_string()),
         members: None,
         update: None,
     };
 
-    let response = service.cache_crate_from_local(Parameters(params)).await;
+    let response = service.cache_crate(Parameters(params)).await;
     let output = parse_cache_response(&response)?;
     assert!(
         output.is_error(),
@@ -495,16 +522,19 @@ async fn test_concurrent_caching() -> Result<()> {
         let version = version.to_string();
 
         let handle = tokio::spawn(async move {
-            let params = CacheCrateFromCratesIOParams {
+            let params = CacheCrateParams {
                 crate_name: name.clone(),
-                version: version.clone(),
+                source_type: "cratesio".to_string(),
+                version: Some(version.clone()),
+                github_url: None,
+                branch: None,
+                tag: None,
+                path: None,
                 members: None,
                 update: None,
             };
             let start = std::time::Instant::now();
-            let result = service_clone
-                .cache_crate_from_cratesio(Parameters(params))
-                .await;
+            let result = service_clone.cache_crate(Parameters(params)).await;
             let duration = start.elapsed();
             (name, version, result, duration)
         });
@@ -560,13 +590,18 @@ async fn test_concurrent_caching() -> Result<()> {
     // Verify no corruption by attempting to use the cached crates
     // This would fail if the cache was corrupted during concurrent access
     for (name, version) in &test_crates {
-        let params = CacheCrateFromCratesIOParams {
+        let params = CacheCrateParams {
             crate_name: name.to_string(),
-            version: version.to_string(),
+            source_type: "cratesio".to_string(),
+            version: Some(version.to_string()),
+            github_url: None,
+            branch: None,
+            tag: None,
+            path: None,
             members: None,
             update: Some(false), // Should not re-download if already cached
         };
-        let result = service.cache_crate_from_cratesio(Parameters(params)).await;
+        let result = service.cache_crate(Parameters(params)).await;
         let output = parse_cache_response(&result)?;
         // Should either be already cached or successful
         let is_valid = match &output {
@@ -621,15 +656,19 @@ edition = "2021"
     }
 
     // First attempt without specifying members - should get workspace detection
-    let params1 = CacheCrateFromLocalParams {
+    let params1 = CacheCrateParams {
         crate_name: "my-workspace".to_string(),
+        source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
-        path: workspace_dir.path().to_str().unwrap().to_string(),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: None,
         update: None,
     };
 
-    let response1 = service.cache_crate_from_local(Parameters(params1)).await;
+    let response1 = service.cache_crate(Parameters(params1)).await;
     let output1 = parse_cache_response(&response1)?;
     assert!(
         matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. }
@@ -639,15 +678,19 @@ edition = "2021"
     );
 
     // Now cache with specific members
-    let params2 = CacheCrateFromLocalParams {
+    let params2 = CacheCrateParams {
         crate_name: "my-workspace".to_string(),
+        source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
-        path: workspace_dir.path().to_str().unwrap().to_string(),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: Some(vec!["lib-a".to_string(), "lib-b".to_string()]),
         update: None,
     };
 
-    let response2 = service.cache_crate_from_local(Parameters(params2)).await;
+    let response2 = service.cache_crate(Parameters(params2)).await;
     let output2 = parse_cache_response(&response2)?;
     assert!(
         matches!(&output2, CacheCrateOutput::Success { .. }),
@@ -1250,9 +1293,14 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 
     // Test caching bevy 0.17.1 which has known compilation issues on macOS with --all-features
     // This should succeed using the feature fallback strategy (default features or no-default-features)
-    let params = CacheCrateFromCratesIOParams {
+    let params = CacheCrateParams {
         crate_name: "bevy".to_string(),
-        version: "0.17.1".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("0.17.1".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
         members: None,
         update: None,
     };
@@ -1260,7 +1308,7 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     // Use a longer timeout for bevy as it's a large crate
     let response = tokio::time::timeout(
         LARGE_CRATE_TEST_TIMEOUT,
-        service.cache_crate_from_cratesio(Parameters(params)),
+        service.cache_crate(Parameters(params)),
     )
     .await
     .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
