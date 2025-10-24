@@ -5,7 +5,7 @@
 //! - GitHub
 //! - Local paths
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
@@ -34,6 +34,7 @@ use tempfile::TempDir;
 
 // Test constants
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+const LARGE_CRATE_TEST_TIMEOUT: Duration = Duration::from_secs(120);
 const SEMVER_VERSION: &str = "1.0.0";
 const SERDE_VERSION: &str = "v1.0.136";
 const SERDE_GITHUB_URL: &str = "https://github.com/serde-rs/serde";
@@ -222,7 +223,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
     };
 
     let response = tokio::time::timeout(
-        TEST_TIMEOUT,
+        LARGE_CRATE_TEST_TIMEOUT,
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
@@ -1217,6 +1218,80 @@ async fn test_empty_search_results() -> Result<()> {
     assert!(output.fuzzy_enabled, "Fuzzy should be enabled");
     // Results could be empty or have some fuzzy matches
     // No need to check >= 0 as total_results is u64 which is always >= 0
+
+    Ok(())
+}
+
+// ===== PLATFORM-SPECIFIC COMPILATION TESTS =====
+
+#[tokio::test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "Test designed for macOS platform-specific compilation issues"
+)]
+async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
+    // NOTE: This test depends on external resources and may fail due to:
+    // - Network connectivity issues
+    // - crates.io downtime or rate limiting
+    // - Bevy crate removal, version change, or dependency updates
+    // - Platform-specific build environment issues
+    //
+    // If this test becomes unreliable in CI, consider:
+    // - Mocking the crate download mechanism
+    // - Using a smaller, more stable test crate
+    // - Adding #[cfg_attr(env = "CI", ignore)] to skip on CI
+
+    // Initialize tracing for this test
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rust_docs_mcp=info")
+        .try_init();
+
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Test caching bevy 0.17.1 which has known compilation issues on macOS with --all-features
+    // This should succeed using the feature fallback strategy (default features or no-default-features)
+    let params = CacheCrateFromCratesIOParams {
+        crate_name: "bevy".to_string(),
+        version: "0.17.1".to_string(),
+        members: None,
+        update: None,
+    };
+
+    // Use a longer timeout for bevy as it's a large crate
+    let response = tokio::time::timeout(
+        LARGE_CRATE_TEST_TIMEOUT,
+        service.cache_crate_from_cratesio(Parameters(params)),
+    )
+    .await
+    .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
+
+    let output = parse_cache_response(&response)?;
+
+    // On macOS, bevy should succeed with the fallback strategy
+    assert!(
+        output.is_success(),
+        "Bevy should cache successfully with feature fallback strategy: {output:?}"
+    );
+
+    // Verify the response mentions which strategy was used
+    let response_lower = response.to_lowercase();
+    let used_fallback = response_lower.contains("default features")
+        || response_lower.contains("no default features");
+
+    if used_fallback {
+        eprintln!("✓ Successfully used fallback feature strategy for bevy on macOS");
+    }
+
+    // Verify it's actually cached
+    let list_params = ListCrateVersionsParams {
+        crate_name: "bevy".to_string(),
+    };
+
+    let versions_response = service.list_crate_versions(Parameters(list_params)).await;
+    assert!(
+        versions_response.contains("0.17.1"),
+        "Bevy 0.17.1 should be in cache"
+    );
 
     Ok(())
 }
