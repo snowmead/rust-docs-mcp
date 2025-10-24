@@ -223,7 +223,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
     };
 
     let response = tokio::time::timeout(
-        TEST_TIMEOUT,
+        LARGE_CRATE_TEST_TIMEOUT,
         service.cache_crate_from_github(Parameters(params)),
     )
     .await?;
@@ -1270,8 +1270,7 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     // On macOS, bevy should succeed with the fallback strategy
     assert!(
         output.is_success(),
-        "Bevy should cache successfully with feature fallback strategy: {:?}",
-        output
+        "Bevy should cache successfully with feature fallback strategy: {output:?}"
     );
 
     // Verify the response mentions which strategy was used

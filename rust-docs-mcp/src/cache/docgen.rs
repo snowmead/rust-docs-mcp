@@ -151,7 +151,7 @@ impl DocGenerator {
 
         let sanitized_member = member_path.replace(['/', '\\'], "-");
         let member_target_dir =
-            source_path.join(format!("target-{}-{:x}", sanitized_member, path_hash));
+            source_path.join(format!("target-{sanitized_member}-{path_hash:x}"));
 
         // Run cargo rustdoc with JSON output for the specific package using unified function
         rustdoc::run_cargo_rustdoc_json(

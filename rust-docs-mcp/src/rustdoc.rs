@@ -92,7 +92,7 @@ pub async fn test_rustdoc_json() -> Result<()> {
 /// Get rustdoc version information
 pub async fn get_rustdoc_version() -> Result<String> {
     let output = Command::new("rustdoc")
-        .arg(format!("+{}", REQUIRED_TOOLCHAIN))
+        .arg(format!("+{REQUIRED_TOOLCHAIN}"))
         .arg("--version")
         .output()
         .context("Failed to run rustdoc --version")?;
@@ -210,8 +210,7 @@ async fn execute_rustdoc(
     tokio::time::timeout(Duration::from_secs(RUSTDOC_TIMEOUT_SECS), command.output())
         .await
         .context(format!(
-            "Rustdoc execution timed out after {} seconds",
-            RUSTDOC_TIMEOUT_SECS
+            "Rustdoc execution timed out after {RUSTDOC_TIMEOUT_SECS} seconds"
         ))?
         .context("Failed to run cargo rustdoc")
 }
@@ -419,10 +418,7 @@ pub async fn run_cargo_rustdoc_json(
         .collect::<Vec<_>>()
         .join("\n");
 
-    bail!(
-        "Failed to generate documentation with all feature strategies:\n{}",
-        error_summary
-    )
+    bail!("Failed to generate documentation with all feature strategies:\n{error_summary}")
 }
 
 #[cfg(test)]
