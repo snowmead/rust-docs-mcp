@@ -77,11 +77,11 @@ ones released yesterday.
 
 ### Cache Management
 
-- `cache_crate_from_cratesio` - Download and cache a specific crate version from
-  crates.io for offline use
-- `cache_crate_from_github` - Download and cache from GitHub (specify branch or
-  tag)
-- `cache_crate_from_local` - Cache from a local file system path
+- `cache_crate` - Download and cache a crate from various sources. Set
+  `source_type` to one of: `cratesio`, `github`, or `local`
+  - **For cratesio**: Provide `version` (e.g., `{crate_name: "serde", source_type: "cratesio", version: "1.0.215"}`)
+  - **For github**: Provide `github_url` and either `branch` OR `tag` (e.g., `{crate_name: "my-crate", source_type: "github", github_url: "https://github.com/user/repo", tag: "v1.0.0"}`)
+  - **For local**: Provide `path`, optional `version` (e.g., `{crate_name: "my-crate", source_type: "local", path: "~/projects/my-crate"}`)
 - `remove_crate` - Remove cached crate versions to free disk space
 - `list_cached_crates` - View all cached crates with versions and sizes
 - `list_crate_versions` - List cached versions for a specific crate

@@ -15,6 +15,55 @@ use crate::cache::{
     utils::format_bytes,
 };
 
+/// Parameters for the unified cache_crate tool
+///
+/// This struct uses a flat design where all source-specific fields are optional,
+/// and the `source_type` field determines which fields are required.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheCrateParams {
+    #[schemars(description = "The name of the crate")]
+    pub crate_name: String,
+
+    #[schemars(description = "Source type: must be 'cratesio', 'github', or 'local'")]
+    pub source_type: String,
+
+    // CratesIO parameters
+    #[schemars(
+        description = "Version of the crate (REQUIRED for source_type='cratesio', e.g., '1.0.0')"
+    )]
+    pub version: Option<String>,
+
+    // GitHub parameters
+    #[schemars(
+        description = "GitHub repository URL (REQUIRED for source_type='github', e.g., 'https://github.com/user/repo')"
+    )]
+    pub github_url: Option<String>,
+    #[schemars(
+        description = "Branch name (REQUIRED for source_type='github' if tag not provided, e.g., 'main', 'develop')"
+    )]
+    pub branch: Option<String>,
+    #[schemars(
+        description = "Tag name (REQUIRED for source_type='github' if branch not provided, e.g., 'v1.0.0', '0.2.1')"
+    )]
+    pub tag: Option<String>,
+
+    // Local parameters
+    #[schemars(
+        description = "Local file system path (REQUIRED for source_type='local', supports absolute paths (/path), home paths (~/path), and relative paths (./path, ../path))"
+    )]
+    pub path: Option<String>,
+
+    // Common parameters
+    #[schemars(
+        description = "Optional list of workspace members to cache. If the crate is a workspace and this is not provided, the tool will return a list of available members. Specify member paths relative to the workspace root (e.g., [\"crates/rmcp\", \"crates/rmcp-macros\"])."
+    )]
+    pub members: Option<Vec<String>>,
+    #[schemars(
+        description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
+    )]
+    pub update: Option<bool>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CacheCrateFromCratesIOParams {
     #[schemars(description = "The name of the crate")]
@@ -417,5 +466,105 @@ impl CacheTools {
             total_queried,
             total_cached,
         }
+    }
+
+    /// Unified cache_crate method that accepts all source types
+    ///
+    /// Validates parameters based on `source_type` and converts to internal CrateSource
+    pub async fn cache_crate(&self, params: CacheCrateParams) -> CacheCrateOutput {
+        // Validate source_type and convert to internal CrateSource
+        let crate_source = match params.source_type.as_str() {
+            "cratesio" => {
+                // Validate required parameters for crates.io
+                let version = match params.version {
+                    Some(v) => v,
+                    None => {
+                        return CacheCrateOutput::Error {
+                            error:
+                                "Missing required parameter 'version' for source_type='cratesio'"
+                                    .to_string(),
+                        };
+                    }
+                };
+
+                CrateSource::CratesIO(CacheCrateFromCratesIOParams {
+                    crate_name: params.crate_name.clone(),
+                    version,
+                    members: params.members.clone(),
+                    update: params.update,
+                })
+            }
+            "github" => {
+                // Validate required parameters for GitHub
+                let github_url = match params.github_url {
+                    Some(url) => url,
+                    None => {
+                        return CacheCrateOutput::Error {
+                            error:
+                                "Missing required parameter 'github_url' for source_type='github'"
+                                    .to_string(),
+                        };
+                    }
+                };
+
+                // Validate that exactly one of branch or tag is provided
+                match (&params.branch, &params.tag) {
+                    (Some(_), Some(_)) => {
+                        return CacheCrateOutput::Error {
+                            error: "Only one of 'branch' or 'tag' can be specified for source_type='github', not both".to_string(),
+                        };
+                    }
+                    (None, None) => {
+                        return CacheCrateOutput::Error {
+                            error: "Either 'branch' or 'tag' must be specified for source_type='github'".to_string(),
+                        };
+                    }
+                    _ => {} // Valid: exactly one is provided
+                }
+
+                CrateSource::GitHub(CacheCrateFromGitHubParams {
+                    crate_name: params.crate_name.clone(),
+                    github_url,
+                    branch: params.branch,
+                    tag: params.tag,
+                    members: params.members.clone(),
+                    update: params.update,
+                })
+            }
+            "local" => {
+                // Validate required parameters for local path
+                let path = match params.path {
+                    Some(p) => p,
+                    None => {
+                        return CacheCrateOutput::Error {
+                            error: "Missing required parameter 'path' for source_type='local'"
+                                .to_string(),
+                        };
+                    }
+                };
+
+                CrateSource::LocalPath(CacheCrateFromLocalParams {
+                    crate_name: params.crate_name.clone(),
+                    version: params.version,
+                    path,
+                    members: params.members.clone(),
+                    update: params.update,
+                })
+            }
+            _ => {
+                return CacheCrateOutput::Error {
+                    error: format!(
+                        "Invalid source_type '{}'. Must be one of: 'cratesio', 'github', 'local'",
+                        params.source_type
+                    ),
+                };
+            }
+        };
+
+        let cache = self.cache.write().await;
+        let json_response = cache.cache_crate_with_source(crate_source).await;
+        serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
+            error: "Failed to parse cache response".to_string(),
+        })
     }
 }

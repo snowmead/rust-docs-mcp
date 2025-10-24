@@ -23,8 +23,8 @@ use crate::analysis::tools::{AnalysisTools, AnalyzeCrateStructureParams};
 use crate::cache::{
     CrateCache,
     tools::{
-        CacheCrateFromCratesIOParams, CacheCrateFromGitHubParams, CacheCrateFromLocalParams,
-        CacheTools, GetCratesMetadataParams, ListCrateVersionsParams, RemoveCrateParams,
+        CacheCrateParams, CacheTools, GetCratesMetadataParams, ListCrateVersionsParams,
+        RemoveCrateParams,
     },
 };
 use crate::deps::tools::{DepsTools, GetDependenciesParams};
@@ -81,35 +81,34 @@ impl RustDocsService {
 
     // Cache tools
     #[tool(
-        description = "Download and cache a specific crate version from crates.io for offline use. This happens automatically when using other tools, but use this to pre-cache crates. Useful for preparing offline access or ensuring a crate is available before searching."
-    )]
-    pub async fn cache_crate_from_cratesio(
-        &self,
-        Parameters(params): Parameters<CacheCrateFromCratesIOParams>,
-    ) -> String {
-        let output = self.cache_tools.cache_crate_from_cratesio(params).await;
-        output.to_json()
-    }
+        description = "Download and cache a crate from various sources for offline use. This happens automatically when using other tools, but use this to pre-cache crates.
 
-    #[tool(
-        description = "Download and cache a specific crate version from GitHub for offline use. Supports cloning from any GitHub repository URL. You must specify either a branch OR a tag (but not both). The crate will be cached using the branch/tag name as the version."
-    )]
-    pub async fn cache_crate_from_github(
-        &self,
-        Parameters(params): Parameters<CacheCrateFromGitHubParams>,
-    ) -> String {
-        let output = self.cache_tools.cache_crate_from_github(params).await;
-        output.to_json()
-    }
+SOURCE TYPE: Set 'source_type' to one of: 'cratesio', 'github', or 'local'
 
-    #[tool(
-        description = "Cache a specific crate version from a local file system path. Supports absolute paths, home paths (~), and relative paths. The specified directory must contain a Cargo.toml file."
+REQUIRED PARAMETERS BY SOURCE TYPE:
+
+1. For source_type='cratesio':
+   - version: The crate version (e.g., '1.0.0', '0.8.5')
+   Example: {crate_name: 'serde', source_type: 'cratesio', version: '1.0.215'}
+
+2. For source_type='github':
+   - github_url: GitHub repository URL (e.g., 'https://github.com/serde-rs/serde')
+   - branch OR tag: Exactly one must be provided (not both)
+     - branch: Branch name (e.g., 'main', 'develop')
+     - tag: Tag name (e.g., 'v1.0.0', '0.2.1')
+   Example: {crate_name: 'my-crate', source_type: 'github', github_url: 'https://github.com/user/repo', tag: 'v1.0.0'}
+
+3. For source_type='local':
+   - path: Local file system path (supports absolute paths, ~/home paths, and relative paths)
+   - version: Optional, will be read from Cargo.toml if not provided
+   Example: {crate_name: 'my-crate', source_type: 'local', path: '~/projects/my-crate'}
+
+OPTIONAL PARAMETERS (all source types):
+- members: List of workspace members to cache (e.g., ['crates/core', 'crates/macros'])
+- update: Force re-cache even if already cached (default: false)"
     )]
-    pub async fn cache_crate_from_local(
-        &self,
-        Parameters(params): Parameters<CacheCrateFromLocalParams>,
-    ) -> String {
-        let output = self.cache_tools.cache_crate_from_local(params).await;
+    pub async fn cache_crate(&self, Parameters(params): Parameters<CacheCrateParams>) -> String {
+        let output = self.cache_tools.cache_crate(params).await;
         output.to_json()
     }
 
