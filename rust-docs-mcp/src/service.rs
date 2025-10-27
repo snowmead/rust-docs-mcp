@@ -22,9 +22,10 @@ use serde::{Deserialize, Serialize};
 use crate::analysis::tools::{AnalysisTools, AnalyzeCrateStructureParams};
 use crate::cache::{
     CrateCache,
+    task_manager::TaskManager,
     tools::{
-        CacheCrateParams, CacheTools, GetCratesMetadataParams, ListCrateVersionsParams,
-        RemoveCrateParams,
+        CacheCrateParams, CacheOperationsParams, CacheTools, GetCratesMetadataParams,
+        ListCrateVersionsParams, RemoveCrateParams,
     },
 };
 use crate::deps::tools::{DepsTools, GetDependenciesParams};
@@ -67,11 +68,12 @@ pub struct RustDocsService {
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
+        let task_manager = Arc::new(TaskManager::new());
 
         Ok(Self {
             tool_router: Self::tool_router(),
             prompt_router: Self::prompt_router(),
-            cache_tools: CacheTools::new(cache.clone()),
+            cache_tools: CacheTools::new(cache.clone(), task_manager),
             docs_tools: DocsTools::new(cache.clone()),
             deps_tools: DepsTools::new(cache.clone()),
             analysis_tools: AnalysisTools::new(cache.clone()),
@@ -81,7 +83,7 @@ impl RustDocsService {
 
     // Cache tools
     #[tool(
-        description = "Download and cache a crate from various sources for offline use. This happens automatically when using other tools, but use this to pre-cache crates.
+        description = "Download and cache a crate from various sources for offline use. This operation runs asynchronously in the background and returns immediately with a task ID for monitoring progress.
 
 SOURCE TYPE: Set 'source_type' to one of: 'cratesio', 'github', or 'local'
 
@@ -105,11 +107,12 @@ REQUIRED PARAMETERS BY SOURCE TYPE:
 
 OPTIONAL PARAMETERS (all source types):
 - members: List of workspace members to cache (e.g., ['crates/core', 'crates/macros'])
-- update: Force re-cache even if already cached (default: false)"
+- update: Force re-cache even if already cached (default: false)
+
+MONITORING: Use cache_operations tool to monitor progress, cancel, or check status of caching operations."
     )]
     pub async fn cache_crate(&self, Parameters(params): Parameters<CacheCrateParams>) -> String {
-        let output = self.cache_tools.cache_crate(params).await;
-        output.to_json()
+        self.cache_tools.cache_crate(params).await
     }
 
     #[tool(
@@ -154,6 +157,24 @@ OPTIONAL PARAMETERS (all source types):
     ) -> String {
         let output = self.cache_tools.get_crates_metadata(params).await;
         output.to_json()
+    }
+
+    #[tool(
+        description = "Manage and monitor background caching operations. This unified tool handles all task-related operations: list all tasks, query specific task status, cancel in-progress tasks, and clear completed/failed tasks. Returns rich markdown-formatted output optimized for AI agents.
+
+Usage:
+- List all tasks: cache_operations({})
+- Filter by status: cache_operations({status_filter: \"in_progress\"})
+- Check specific task: cache_operations({task_id: \"abc-123-def\"})
+- Cancel task: cache_operations({task_id: \"abc-123-def\", cancel: true})
+- Clear completed: cache_operations({clear: true})
+- Clear specific: cache_operations({task_id: \"abc-123-def\", clear: true})"
+    )]
+    pub async fn cache_operations(
+        &self,
+        Parameters(params): Parameters<CacheOperationsParams>,
+    ) -> String {
+        self.cache_tools.cache_operations(params).await
     }
 
     // Docs tools

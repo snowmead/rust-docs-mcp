@@ -12,6 +12,8 @@ use crate::cache::{
         CacheCrateOutput, CrateMetadata, ErrorOutput, GetCratesMetadataOutput,
         ListCachedCratesOutput, ListCrateVersionsOutput, RemoveCrateOutput, SizeInfo, VersionInfo,
     },
+    task_formatter,
+    task_manager::{CachingStage, TaskManager, TaskStatus},
     utils::format_bytes,
 };
 
@@ -158,14 +160,37 @@ pub struct ListCrateVersionsParams {
     pub crate_name: String,
 }
 
+/// Parameters for the cache_operations tool
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct CacheOperationsParams {
+    #[schemars(description = "Optional task_id to query specific task or to cancel/clear. If not provided, lists all tasks")]
+    pub task_id: Option<String>,
+
+    #[schemars(description = "Optional status filter when listing tasks: \"pending\", \"in_progress\", \"completed\", \"failed\", \"cancelled\"")]
+    pub status_filter: Option<String>,
+
+    #[schemars(description = "Set to true to cancel the specified task (requires task_id)")]
+    #[serde(default)]
+    pub cancel: bool,
+
+    #[schemars(description = "Set to true to remove completed/failed tasks from memory (clears specified task or all if no task_id)")]
+    #[serde(default)]
+    pub clear: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct CacheTools {
     cache: Arc<RwLock<CrateCache>>,
+    task_manager: Arc<TaskManager>,
 }
 
 impl CacheTools {
-    pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
-        Self { cache }
+    /// Create a new CacheTools instance
+    pub fn new(cache: Arc<RwLock<CrateCache>>, task_manager: Arc<TaskManager>) -> Self {
+        Self {
+            cache,
+            task_manager,
+        }
     }
 
     pub async fn cache_crate_from_cratesio(
@@ -470,101 +495,235 @@ impl CacheTools {
 
     /// Unified cache_crate method that accepts all source types
     ///
-    /// Validates parameters based on `source_type` and converts to internal CrateSource
-    pub async fn cache_crate(&self, params: CacheCrateParams) -> CacheCrateOutput {
-        // Validate source_type and convert to internal CrateSource
-        let crate_source = match params.source_type.as_str() {
+    /// Validates parameters, spawns async task, and returns immediately with task ID.
+    /// Returns markdown-formatted text optimized for LLM consumption.
+    pub async fn cache_crate(&self, params: CacheCrateParams) -> String {
+        // Validate and extract source details for task creation
+        let (crate_name, version, source_details) = match params.source_type.as_str() {
             "cratesio" => {
-                // Validate required parameters for crates.io
-                let version = match params.version {
-                    Some(v) => v,
+                let version = match &params.version {
+                    Some(v) => v.clone(),
                     None => {
-                        return CacheCrateOutput::Error {
-                            error:
-                                "Missing required parameter 'version' for source_type='cratesio'"
-                                    .to_string(),
-                        };
+                        return "# Error\n\nMissing required parameter 'version' for source_type='cratesio'".to_string();
                     }
                 };
-
-                CrateSource::CratesIO(CacheCrateFromCratesIOParams {
-                    crate_name: params.crate_name.clone(),
-                    version,
-                    members: params.members.clone(),
-                    update: params.update,
-                })
+                (params.crate_name.clone(), version, None)
             }
             "github" => {
-                // Validate required parameters for GitHub
-                let github_url = match params.github_url {
-                    Some(url) => url,
+                let github_url = match &params.github_url {
+                    Some(url) => url.clone(),
                     None => {
-                        return CacheCrateOutput::Error {
-                            error:
-                                "Missing required parameter 'github_url' for source_type='github'"
-                                    .to_string(),
-                        };
+                        return "# Error\n\nMissing required parameter 'github_url' for source_type='github'".to_string();
                     }
                 };
 
-                // Validate that exactly one of branch or tag is provided
                 match (&params.branch, &params.tag) {
                     (Some(_), Some(_)) => {
-                        return CacheCrateOutput::Error {
-                            error: "Only one of 'branch' or 'tag' can be specified for source_type='github', not both".to_string(),
-                        };
+                        return "# Error\n\nOnly one of 'branch' or 'tag' can be specified for source_type='github', not both".to_string();
                     }
                     (None, None) => {
-                        return CacheCrateOutput::Error {
-                            error: "Either 'branch' or 'tag' must be specified for source_type='github'".to_string(),
-                        };
+                        return "# Error\n\nEither 'branch' or 'tag' must be specified for source_type='github'".to_string();
                     }
-                    _ => {} // Valid: exactly one is provided
+                    _ => {}
                 }
 
-                CrateSource::GitHub(CacheCrateFromGitHubParams {
-                    crate_name: params.crate_name.clone(),
-                    github_url,
-                    branch: params.branch,
-                    tag: params.tag,
-                    members: params.members.clone(),
-                    update: params.update,
-                })
+                let version = params.branch.clone().or_else(|| params.tag.clone()).unwrap();
+                let ref_type = if params.branch.is_some() { "branch" } else { "tag" };
+                let details = format!("{}, {}: {}", github_url, ref_type, version);
+                (params.crate_name.clone(), version, Some(details))
             }
             "local" => {
-                // Validate required parameters for local path
-                let path = match params.path {
-                    Some(p) => p,
+                let path = match &params.path {
+                    Some(p) => p.clone(),
                     None => {
-                        return CacheCrateOutput::Error {
-                            error: "Missing required parameter 'path' for source_type='local'"
-                                .to_string(),
-                        };
+                        return "# Error\n\nMissing required parameter 'path' for source_type='local'".to_string();
                     }
                 };
 
-                CrateSource::LocalPath(CacheCrateFromLocalParams {
-                    crate_name: params.crate_name.clone(),
-                    version: params.version,
-                    path,
-                    members: params.members.clone(),
-                    update: params.update,
-                })
+                // Version might be resolved later, use placeholder
+                let version = params.version.clone().unwrap_or_else(|| "auto".to_string());
+                (params.crate_name.clone(), version, Some(path))
             }
             _ => {
-                return CacheCrateOutput::Error {
-                    error: format!(
-                        "Invalid source_type '{}'. Must be one of: 'cratesio', 'github', 'local'",
-                        params.source_type
-                    ),
-                };
+                return format!(
+                    "# Error\n\nInvalid source_type '{}'. Must be one of: 'cratesio', 'github', 'local'",
+                    params.source_type
+                );
             }
         };
 
-        let cache = self.cache.write().await;
-        let json_response = cache.cache_crate_with_source(crate_source).await;
-        serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
-            error: "Failed to parse cache response".to_string(),
-        })
+        // Create task
+        let task = self
+            .task_manager
+            .create_task(
+                crate_name,
+                version,
+                params.source_type.clone(),
+                source_details,
+            )
+            .await;
+
+        // Spawn background task
+        let cache = self.cache.clone();
+        let task_manager = self.task_manager.clone();
+        let task_id = task.task_id.clone();
+        let cancellation_token = task.cancellation_token.clone();
+        let params = params.clone(); // Clone params for the spawned task
+
+        tokio::spawn(async move {
+            // Update status to in progress
+            task_manager
+                .update_status(&task_id, TaskStatus::InProgress)
+                .await;
+
+            // Build CrateSource from params
+            let crate_source = Self::params_to_source(&params);
+
+            // Run the caching operation
+            let cache_guard = cache.write().await;
+
+            // Set initial stage
+            task_manager
+                .update_stage(&task_id, CachingStage::Downloading)
+                .await;
+
+            // Check for cancellation before starting
+            if cancellation_token.is_cancelled() {
+                task_manager
+                    .update_status(&task_id, TaskStatus::Cancelled)
+                    .await;
+                return;
+            }
+
+            let json_response = cache_guard.cache_crate_with_source(crate_source).await;
+            drop(cache_guard); // Release lock
+
+            // Check for cancellation after caching
+            if cancellation_token.is_cancelled() {
+                task_manager
+                    .update_status(&task_id, TaskStatus::Cancelled)
+                    .await;
+                return;
+            }
+
+            // Parse result and update task status
+            match serde_json::from_str::<CacheCrateOutput>(&json_response) {
+                Ok(output) => match output {
+                    CacheCrateOutput::Success { .. } | CacheCrateOutput::PartialSuccess { .. } => {
+                        task_manager
+                            .update_status(&task_id, TaskStatus::Completed)
+                            .await;
+                    }
+                    CacheCrateOutput::WorkspaceDetected { .. } => {
+                        task_manager
+                            .set_error(
+                                &task_id,
+                                "Workspace detected. Please specify member(s) to cache.".to_string(),
+                            )
+                            .await;
+                    }
+                    CacheCrateOutput::Error { error } => {
+                        task_manager.set_error(&task_id, error).await;
+                    }
+                },
+                Err(_) => {
+                    task_manager
+                        .set_error(&task_id, "Failed to parse cache response".to_string())
+                        .await;
+                }
+            }
+        });
+
+        // Return markdown formatted task started message
+        task_formatter::format_task_started(&task)
+    }
+
+    /// Helper to convert CacheCrateParams to CrateSource
+    fn params_to_source(params: &CacheCrateParams) -> CrateSource {
+        match params.source_type.as_str() {
+            "cratesio" => CrateSource::CratesIO(CacheCrateFromCratesIOParams {
+                crate_name: params.crate_name.clone(),
+                version: params.version.clone().unwrap(),
+                members: params.members.clone(),
+                update: params.update,
+            }),
+            "github" => CrateSource::GitHub(CacheCrateFromGitHubParams {
+                crate_name: params.crate_name.clone(),
+                github_url: params.github_url.clone().unwrap(),
+                branch: params.branch.clone(),
+                tag: params.tag.clone(),
+                members: params.members.clone(),
+                update: params.update,
+            }),
+            "local" => CrateSource::LocalPath(CacheCrateFromLocalParams {
+                crate_name: params.crate_name.clone(),
+                version: params.version.clone(),
+                path: params.path.clone().unwrap(),
+                members: params.members.clone(),
+                update: params.update,
+            }),
+            _ => unreachable!("Invalid source type should have been caught earlier"),
+        }
+    }
+
+    /// Unified cache_operations method for managing and monitoring caching tasks
+    ///
+    /// Returns markdown-formatted text optimized for LLM consumption
+    pub async fn cache_operations(&self, params: CacheOperationsParams) -> String {
+        // Handle cancel action
+        if params.cancel {
+            let Some(task_id) = &params.task_id else {
+                return "# Error\n\nCannot cancel without specifying a task_id.".to_string();
+            };
+
+            return match self.task_manager.cancel_task(task_id).await {
+                Some(task) => task_formatter::format_cancel_result(&task),
+                None => format!("# Error\n\nTask `{}` not found.", task_id),
+            };
+        }
+
+        // Handle clear action
+        if params.clear {
+            return if let Some(task_id) = &params.task_id {
+                // Clear specific task
+                match self.task_manager.get_task(task_id).await {
+                    Some(task) if task.is_terminal() => {
+                        self.task_manager.remove_task(task_id).await;
+                        task_formatter::format_clear_result(vec![task])
+                    }
+                    Some(_) => format!(
+                        "# Error\n\nCannot clear task `{}` because it is still in progress. Cancel it first or wait for completion.",
+                        task_id
+                    ),
+                    None => format!("# Error\n\nTask `{}` not found.", task_id),
+                }
+            } else {
+                // Clear all terminal tasks
+                let cleared = self.task_manager.clear_terminal_tasks().await;
+                task_formatter::format_clear_result(cleared)
+            };
+        }
+
+        // Handle query operations
+        if let Some(task_id) = &params.task_id {
+            // Get specific task
+            match self.task_manager.get_task(task_id).await {
+                Some(task) => task_formatter::format_single_task(&task),
+                None => format!("# Error\n\nTask `{}` not found.", task_id),
+            }
+        } else {
+            // List all tasks with optional filter
+            let status_filter = params.status_filter.as_ref().and_then(|s| match s.as_str() {
+                "pending" => Some(TaskStatus::Pending),
+                "in_progress" => Some(TaskStatus::InProgress),
+                "completed" => Some(TaskStatus::Completed),
+                "failed" => Some(TaskStatus::Failed),
+                "cancelled" => Some(TaskStatus::Cancelled),
+                _ => None,
+            });
+
+            let tasks = self.task_manager.list_tasks(status_filter.as_ref()).await;
+            task_formatter::format_task_list(tasks)
+        }
     }
 }

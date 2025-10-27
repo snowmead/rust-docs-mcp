@@ -24,6 +24,8 @@ pub mod outputs;
 pub mod service;
 pub mod source;
 pub mod storage;
+pub mod task_formatter;
+pub mod task_manager;
 pub mod tools;
 pub mod transaction;
 pub mod types;
