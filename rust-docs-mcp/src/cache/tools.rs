@@ -9,8 +9,9 @@ use crate::cache::{
     CrateCache,
     downloader::CrateSource,
     outputs::{
-        CacheCrateOutput, CrateMetadata, ErrorOutput, GetCratesMetadataOutput,
-        ListCachedCratesOutput, ListCrateVersionsOutput, RemoveCrateOutput, SizeInfo, VersionInfo,
+        CacheCrateOutput, CacheTaskStartedOutput, CrateMetadata, ErrorOutput,
+        GetCratesMetadataOutput, ListCachedCratesOutput, ListCrateVersionsOutput,
+        RemoveCrateOutput, SizeInfo, VersionInfo,
     },
     task_formatter,
     task_manager::{CachingStage, TaskManager, TaskStatus},
@@ -493,10 +494,79 @@ impl CacheTools {
         }
     }
 
+    /// Resolve version from local Cargo.toml synchronously
+    ///
+    /// Returns `(version, auto_detected)` tuple or error message.
+    /// This helper reads the Cargo.toml to get the real version before creating a task,
+    /// ensuring task metadata is accurate from the start.
+    fn resolve_local_version(
+        path: &str,
+        provided_version: Option<&str>,
+    ) -> Result<(String, bool), String> {
+        use crate::cache::workspace::WorkspaceHandler;
+        use std::path::Path;
+
+        // Expand path (handles ~ and relative paths)
+        let expanded_path = match shellexpand::full(path) {
+            Ok(p) => p,
+            Err(e) => return Err(format!("Failed to expand path: {}", e)),
+        };
+        let local_path = Path::new(expanded_path.as_ref());
+
+        // Validate path exists
+        if !local_path.exists() {
+            return Err(format!("Local path does not exist: {}", local_path.display()));
+        }
+
+        let cargo_toml = local_path.join("Cargo.toml");
+        if !cargo_toml.exists() {
+            return Err(format!(
+                "No Cargo.toml found at path: {}",
+                local_path.display()
+            ));
+        }
+
+        // Check if workspace
+        match WorkspaceHandler::is_workspace(&cargo_toml) {
+            Ok(true) => {
+                // Workspace - version must be provided
+                match provided_version {
+                    Some(v) => Ok((v.to_string(), false)),
+                    None => Err(format!(
+                        "The path '{}' contains a workspace manifest. Please provide a version for caching.",
+                        local_path.display()
+                    )),
+                }
+            }
+            Ok(false) => {
+                // Regular package - get version from Cargo.toml
+                match WorkspaceHandler::get_package_version(&cargo_toml) {
+                    Ok(actual_version) => {
+                        if let Some(provided) = provided_version {
+                            // Validate provided version matches
+                            if provided != actual_version {
+                                return Err(format!(
+                                    "Version mismatch: provided '{}' does not match actual '{}' in Cargo.toml",
+                                    provided, actual_version
+                                ));
+                            }
+                            Ok((actual_version, false))
+                        } else {
+                            // Auto-detected version
+                            Ok((actual_version, true))
+                        }
+                    }
+                    Err(e) => Err(format!("Failed to read version from Cargo.toml: {}", e)),
+                }
+            }
+            Err(e) => Err(format!("Failed to check workspace status: {}", e)),
+        }
+    }
+
     /// Unified cache_crate method that accepts all source types
     ///
     /// Validates parameters, spawns async task, and returns immediately with task ID.
-    /// Returns markdown-formatted text optimized for LLM consumption.
+    /// Returns JSON-formatted [`CacheTaskStartedOutput`] for structured monitoring.
     pub async fn cache_crate(&self, params: CacheCrateParams) -> String {
         // Validate and extract source details for task creation
         let (crate_name, version, source_details) = match params.source_type.as_str() {
@@ -540,9 +610,25 @@ impl CacheTools {
                     }
                 };
 
-                // Version might be resolved later, use placeholder
-                let version = params.version.clone().unwrap_or_else(|| "auto".to_string());
-                (params.crate_name.clone(), version, Some(path))
+                // Resolve version synchronously before creating task (fixes bug #2)
+                let (version, auto_detected) = match Self::resolve_local_version(
+                    &path,
+                    params.version.as_deref(),
+                ) {
+                    Ok(result) => result,
+                    Err(error_msg) => {
+                        return format!("# Error\n\n{}", error_msg);
+                    }
+                };
+
+                // Add auto-detection note to source details
+                let details = if auto_detected {
+                    format!("{} (version auto-detected from Cargo.toml)", path)
+                } else {
+                    path
+                };
+
+                (params.crate_name.clone(), version, Some(details))
             }
             _ => {
                 return format!(
@@ -563,6 +649,11 @@ impl CacheTools {
             )
             .await;
 
+        // Update status to InProgress before returning (fixes race condition bug #1)
+        self.task_manager
+            .update_status(&task.task_id, TaskStatus::InProgress)
+            .await;
+
         // Spawn background task
         let cache = self.cache.clone();
         let task_manager = self.task_manager.clone();
@@ -571,11 +662,6 @@ impl CacheTools {
         let params = params.clone(); // Clone params for the spawned task
 
         tokio::spawn(async move {
-            // Update status to in progress
-            task_manager
-                .update_status(&task_id, TaskStatus::InProgress)
-                .await;
-
             // Build CrateSource from params
             let crate_source = Self::params_to_source(&params);
 
@@ -634,8 +720,20 @@ impl CacheTools {
             }
         });
 
-        // Return markdown formatted task started message
-        task_formatter::format_task_started(&task)
+        // Return JSON formatted task started response
+        let output = CacheTaskStartedOutput {
+            task_id: task.task_id.clone(),
+            crate_name: task.crate_name.clone(),
+            version: task.version.clone(),
+            source_type: task.source_type.clone(),
+            source_details: task.source_details.clone(),
+            status: "in_progress".to_string(),
+            message: format!(
+                "Caching task started for {}-{}. Use cache_operations to monitor progress.",
+                task.crate_name, task.version
+            ),
+        };
+        output.to_json()
     }
 
     /// Helper to convert CacheCrateParams to CrateSource

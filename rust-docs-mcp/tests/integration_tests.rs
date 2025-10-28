@@ -11,10 +11,10 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheCrateOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
-    CacheCrateParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
+    CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
 };
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
@@ -41,6 +41,11 @@ const CLIPPY_GITHUB_URL: &str = "https://github.com/rust-lang/rust-clippy";
 const CLIPPY_BRANCH: &str = "master";
 
 // Response validation helpers
+fn parse_cache_task_started(response: &str) -> Result<CacheTaskStartedOutput> {
+    serde_json::from_str(response)
+        .map_err(|e| anyhow::anyhow!("Failed to parse task started response: {e}\nResponse: {response}"))
+}
+
 fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
     serde_json::from_str(response)
         .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {e}\nResponse: {response}"))
@@ -62,6 +67,64 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
     Ok((service, temp_dir))
 }
 
+/// Result of waiting for a caching task
+#[derive(Debug)]
+enum TaskResult {
+    Success,
+    WorkspaceDetected(String), // Contains workspace info
+    BinaryOnly(String),         // Contains binary-only error
+    Failed(String),             // Contains error message
+    Cancelled,
+}
+
+/// Helper to wait for an async caching task to complete and return the final result.
+/// This polls cache_operations every 500ms until the task reaches a terminal state.
+async fn wait_for_task_completion(
+    service: &RustDocsService,
+    task_id: &str,
+    timeout: Duration,
+) -> Result<TaskResult> {
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(500);
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for task {task_id} to complete after {timeout:?}"
+            ));
+        }
+
+        // Check task status via cache_operations
+        let params = CacheOperationsParams {
+            task_id: Some(task_id.to_string()),
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        };
+
+        let response = service.cache_operations(Parameters(params)).await;
+
+        // Parse the markdown response to check if task is complete
+        if response.contains("COMPLETED ✓") {
+            return Ok(TaskResult::Success);
+        } else if response.contains("FAILED ✗") {
+            // Check for specific failure types
+            if response.contains("Workspace detected") || response.contains("specify member") {
+                return Ok(TaskResult::WorkspaceDetected(response));
+            } else if response.contains("binary-only") || response.contains("no library") {
+                return Ok(TaskResult::BinaryOnly(response));
+            } else {
+                return Ok(TaskResult::Failed(response));
+            }
+        } else if response.contains("CANCELLED") {
+            return Ok(TaskResult::Cancelled);
+        }
+
+        // Task still in progress, wait and retry
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
 /// Helper to setup and cache the semver test crate
 async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
     let params = CacheCrateParams {
@@ -76,14 +139,19 @@ async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    // Start the async caching operation
+    let response = service.cache_crate(Parameters(params)).await;
 
-    let output = parse_cache_response(&response)?;
-    if !output.is_success() {
-        return Err(anyhow::anyhow!("Failed to cache test crate: {output:?}"));
+    // Parse the task started response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for the task to complete
+    let result = wait_for_task_completion(service, &task_output.task_id, TEST_TIMEOUT).await?;
+
+    match result {
+        TaskResult::Success => Ok(()),
+        _ => Err(anyhow::anyhow!("Failed to cache test crate: {result:?}")),
     }
-    Ok(())
 }
 
 /// Helper to get a test item ID from the semver crate
@@ -126,21 +194,16 @@ async fn test_cache_from_crates_io() -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    // Start async caching operation
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
 
-    let output = parse_cache_response(&response)?;
-    match &output {
-        CacheCrateOutput::Success {
-            crate_name,
-            version,
-            ..
-        } => {
-            assert_eq!(crate_name, "semver");
-            assert_eq!(version, SEMVER_VERSION);
-        }
-        _ => panic!("Expected success response, got: {output:?}"),
-    }
+    assert_eq!(task_output.crate_name, "semver");
+    assert_eq!(task_output.version, SEMVER_VERSION);
+
+    // Wait for task to complete
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(matches!(result, TaskResult::Success), "Expected success, got: {result:?}");
 
     // Verify it's in the cache by listing versions
     let list_params = ListCrateVersionsParams {
@@ -178,14 +241,16 @@ async fn test_cache_from_github() -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    let response = service.cache_crate(Parameters(params)).await;
 
-    // Serde is a workspace, so we should get a workspace detection response
-    let output = parse_cache_response(&response)?;
+    // Parse the async task response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for completion - serde is a workspace so we expect workspace detection failure
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
     assert!(
-        output.is_workspace_detected(),
-        "Expected workspace detection for serde: {output:?}"
+        matches!(result, TaskResult::WorkspaceDetected(_)),
+        "Expected workspace detection for serde, got: {result:?}"
     );
 
     // Verify cached (workspace metadata should be cached)
