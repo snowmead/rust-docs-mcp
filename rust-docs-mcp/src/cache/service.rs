@@ -8,6 +8,7 @@ use crate::cache::utils::CacheResponse;
 use crate::cache::workspace::WorkspaceHandler;
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// Service for managing crate caching and documentation generation
 #[derive(Debug, Clone)]
@@ -53,7 +54,7 @@ impl CrateCache {
         // Check if crate is downloaded but docs not generated
         if !self.storage.is_cached(name, version) {
             tracing::info!("Crate {}-{} not cached, downloading", name, version);
-            self.download_or_copy_crate(name, version, source).await?;
+            self.download_or_copy_crate(name, version, source, None).await?;
         } else {
             tracing::info!(
                 "Crate {}-{} already cached, skipping download",
@@ -108,7 +109,10 @@ impl CrateCache {
 
         // Generate documentation
         tracing::info!("Generating docs for {}-{}", name, version);
-        match self.generate_docs(name, version).await {
+        // Note: progress_callback is None here because this method is called from
+        // various places. The progress-aware path goes through cache_crate_with_source
+        // which passes progress callbacks directly to generate_docs.
+        match self.generate_docs(name, version, None).await {
             Ok(_) => {
                 // Load and return the generated docs
                 self.load_docs(name, version, None).await
@@ -140,11 +144,11 @@ impl CrateCache {
 
         // Check if crate is downloaded
         if !self.storage.is_cached(name, version) {
-            self.download_or_copy_crate(name, version, source).await?;
+            self.download_or_copy_crate(name, version, source, None).await?;
         }
 
         // Generate documentation for the specific workspace member
-        self.generate_workspace_member_docs(name, version, member_path)
+        self.generate_workspace_member_docs(name, version, member_path, None)
             .await?;
 
         // Get package name for the member
@@ -218,15 +222,16 @@ impl CrateCache {
         name: &str,
         version: &str,
         source: Option<&str>,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
     ) -> Result<PathBuf> {
         self.downloader
-            .download_or_copy_crate(name, version, source)
+            .download_or_copy_crate(name, version, source, progress_callback)
             .await
     }
 
     /// Generate JSON documentation for a crate
-    pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
-        self.doc_generator.generate_docs(name, version).await
+    pub async fn generate_docs(&self, name: &str, version: &str, progress_callback: Option<crate::cache::downloader::ProgressCallback>) -> Result<PathBuf> {
+        self.doc_generator.generate_docs(name, version, progress_callback).await
     }
 
     /// Generate JSON documentation for a workspace member
@@ -235,9 +240,10 @@ impl CrateCache {
         name: &str,
         version: &str,
         member_path: &str,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
     ) -> Result<PathBuf> {
         self.doc_generator
-            .generate_workspace_member_docs(name, version, member_path)
+            .generate_workspace_member_docs(name, version, member_path, progress_callback)
             .await
     }
 
@@ -326,7 +332,7 @@ impl CrateCache {
     ) -> Result<PathBuf> {
         // Check if crate is already downloaded
         if !self.storage.is_cached(name, version) {
-            self.download_or_copy_crate(name, version, source).await?;
+            self.download_or_copy_crate(name, version, source, None).await?;
         }
 
         self.storage.source_path(name, version)
@@ -409,7 +415,7 @@ impl CrateCache {
 
         // Download the crate
         let source_path = self
-            .download_or_copy_crate(crate_name, version, source_str)
+            .download_or_copy_crate(crate_name, version, source_str, None)
             .await?;
 
         // Check if it's a workspace
@@ -768,7 +774,12 @@ impl CrateCache {
     }
 
     /// Common method to cache a crate from any source
-    pub async fn cache_crate_with_source(&self, source: CrateSource) -> String {
+    pub async fn cache_crate_with_source(
+        &self,
+        source: CrateSource,
+        task_manager: Option<Arc<crate::cache::task_manager::TaskManager>>,
+        task_id: Option<String>,
+    ) -> String {
         // For local paths, resolve version if needed
         let source = if let CrateSource::LocalPath(mut params) = source {
             match self.resolve_local_path_version(&params).await {
@@ -870,9 +881,14 @@ impl CrateCache {
             // Crate is cached but docs not generated, continue to generate docs
         }
 
+        // Download step
+        if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
+            tm.update_step(tid, 1, "Downloading crate source").await;
+        }
+
         // First, download the crate if not already cached
         let source_path = match self
-            .download_or_copy_crate(&crate_name, &version, source_str.as_deref())
+            .download_or_copy_crate(&crate_name, &version, source_str.as_deref(), None)
             .await
         {
             Ok(path) => {
@@ -891,39 +907,51 @@ impl CrateCache {
             "cache_crate_with_source: calling detect_and_handle_workspace for {}",
             crate_name
         );
-        // Detect and handle workspace vs regular crate
-        match self
-            .detect_and_handle_workspace(
-                &crate_name,
-                &version,
-                &source_path,
-                &source,
-                source_str.as_deref(),
-                false,
-            )
-            .await
-        {
-            Ok(response) => {
+
+        // Check for workspace and handle accordingly
+        let cargo_toml_path = source_path.join("Cargo.toml");
+        let is_workspace = WorkspaceHandler::is_workspace(&cargo_toml_path).unwrap_or(false);
+
+        if is_workspace {
+            // It's a workspace, get the members and return workspace response
+            match WorkspaceHandler::get_workspace_members(&cargo_toml_path) {
+                Ok(members) => {
+                    let response = self.generate_workspace_response(&crate_name, &version, members, &source, false);
+                    return response.to_json();
+                }
+                Err(e) => {
+                    return CacheResponse::error(format!("Failed to get workspace members: {e}")).to_json();
+                }
+            }
+        }
+
+        // Not a workspace - generate docs
+        // Update to doc generation stage
+        if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
+            tm.update_stage(tid, crate::cache::task_manager::CachingStage::GeneratingDocs).await;
+            tm.update_step(tid, 1, "Running cargo rustdoc").await;
+        }
+
+        match self.generate_docs(&crate_name, &version, None).await {
+            Ok(_) => {
+                // Update to indexing stage
+                if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
+                    tm.update_stage(tid, crate::cache::task_manager::CachingStage::Indexing).await;
+                    tm.update_step(tid, 1, "Creating search index").await;
+                }
+
                 tracing::info!(
-                    "cache_crate_with_source: detect_and_handle_workspace succeeded for {}",
+                    "cache_crate_with_source: docs generated successfully for {}",
                     crate_name
                 );
-                response.to_json()
+                CacheResponse::success(&crate_name, &version).to_json()
             }
             Err(e) => {
                 tracing::error!(
-                    "cache_crate_with_source: detect_and_handle_workspace failed for {}: {}",
+                    "cache_crate_with_source: docs generation failed for {}: {}",
                     crate_name,
                     e
                 );
-                // Check if this is the workspace error we're looking for
-                if e.to_string()
-                    .contains("This appears to be a workspace with multiple targets")
-                {
-                    tracing::error!(
-                        "cache_crate_with_source: ERROR - workspace detection failed, error came from rustdoc generation"
-                    );
-                }
 
                 // Extract more specific error context based on the source type
                 let error_msg = match &source {
@@ -965,7 +993,7 @@ impl CrateCache {
         member_name: Option<&str>,
     ) -> Result<()> {
         self.doc_generator
-            .create_search_index(name, version, member_name)
+            .create_search_index(name, version, member_name, None)
             .await
     }
 }

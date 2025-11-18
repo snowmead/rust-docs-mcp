@@ -28,6 +28,7 @@ use rust_docs_mcp::docs::tools::{
 };
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -75,6 +76,42 @@ enum TaskResult {
     BinaryOnly(String),         // Contains binary-only error
     Failed(String),             // Contains error message
     Cancelled,
+}
+
+/// Extract current step information from markdown output
+/// Returns None if no step information is found
+/// Returns (current_step, total_steps, description)
+fn extract_step_from_response(response: &str) -> Option<(u8, u8, Option<String>)> {
+    // Look for pattern: **Step**: X of Y
+    // or: **Step**: X of Y: Description
+    response
+        .lines()
+        .find(|line| line.contains("**Step**:"))
+        .and_then(|line| {
+            // Extract after "**Step**: "
+            let step_part = line.split("**Step**:").nth(1)?.trim();
+
+            // Parse "X of Y" or "X of Y: Description"
+            let parts: Vec<&str> = step_part.splitn(2, " of ").collect();
+            if parts.len() != 2 {
+                return None;
+            }
+
+            let current: u8 = parts[0].trim().parse().ok()?;
+
+            // Check if there's a description after total
+            let remaining = parts[1];
+            let (total_str, description) = if let Some(colon_pos) = remaining.find(':') {
+                let (total, desc) = remaining.split_at(colon_pos);
+                (total.trim(), Some(desc[1..].trim().to_string()))
+            } else {
+                (remaining.trim(), None)
+            };
+
+            let total: u8 = total_str.parse().ok()?;
+
+            Some((current, total, description))
+        })
 }
 
 /// Helper to wait for an async caching task to complete and return the final result.
@@ -1402,3 +1439,108 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 
     Ok(())
 }
+
+// ===== PROGRESS TRACKING TESTS =====
+
+#[tokio::test]
+async fn test_step_tracking() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Cache a small crate and track step updates
+    let params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some(SEMVER_VERSION.to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let task_id = &task_output.task_id;
+
+    // Track step updates - collect all steps we see
+    let mut step_updates = Vec::new();
+    let start = std::time::Instant::now();
+    let timeout = TEST_TIMEOUT;
+    let poll_interval = Duration::from_millis(100); // Poll faster to catch step updates
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for task {task_id} to complete after {timeout:?}"
+            ));
+        }
+
+        // Check task status
+        let check_params = CacheOperationsParams {
+            task_id: Some(task_id.to_string()),
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        };
+
+        let response = service.cache_operations(Parameters(check_params)).await;
+
+        // Extract step if present
+        if let Some((current, total, desc)) = extract_step_from_response(&response) {
+            // Only record if different from last value
+            let last_matches = step_updates.last().map(|(c, t, _)| *c == current && *t == total).unwrap_or(false);
+            if !last_matches {
+                println!("Step update: {} of {} {:?}", current, total, desc);
+                step_updates.push((current, total, desc));
+            }
+        }
+
+        // Check if complete
+        if response.contains("COMPLETED ✓") {
+            break;
+        } else if response.contains("FAILED ✗") {
+            return Err(anyhow::anyhow!("Task failed: {response}"));
+        } else if response.contains("CANCELLED") {
+            return Err(anyhow::anyhow!("Task was cancelled"));
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+
+    println!("Step updates observed: {:?}", step_updates);
+
+    // Verify step tracking requirements:
+
+    // 1. We should have seen at least SOME step updates
+    assert!(
+        !step_updates.is_empty(),
+        "Should have observed at least some step updates"
+    );
+
+    // 2. Current step should never exceed total steps
+    for (current, total, _) in &step_updates {
+        assert!(
+            current <= total,
+            "Current step {current} exceeds total steps {total}"
+        );
+    }
+
+    // 3. Steps should make sense (start at 1)
+    if let Some((first_step, _, _)) = step_updates.first() {
+        assert_eq!(
+            *first_step, 1,
+            "First step should be 1, got {first_step}"
+        );
+    }
+
+    println!("✓ Step tracking test passed");
+    println!("  - Observed {} step updates", step_updates.len());
+    if let (Some(first), Some(last)) = (step_updates.first(), step_updates.last()) {
+        println!("  - First step: {} of {}", first.0, first.1);
+        println!("  - Last step: {} of {}", last.0, last.1);
+    }
+
+    Ok(())
+}
+

@@ -4,6 +4,7 @@
 //! for both regular crates and workspace members.
 
 use crate::cache::constants::*;
+use crate::cache::downloader::ProgressCallback;
 use crate::cache::storage::CacheStorage;
 use crate::cache::workspace::WorkspaceHandler;
 use crate::rustdoc;
@@ -40,7 +41,7 @@ impl DocGenerator {
     }
 
     /// Generate documentation for a crate
-    pub async fn generate_docs(&self, name: &str, version: &str) -> Result<PathBuf> {
+    pub async fn generate_docs(&self, name: &str, version: &str, progress_callback: Option<ProgressCallback>) -> Result<PathBuf> {
         tracing::info!(
             "DocGenerator::generate_docs starting for {}-{}",
             name,
@@ -57,6 +58,9 @@ impl DocGenerator {
                 name,
                 version
             );
+            if let Some(callback) = progress_callback {
+                callback(100);
+            }
             return Ok(docs_path);
         }
 
@@ -66,8 +70,18 @@ impl DocGenerator {
 
         tracing::info!("Generating documentation for {}-{}", name, version);
 
+        // Report 10% at start of rustdoc
+        if let Some(ref callback) = progress_callback {
+            callback(10);
+        }
+
         // Run cargo rustdoc with JSON output using unified function
         rustdoc::run_cargo_rustdoc_json(&source_path, None, None).await?;
+
+        // Rustdoc complete - report 70%
+        if let Some(ref callback) = progress_callback {
+            callback(70);
+        }
 
         // Find the generated JSON file in target/doc
         let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
@@ -82,8 +96,13 @@ impl DocGenerator {
         // Update metadata to reflect that docs are now generated
         self.storage.save_metadata(name, version)?;
 
+        // Report 80% before indexing
+        if let Some(ref callback) = progress_callback {
+            callback(80);
+        }
+
         // Create search index for the crate
-        self.create_search_index(name, version, None)
+        self.create_search_index(name, version, None, progress_callback.clone())
             .await
             .context("Failed to create search index")?;
 
@@ -109,6 +128,7 @@ impl DocGenerator {
         name: &str,
         version: &str,
         member_path: &str,
+        progress_callback: Option<ProgressCallback>,
     ) -> Result<PathBuf> {
         let source_path = self.storage.source_path(name, version)?;
         let member_full_path = source_path.join(member_path);
@@ -184,7 +204,7 @@ impl DocGenerator {
             .await?;
 
         // Create search index for the workspace member
-        self.create_search_index(name, version, Some(member_path))
+        self.create_search_index(name, version, Some(member_path), progress_callback)
             .await
             .context("Failed to create search index for workspace member")?;
 
@@ -368,6 +388,7 @@ impl DocGenerator {
         name: &str,
         version: &str,
         member_name: Option<&str>,
+        progress_callback: Option<ProgressCallback>,
     ) -> Result<()> {
         let log_prefix = if let Some(member) = member_name {
             format!("workspace member {member} in")
@@ -395,8 +416,8 @@ impl DocGenerator {
         // Create the search indexer for this crate or workspace member
         let mut indexer = SearchIndexer::new_for_crate(name, version, &self.storage, member_name)?;
 
-        // Add all crate items to the index
-        indexer.add_crate_items(name, version, &crate_data)?;
+        // Add all crate items to the index with progress tracking
+        indexer.add_crate_items(name, version, &crate_data, progress_callback)?;
 
         tracing::info!(
             "Successfully created search index for {}{}-{}",

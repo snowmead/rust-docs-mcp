@@ -200,7 +200,7 @@ impl CacheTools {
     ) -> CacheCrateOutput {
         let cache = self.cache.write().await;
         let source = CrateSource::CratesIO(params);
-        let json_response = cache.cache_crate_with_source(source).await;
+        let json_response = cache.cache_crate_with_source(source, None, None).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
             error: "Failed to parse cache response".to_string(),
         })
@@ -227,7 +227,7 @@ impl CacheTools {
 
         let cache = self.cache.write().await;
         let source = CrateSource::GitHub(params);
-        let json_response = cache.cache_crate_with_source(source).await;
+        let json_response = cache.cache_crate_with_source(source, None, None).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
             error: "Failed to parse cache response".to_string(),
         })
@@ -239,7 +239,7 @@ impl CacheTools {
     ) -> CacheCrateOutput {
         let cache = self.cache.write().await;
         let source = CrateSource::LocalPath(params);
-        let json_response = cache.cache_crate_with_source(source).await;
+        let json_response = cache.cache_crate_with_source(source, None, None).await;
         serde_json::from_str(&json_response).unwrap_or_else(|_| CacheCrateOutput::Error {
             error: "Failed to parse cache response".to_string(),
         })
@@ -668,7 +668,7 @@ impl CacheTools {
             // Run the caching operation
             let cache_guard = cache.write().await;
 
-            // Set initial stage
+            // Set initial stage - Downloading
             task_manager
                 .update_stage(&task_id, CachingStage::Downloading)
                 .await;
@@ -681,7 +681,10 @@ impl CacheTools {
                 return;
             }
 
-            let json_response = cache_guard.cache_crate_with_source(crate_source).await;
+            // Pass task manager and task ID to enable real progress tracking
+            let json_response = cache_guard
+                .cache_crate_with_source(crate_source, Some(task_manager.clone()), Some(task_id.clone()))
+                .await;
             drop(cache_guard); // Release lock
 
             // Check for cancellation after caching

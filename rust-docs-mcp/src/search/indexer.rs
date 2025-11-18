@@ -141,6 +141,7 @@ impl SearchIndexer {
         crate_name: &str,
         version: &str,
         crate_data: &Crate,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
     ) -> Result<()> {
         let query = DocQuery::new(crate_data.clone());
         let items = query.list_items(None); // Get all items without filtering
@@ -154,7 +155,7 @@ impl SearchIndexer {
             ));
         }
 
-        self.add_items_to_index(crate_name, version, &items)?;
+        self.add_items_to_index(crate_name, version, &items, progress_callback)?;
         Ok(())
     }
 
@@ -164,21 +165,46 @@ impl SearchIndexer {
         crate_name: &str,
         version: &str,
         items: &[ItemInfo],
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
     ) -> Result<()> {
+        let total_items = items.len();
+
         // Create all documents first
         let mut documents = Vec::new();
-        for item in items {
+        for (i, item) in items.iter().enumerate() {
             let doc = self.create_document_from_item(crate_name, version, item)?;
             documents.push(doc);
+
+            // Report progress every 50 items during document creation (0-70%)
+            if let Some(ref callback) = progress_callback {
+                if i % 50 == 0 || i == total_items - 1 {
+                    let percent = ((i * 70) / total_items.max(1)).min(70) as u8;
+                    callback(percent);
+                }
+            }
         }
 
         // Then add all documents to the writer
         let writer = self.get_writer()?;
-        for doc in documents {
-            writer.add_document(doc)?;
+        for (i, doc) in documents.iter().enumerate() {
+            writer.add_document(doc.clone())?;
+
+            // Report progress during writing (70-95%)
+            if let Some(ref callback) = progress_callback {
+                if i % 50 == 0 || i == documents.len() - 1 {
+                    let percent = (70 + ((i * 25) / documents.len().max(1))).min(95) as u8;
+                    callback(percent);
+                }
+            }
         }
 
         writer.commit()?;
+
+        // Report 100% complete
+        if let Some(callback) = progress_callback {
+            callback(100);
+        }
+
         Ok(())
     }
 

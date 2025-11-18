@@ -18,8 +18,12 @@ use std::env;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tar::Archive;
 use zeroize::Zeroizing;
+
+/// Progress callback function type for reporting download/operation progress (0-100)
+pub type ProgressCallback = Arc<dyn Fn(u8) + Send + Sync>;
 
 /// Constants for download operations
 const LOCK_TIMEOUT_SECS: u64 = 60;
@@ -87,11 +91,12 @@ impl CrateDownloader {
         name: &str,
         version: &str,
         source: Option<&str>,
+        progress_callback: Option<ProgressCallback>,
     ) -> Result<PathBuf> {
         let source_type = SourceDetector::detect(source);
 
         match source_type {
-            SourceType::CratesIo => self.download_crate(name, version).await,
+            SourceType::CratesIo => self.download_crate(name, version, progress_callback).await,
             SourceType::GitHub {
                 url,
                 reference,
@@ -110,10 +115,13 @@ impl CrateDownloader {
     }
 
     /// Download a crate from crates.io
-    async fn download_crate(&self, name: &str, version: &str) -> Result<PathBuf> {
+    async fn download_crate(&self, name: &str, version: &str, progress_callback: Option<ProgressCallback>) -> Result<PathBuf> {
         // Check if already cached
         if self.storage.is_cached(name, version) {
             tracing::info!("Crate {}-{} already cached", name, version);
+            if let Some(callback) = progress_callback {
+                callback(100); // Already cached = 100% complete
+            }
             return self.storage.source_path(name, version);
         }
 
@@ -188,12 +196,26 @@ impl CrateDownloader {
         let mut temp_file = File::create(&temp_file_path)
             .with_context(|| format!("Failed to create temporary file for {name}-{version}"))?;
 
+        // Track download progress
+        let total_bytes = response.content_length().unwrap_or(0);
+        let mut downloaded_bytes = 0u64;
+
         let mut stream = response.bytes_stream();
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.context("Failed to read chunk from download stream")?;
+            downloaded_bytes += chunk.len() as u64;
+
             temp_file
                 .write_all(&chunk)
                 .context("Failed to write to temporary file")?;
+
+            // Report progress if callback provided and total size known
+            if let Some(ref callback) = progress_callback {
+                if total_bytes > 0 {
+                    let percent = ((downloaded_bytes * 100) / total_bytes).min(100) as u8;
+                    callback(percent);
+                }
+            }
         }
 
         // Extract the crate

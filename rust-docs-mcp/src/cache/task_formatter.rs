@@ -78,9 +78,19 @@ pub fn format_single_task(task: &CachingTask) -> String {
     match task.status {
         TaskStatus::InProgress | TaskStatus::Pending => {
             let stage_info = if let Some(stage) = &task.stage {
+                let step_str = if let Some(step) = task.current_step {
+                    let total = stage.total_steps();
+                    let desc = task.step_description.as_ref()
+                        .map(|d| format!(": {}", d))
+                        .unwrap_or_default();
+                    format!("\n**Step**: {} of {}{}", step, total, desc)
+                } else {
+                    String::new()
+                };
                 format!(
-                    "**Current Stage**: {}\n\n## Progress Details\n{}",
+                    "**Current Stage**: {}{}\n\n## Progress Details\n{}",
                     stage.description(),
+                    step_str,
                     get_stage_context(stage.as_str())
                 )
             } else {
@@ -352,6 +362,14 @@ fn format_task_summary(task: &CachingTask) -> String {
         TaskStatus::InProgress => {
             if let Some(stage) = &task.stage {
                 output.push_str(&format!("**Stage**: {}  \n", stage.description()));
+
+                if let Some(step) = task.current_step {
+                    let total = stage.total_steps();
+                    let desc = task.step_description.as_ref()
+                        .map(|d| format!(": {}", d))
+                        .unwrap_or_default();
+                    output.push_str(&format!("**Step**: {} of {}{}  \n", step, total, desc));
+                }
             }
             output.push_str(&format!("**Started**: {}  \n", format_timestamp(task.started_at)));
             output.push_str(&format!("**Elapsed**: {}\n\n", format_duration(task.elapsed_secs())));

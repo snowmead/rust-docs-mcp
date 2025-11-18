@@ -3136,6 +3136,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "dashmap",
  "dirs",
  "flate2",
  "fs4 0.13.1",
