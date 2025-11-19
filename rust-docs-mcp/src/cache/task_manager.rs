@@ -4,7 +4,6 @@
 //! Each caching operation gets a unique task ID and can be monitored, cancelled, or cleared.
 
 use dashmap::DashMap;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 use tokio_util::sync::CancellationToken;

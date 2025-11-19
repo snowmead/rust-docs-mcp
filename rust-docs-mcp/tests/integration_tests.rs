@@ -1415,7 +1415,8 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     let task = parse_cache_task_started(&response)?;
 
     // Wait for completion with extended timeout
-    let result = wait_for_task_completion(&service, &task.task_id, LARGE_CRATE_TEST_TIMEOUT).await
+    let result = wait_for_task_completion(&service, &task.task_id, LARGE_CRATE_TEST_TIMEOUT)
+        .await
         .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
 
     // On macOS, bevy should succeed with the fallback strategy
