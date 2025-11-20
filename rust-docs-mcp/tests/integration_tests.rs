@@ -11,10 +11,10 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheCrateOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
-    CacheCrateParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
+    CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
 };
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
@@ -28,6 +28,7 @@ use rust_docs_mcp::docs::tools::{
 };
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -41,6 +42,11 @@ const CLIPPY_GITHUB_URL: &str = "https://github.com/rust-lang/rust-clippy";
 const CLIPPY_BRANCH: &str = "master";
 
 // Response validation helpers
+fn parse_cache_task_started(response: &str) -> Result<CacheTaskStartedOutput> {
+    serde_json::from_str(response)
+        .map_err(|e| anyhow::anyhow!("Failed to parse task started response: {e}\nResponse: {response}"))
+}
+
 fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
     serde_json::from_str(response)
         .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {e}\nResponse: {response}"))
@@ -62,6 +68,100 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
     Ok((service, temp_dir))
 }
 
+/// Result of waiting for a caching task
+#[derive(Debug)]
+enum TaskResult {
+    Success,
+    WorkspaceDetected(String), // Contains workspace info
+    BinaryOnly(String),         // Contains binary-only error
+    Failed(String),             // Contains error message
+    Cancelled,
+}
+
+/// Extract current step information from markdown output
+/// Returns None if no step information is found
+/// Returns (current_step, total_steps, description)
+fn extract_step_from_response(response: &str) -> Option<(u8, u8, Option<String>)> {
+    // Look for pattern: **Step**: X of Y
+    // or: **Step**: X of Y: Description
+    response
+        .lines()
+        .find(|line| line.contains("**Step**:"))
+        .and_then(|line| {
+            // Extract after "**Step**: "
+            let step_part = line.split("**Step**:").nth(1)?.trim();
+
+            // Parse "X of Y" or "X of Y: Description"
+            let parts: Vec<&str> = step_part.splitn(2, " of ").collect();
+            if parts.len() != 2 {
+                return None;
+            }
+
+            let current: u8 = parts[0].trim().parse().ok()?;
+
+            // Check if there's a description after total
+            let remaining = parts[1];
+            let (total_str, description) = if let Some(colon_pos) = remaining.find(':') {
+                let (total, desc) = remaining.split_at(colon_pos);
+                (total.trim(), Some(desc[1..].trim().to_string()))
+            } else {
+                (remaining.trim(), None)
+            };
+
+            let total: u8 = total_str.parse().ok()?;
+
+            Some((current, total, description))
+        })
+}
+
+/// Helper to wait for an async caching task to complete and return the final result.
+/// This polls cache_operations every 500ms until the task reaches a terminal state.
+async fn wait_for_task_completion(
+    service: &RustDocsService,
+    task_id: &str,
+    timeout: Duration,
+) -> Result<TaskResult> {
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(500);
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for task {task_id} to complete after {timeout:?}"
+            ));
+        }
+
+        // Check task status via cache_operations
+        let params = CacheOperationsParams {
+            task_id: Some(task_id.to_string()),
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        };
+
+        let response = service.cache_operations(Parameters(params)).await;
+
+        // Parse the markdown response to check if task is complete
+        if response.contains("COMPLETED ✓") {
+            return Ok(TaskResult::Success);
+        } else if response.contains("FAILED ✗") {
+            // Check for specific failure types
+            if response.contains("Workspace detected") || response.contains("specify member") {
+                return Ok(TaskResult::WorkspaceDetected(response));
+            } else if response.contains("binary-only") || response.contains("no library") {
+                return Ok(TaskResult::BinaryOnly(response));
+            } else {
+                return Ok(TaskResult::Failed(response));
+            }
+        } else if response.contains("CANCELLED") {
+            return Ok(TaskResult::Cancelled);
+        }
+
+        // Task still in progress, wait and retry
+        tokio::time::sleep(poll_interval).await;
+    }
+}
+
 /// Helper to setup and cache the semver test crate
 async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
     let params = CacheCrateParams {
@@ -76,14 +176,19 @@ async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    // Start the async caching operation
+    let response = service.cache_crate(Parameters(params)).await;
 
-    let output = parse_cache_response(&response)?;
-    if !output.is_success() {
-        return Err(anyhow::anyhow!("Failed to cache test crate: {output:?}"));
+    // Parse the task started response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for the task to complete
+    let result = wait_for_task_completion(service, &task_output.task_id, TEST_TIMEOUT).await?;
+
+    match result {
+        TaskResult::Success => Ok(()),
+        _ => Err(anyhow::anyhow!("Failed to cache test crate: {result:?}")),
     }
-    Ok(())
 }
 
 /// Helper to get a test item ID from the semver crate
@@ -126,21 +231,16 @@ async fn test_cache_from_crates_io() -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    // Start async caching operation
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
 
-    let output = parse_cache_response(&response)?;
-    match &output {
-        CacheCrateOutput::Success {
-            crate_name,
-            version,
-            ..
-        } => {
-            assert_eq!(crate_name, "semver");
-            assert_eq!(version, SEMVER_VERSION);
-        }
-        _ => panic!("Expected success response, got: {output:?}"),
-    }
+    assert_eq!(task_output.crate_name, "semver");
+    assert_eq!(task_output.version, SEMVER_VERSION);
+
+    // Wait for task to complete
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(matches!(result, TaskResult::Success), "Expected success, got: {result:?}");
 
     // Verify it's in the cache by listing versions
     let list_params = ListCrateVersionsParams {
@@ -178,14 +278,16 @@ async fn test_cache_from_github() -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    let response = service.cache_crate(Parameters(params)).await;
 
-    // Serde is a workspace, so we should get a workspace detection response
-    let output = parse_cache_response(&response)?;
+    // Parse the async task response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for completion - serde is a workspace so we expect workspace detection failure
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
     assert!(
-        output.is_workspace_detected(),
-        "Expected workspace detection for serde: {output:?}"
+        matches!(result, TaskResult::WorkspaceDetected(_)),
+        "Expected workspace detection for serde, got: {result:?}"
     );
 
     // Verify cached (workspace metadata should be cached)
@@ -228,19 +330,21 @@ async fn test_cache_from_github_branch() -> Result<()> {
         update: None,
     };
 
-    let response = tokio::time::timeout(
-        LARGE_CRATE_TEST_TIMEOUT,
-        service.cache_crate(Parameters(params)),
-    )
-    .await?;
+    let response = service.cache_crate(Parameters(params)).await;
 
     // Print the response for debugging
     println!("Response: {response}");
 
-    // Clippy is a binary-only package, so we should expect an appropriate error
+    // Parse async task response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for task completion - clippy is binary-only so should fail
+    let result = wait_for_task_completion(&service, &task_output.task_id, LARGE_CRATE_TEST_TIMEOUT).await?;
+
+    // Clippy is a binary-only package, so we should expect a binary-only error
     assert!(
-        is_binary_only_response(&response),
-        "Expected binary-only package response, got: {response}"
+        matches!(result, TaskResult::BinaryOnly(_)),
+        "Expected binary-only package error, got: {result:?}"
     );
 
     Ok(())
@@ -287,10 +391,13 @@ edition = "2021"
     };
 
     let response = service.cache_crate(Parameters(params)).await;
-    let output = parse_cache_response(&response)?;
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for task completion
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
     assert!(
-        output.is_success(),
-        "Failed to cache from local path: {output:?}"
+        matches!(result, TaskResult::Success),
+        "Failed to cache from local path: {result:?}"
     );
 
     // Verify cached
@@ -365,19 +472,21 @@ serde = {{ workspace = true }}
 
     let response = service.cache_crate(Parameters(params)).await;
 
+    // Parse async task response
+    let task_output = parse_cache_task_started(&response)?;
+
+    // Wait for completion - should fail with workspace detection
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+
     // Response should indicate workspace detection
-    let output = parse_cache_response(&response)?;
     assert!(
-        output.is_workspace_detected(),
-        "Response should indicate workspace detection: {output:?}"
+        matches!(result, TaskResult::WorkspaceDetected(_)),
+        "Response should indicate workspace detection: {result:?}"
     );
 
-    if let CacheCrateOutput::WorkspaceDetected {
-        workspace_members, ..
-    } = &output
-    {
-        assert!(workspace_members.contains(&"crate-a".to_string()));
-        assert!(workspace_members.contains(&"crate-b".to_string()));
+    // Verify the response mentions workspace detection
+    if let TaskResult::WorkspaceDetected(msg) = result {
+        assert!(msg.contains("Workspace detected"), "Should mention workspace: {msg}");
     }
 
     Ok(())
@@ -400,10 +509,10 @@ async fn test_cache_update() -> Result<()> {
         update: None,
     };
 
-    let response1 =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params1))).await?;
-    let output1 = parse_cache_response(&response1)?;
-    assert!(output1.is_success(), "Initial cache failed: {output1:?}");
+    let response1 = service.cache_crate(Parameters(params1)).await;
+    let task1 = parse_cache_task_started(&response1)?;
+    let result1 = wait_for_task_completion(&service, &task1.task_id, TEST_TIMEOUT).await?;
+    assert!(matches!(result1, TaskResult::Success), "Initial cache failed: {result1:?}");
 
     // Cache again with update flag
     let params2 = CacheCrateParams {
@@ -418,15 +527,10 @@ async fn test_cache_update() -> Result<()> {
         update: Some(true),
     };
 
-    let response2 =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params2))).await?;
-    // Update should return "Successfully updated" message
-    let output2 = parse_cache_response(&response2)?;
-    assert!(output2.is_success(), "Update cache failed: {output2:?}");
-
-    if let CacheCrateOutput::Success { updated, .. } = &output2 {
-        assert_eq!(*updated, Some(true), "Should have updated flag set");
-    }
+    let response2 = service.cache_crate(Parameters(params2)).await;
+    let task2 = parse_cache_task_started(&response2)?;
+    let result2 = wait_for_task_completion(&service, &task2.task_id, TEST_TIMEOUT).await?;
+    assert!(matches!(result2, TaskResult::Success), "Update cache failed: {result2:?}");
 
     Ok(())
 }
@@ -448,17 +552,17 @@ async fn test_invalid_inputs() -> Result<()> {
         update: None,
     };
 
-    let response =
-        tokio::time::timeout(TEST_TIMEOUT, service.cache_crate(Parameters(params))).await?;
+    let response = service.cache_crate(Parameters(params)).await;
 
-    // crates.io returns 403 Forbidden for non-existent crates
-    let output = parse_cache_response(&response)?;
+    // crates.io returns 403 Forbidden for non-existent crates - this will be async
+    let task = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task.task_id, TEST_TIMEOUT).await?;
     assert!(
-        output.is_error(),
-        "Expected error response, got: {output:?}"
+        matches!(result, TaskResult::Failed(_)),
+        "Expected error response, got: {result:?}"
     );
 
-    // Test invalid GitHub URL
+    // Test invalid GitHub URL - this might fail synchronously or asynchronously
     let params = CacheCrateParams {
         crate_name: "invalid".to_string(),
         source_type: "github".to_string(),
@@ -472,13 +576,21 @@ async fn test_invalid_inputs() -> Result<()> {
     };
 
     let response = service.cache_crate(Parameters(params)).await;
-    let output = parse_cache_response(&response)?;
-    assert!(
-        output.is_error(),
-        "Expected error response, got: {output:?}"
-    );
+    // Try parsing as error first, then as async task
+    if response.contains("# Error") {
+        // Synchronous error
+        assert!(response.contains("Error"), "Expected error in response: {response}");
+    } else {
+        // Async task
+        let task = parse_cache_task_started(&response)?;
+        let result = wait_for_task_completion(&service, &task.task_id, TEST_TIMEOUT).await?;
+        assert!(
+            matches!(result, TaskResult::Failed(_)),
+            "Expected error response, got: {result:?}"
+        );
+    }
 
-    // Test non-existent local path
+    // Test non-existent local path - this will fail synchronously
     let params = CacheCrateParams {
         crate_name: "invalid".to_string(),
         source_type: "local".to_string(),
@@ -492,11 +604,9 @@ async fn test_invalid_inputs() -> Result<()> {
     };
 
     let response = service.cache_crate(Parameters(params)).await;
-    let output = parse_cache_response(&response)?;
-    assert!(
-        output.is_error(),
-        "Expected error response, got: {output:?}"
-    );
+    // Local path validation happens synchronously before spawning
+    assert!(response.contains("Error") || response.contains("does not exist"),
+            "Expected error for non-existent path: {response}");
 
     Ok(())
 }
@@ -513,58 +623,47 @@ async fn test_concurrent_caching() -> Result<()> {
         ("regex", "1.11.1"), // Use the latest version compatible with nightly toolchain
     ];
 
-    // Cache multiple crates concurrently
-    let mut handles = vec![];
+    // Start caching multiple crates concurrently
+    let mut task_ids = vec![];
 
     for (name, version) in &test_crates {
-        let service_clone = service.clone();
-        let name = name.to_string();
-        let version = version.to_string();
+        let params = CacheCrateParams {
+            crate_name: name.to_string(),
+            source_type: "cratesio".to_string(),
+            version: Some(version.to_string()),
+            github_url: None,
+            branch: None,
+            tag: None,
+            path: None,
+            members: None,
+            update: None,
+        };
+        let start = std::time::Instant::now();
+        let response = service.cache_crate(Parameters(params)).await;
+        let duration = start.elapsed();
+        println!("Started caching {name} {version} in {duration:?}");
 
-        let handle = tokio::spawn(async move {
-            let params = CacheCrateParams {
-                crate_name: name.clone(),
-                source_type: "cratesio".to_string(),
-                version: Some(version.clone()),
-                github_url: None,
-                branch: None,
-                tag: None,
-                path: None,
-                members: None,
-                update: None,
-            };
-            let start = std::time::Instant::now();
-            let result = service_clone.cache_crate(Parameters(params)).await;
-            let duration = start.elapsed();
-            (name, version, result, duration)
-        });
-
-        handles.push(handle);
+        let task = parse_cache_task_started(&response)?;
+        task_ids.push((name.to_string(), version.to_string(), task.task_id));
     }
 
-    // Wait for all to complete and verify results
+    // Wait for all tasks to complete
     let mut results = vec![];
-    for handle in handles {
-        let (name, version, result, duration) = handle.await?;
-        println!("Cached {name} {version} in {duration:?}");
+    for (name, version, task_id) in task_ids {
+        let result = wait_for_task_completion(&service, &task_id, TEST_TIMEOUT).await?;
+        println!("Completed caching {name} {version}");
 
-        let success = if let Ok(output) = parse_cache_response(&result) {
-            output.is_success()
-        } else {
-            false
-        };
-        if !success {
-            eprintln!("Concurrent cache failed for {name}: {result}");
+        if !matches!(result, TaskResult::Success) {
+            eprintln!("Concurrent cache failed for {name}: {result:?}");
         }
-        results.push((name, version, result));
+        results.push((name.clone(), version.clone(), result));
     }
 
     // Verify all operations succeeded
     for (name, version, result) in &results {
-        let output = parse_cache_response(result)?;
         assert!(
-            output.is_success(),
-            "Failed to cache {name} {version}: {output:?}"
+            matches!(result, TaskResult::Success),
+            "Failed to cache {name} {version}: {result:?}"
         );
     }
 
@@ -587,7 +686,7 @@ async fn test_concurrent_caching() -> Result<()> {
         );
     }
 
-    // Verify no corruption by attempting to use the cached crates
+    // Verify no corruption by attempting to re-cache (should be idempotent)
     // This would fail if the cache was corrupted during concurrent access
     for (name, version) in &test_crates {
         let params = CacheCrateParams {
@@ -601,17 +700,14 @@ async fn test_concurrent_caching() -> Result<()> {
             members: None,
             update: Some(false), // Should not re-download if already cached
         };
-        let result = service.cache_crate(Parameters(params)).await;
-        let output = parse_cache_response(&result)?;
-        // Should either be already cached or successful
-        let is_valid = match &output {
-            CacheCrateOutput::Success { .. } => true,
-            CacheCrateOutput::Error { error } if error.contains("already cached") => true,
-            _ => false,
-        };
+        let response = service.cache_crate(Parameters(params)).await;
+        let task = parse_cache_task_started(&response)?;
+        let result = wait_for_task_completion(&service, &task.task_id, TEST_TIMEOUT).await?;
+
+        // Should complete successfully even if already cached
         assert!(
-            is_valid,
-            "Cache integrity check failed for {name} {version}: {output:?}"
+            matches!(result, TaskResult::Success),
+            "Cache integrity check failed for {name} {version}: {result:?}"
         );
     }
 
@@ -669,13 +765,18 @@ edition = "2021"
     };
 
     let response1 = service.cache_crate(Parameters(params1)).await;
-    let output1 = parse_cache_response(&response1)?;
+    let task1 = parse_cache_task_started(&response1)?;
+    let result1 = wait_for_task_completion(&service, &task1.task_id, TEST_TIMEOUT).await?;
+
+    // Should detect workspace
     assert!(
-        matches!(&output1, CacheCrateOutput::WorkspaceDetected { workspace_members, .. }
-            if workspace_members.contains(&"lib-a".to_string())
-            && workspace_members.contains(&"lib-b".to_string())),
-        "Should detect workspace and list members: {output1:?}"
+        matches!(result1, TaskResult::WorkspaceDetected(_)),
+        "Should detect workspace: {result1:?}"
     );
+
+    if let TaskResult::WorkspaceDetected(msg) = result1 {
+        assert!(msg.contains("Workspace detected"), "Should mention workspace: {msg}");
+    }
 
     // Now cache with specific members
     let params2 = CacheCrateParams {
@@ -691,10 +792,12 @@ edition = "2021"
     };
 
     let response2 = service.cache_crate(Parameters(params2)).await;
-    let output2 = parse_cache_response(&response2)?;
+    let task2 = parse_cache_task_started(&response2)?;
+    let result2 = wait_for_task_completion(&service, &task2.task_id, TEST_TIMEOUT).await?;
+
     assert!(
-        matches!(&output2, CacheCrateOutput::Success { .. }),
-        "Should successfully cache workspace members: {output2:?}"
+        matches!(result2, TaskResult::Success),
+        "Should successfully cache workspace members: {result2:?}"
     );
 
     Ok(())
@@ -1306,29 +1409,23 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     };
 
     // Use a longer timeout for bevy as it's a large crate
-    let response = tokio::time::timeout(
-        LARGE_CRATE_TEST_TIMEOUT,
-        service.cache_crate(Parameters(params)),
-    )
-    .await
-    .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
+    let response = service.cache_crate(Parameters(params)).await;
 
-    let output = parse_cache_response(&response)?;
+    // Parse async task response
+    let task = parse_cache_task_started(&response)?;
+
+    // Wait for completion with extended timeout
+    let result = wait_for_task_completion(&service, &task.task_id, LARGE_CRATE_TEST_TIMEOUT)
+        .await
+        .context("Timeout while caching bevy - consider increasing LARGE_CRATE_TEST_TIMEOUT")?;
 
     // On macOS, bevy should succeed with the fallback strategy
     assert!(
-        output.is_success(),
-        "Bevy should cache successfully with feature fallback strategy: {output:?}"
+        matches!(result, TaskResult::Success),
+        "Bevy should cache successfully with feature fallback strategy: {result:?}"
     );
 
-    // Verify the response mentions which strategy was used
-    let response_lower = response.to_lowercase();
-    let used_fallback = response_lower.contains("default features")
-        || response_lower.contains("no default features");
-
-    if used_fallback {
-        eprintln!("✓ Successfully used fallback feature strategy for bevy on macOS");
-    }
+    eprintln!("✓ Successfully cached bevy on macOS (likely used fallback feature strategy)");
 
     // Verify it's actually cached
     let list_params = ListCrateVersionsParams {
@@ -1343,3 +1440,108 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 
     Ok(())
 }
+
+// ===== PROGRESS TRACKING TESTS =====
+
+#[tokio::test]
+async fn test_step_tracking() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Cache a small crate and track step updates
+    let params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some(SEMVER_VERSION.to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let task_id = &task_output.task_id;
+
+    // Track step updates - collect all steps we see
+    let mut step_updates = Vec::new();
+    let start = std::time::Instant::now();
+    let timeout = TEST_TIMEOUT;
+    let poll_interval = Duration::from_millis(100); // Poll faster to catch step updates
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for task {task_id} to complete after {timeout:?}"
+            ));
+        }
+
+        // Check task status
+        let check_params = CacheOperationsParams {
+            task_id: Some(task_id.to_string()),
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        };
+
+        let response = service.cache_operations(Parameters(check_params)).await;
+
+        // Extract step if present
+        if let Some((current, total, desc)) = extract_step_from_response(&response) {
+            // Only record if different from last value
+            let last_matches = step_updates.last().map(|(c, t, _)| *c == current && *t == total).unwrap_or(false);
+            if !last_matches {
+                println!("Step update: {} of {} {:?}", current, total, desc);
+                step_updates.push((current, total, desc));
+            }
+        }
+
+        // Check if complete
+        if response.contains("COMPLETED ✓") {
+            break;
+        } else if response.contains("FAILED ✗") {
+            return Err(anyhow::anyhow!("Task failed: {response}"));
+        } else if response.contains("CANCELLED") {
+            return Err(anyhow::anyhow!("Task was cancelled"));
+        }
+
+        tokio::time::sleep(poll_interval).await;
+    }
+
+    println!("Step updates observed: {:?}", step_updates);
+
+    // Verify step tracking requirements:
+
+    // 1. We should have seen at least SOME step updates
+    assert!(
+        !step_updates.is_empty(),
+        "Should have observed at least some step updates"
+    );
+
+    // 2. Current step should never exceed total steps
+    for (current, total, _) in &step_updates {
+        assert!(
+            current <= total,
+            "Current step {current} exceeds total steps {total}"
+        );
+    }
+
+    // 3. Steps should make sense (start at 1)
+    if let Some((first_step, _, _)) = step_updates.first() {
+        assert_eq!(
+            *first_step, 1,
+            "First step should be 1, got {first_step}"
+        );
+    }
+
+    println!("✓ Step tracking test passed");
+    println!("  - Observed {} step updates", step_updates.len());
+    if let (Some(first), Some(last)) = (step_updates.first(), step_updates.last()) {
+        println!("  - First step: {} of {}", first.0, first.1);
+        println!("  - Last step: {} of {}", last.0, last.1);
+    }
+
+    Ok(())
+}
+

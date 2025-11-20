@@ -7,6 +7,28 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// Output from async cache_crate operations - returns task ID for monitoring
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
+pub struct CacheTaskStartedOutput {
+    pub task_id: String,
+    #[serde(rename = "crate")]
+    pub crate_name: String,
+    pub version: String,
+    pub source_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_details: Option<String>,
+    pub status: String,
+    pub message: String,
+}
+
+impl CacheTaskStartedOutput {
+    /// Convert to JSON string for MCP response
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self)
+            .unwrap_or_else(|_| r#"{"error":"Failed to serialize response"}"#.to_string())
+    }
+}
+
 /// Output from cache_crate operations (crates.io, GitHub, local)
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 #[serde(tag = "status")]
