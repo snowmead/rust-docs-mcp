@@ -164,17 +164,23 @@ pub struct ListCrateVersionsParams {
 /// Parameters for the cache_operations tool
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct CacheOperationsParams {
-    #[schemars(description = "Optional task_id to query specific task or to cancel/clear. If not provided, lists all tasks")]
+    #[schemars(
+        description = "Optional task_id to query specific task or to cancel/clear. If not provided, lists all tasks"
+    )]
     pub task_id: Option<String>,
 
-    #[schemars(description = "Optional status filter when listing tasks: \"pending\", \"in_progress\", \"completed\", \"failed\", \"cancelled\"")]
+    #[schemars(
+        description = "Optional status filter when listing tasks: \"pending\", \"in_progress\", \"completed\", \"failed\", \"cancelled\""
+    )]
     pub status_filter: Option<String>,
 
     #[schemars(description = "Set to true to cancel the specified task (requires task_id)")]
     #[serde(default)]
     pub cancel: bool,
 
-    #[schemars(description = "Set to true to remove completed/failed tasks from memory (clears specified task or all if no task_id)")]
+    #[schemars(
+        description = "Set to true to remove completed/failed tasks from memory (clears specified task or all if no task_id)"
+    )]
     #[serde(default)]
     pub clear: bool,
 }
@@ -515,7 +521,10 @@ impl CacheTools {
 
         // Validate path exists
         if !local_path.exists() {
-            return Err(format!("Local path does not exist: {}", local_path.display()));
+            return Err(format!(
+                "Local path does not exist: {}",
+                local_path.display()
+            ));
         }
 
         let cargo_toml = local_path.join("Cargo.toml");
@@ -597,8 +606,16 @@ impl CacheTools {
                     _ => {}
                 }
 
-                let version = params.branch.clone().or_else(|| params.tag.clone()).unwrap();
-                let ref_type = if params.branch.is_some() { "branch" } else { "tag" };
+                let version = params
+                    .branch
+                    .clone()
+                    .or_else(|| params.tag.clone())
+                    .unwrap();
+                let ref_type = if params.branch.is_some() {
+                    "branch"
+                } else {
+                    "tag"
+                };
                 let details = format!("{}, {}: {}", github_url, ref_type, version);
                 (params.crate_name.clone(), version, Some(details))
             }
@@ -611,15 +628,13 @@ impl CacheTools {
                 };
 
                 // Resolve version synchronously before creating task (fixes bug #2)
-                let (version, auto_detected) = match Self::resolve_local_version(
-                    &path,
-                    params.version.as_deref(),
-                ) {
-                    Ok(result) => result,
-                    Err(error_msg) => {
-                        return format!("# Error\n\n{}", error_msg);
-                    }
-                };
+                let (version, auto_detected) =
+                    match Self::resolve_local_version(&path, params.version.as_deref()) {
+                        Ok(result) => result,
+                        Err(error_msg) => {
+                            return format!("# Error\n\n{}", error_msg);
+                        }
+                    };
 
                 // Add auto-detection note to source details
                 let details = if auto_detected {
@@ -683,7 +698,11 @@ impl CacheTools {
 
             // Pass task manager and task ID to enable real progress tracking
             let json_response = cache_guard
-                .cache_crate_with_source(crate_source, Some(task_manager.clone()), Some(task_id.clone()))
+                .cache_crate_with_source(
+                    crate_source,
+                    Some(task_manager.clone()),
+                    Some(task_id.clone()),
+                )
                 .await;
             drop(cache_guard); // Release lock
 
@@ -707,7 +726,8 @@ impl CacheTools {
                         task_manager
                             .set_error(
                                 &task_id,
-                                "Workspace detected. Please specify member(s) to cache.".to_string(),
+                                "Workspace detected. Please specify member(s) to cache."
+                                    .to_string(),
                             )
                             .await;
                     }
@@ -814,14 +834,17 @@ impl CacheTools {
             }
         } else {
             // List all tasks with optional filter
-            let status_filter = params.status_filter.as_ref().and_then(|s| match s.as_str() {
-                "pending" => Some(TaskStatus::Pending),
-                "in_progress" => Some(TaskStatus::InProgress),
-                "completed" => Some(TaskStatus::Completed),
-                "failed" => Some(TaskStatus::Failed),
-                "cancelled" => Some(TaskStatus::Cancelled),
-                _ => None,
-            });
+            let status_filter = params
+                .status_filter
+                .as_ref()
+                .and_then(|s| match s.as_str() {
+                    "pending" => Some(TaskStatus::Pending),
+                    "in_progress" => Some(TaskStatus::InProgress),
+                    "completed" => Some(TaskStatus::Completed),
+                    "failed" => Some(TaskStatus::Failed),
+                    "cancelled" => Some(TaskStatus::Cancelled),
+                    _ => None,
+                });
 
             let tasks = self.task_manager.list_tasks(status_filter.as_ref()).await;
             task_formatter::format_task_list(tasks)

@@ -89,10 +89,10 @@ impl CachingStage {
     /// Get total number of steps for this stage
     pub fn total_steps(&self) -> u8 {
         match self {
-            CachingStage::Downloading => 1,     // Single step: download
-            CachingStage::GeneratingDocs => 2,  // 1. Run rustdoc, 2. Save docs
-            CachingStage::Indexing => 3,        // 1. Load docs, 2. Create index, 3. Commit
-            CachingStage::Completed => 1,       // Single step: complete
+            CachingStage::Downloading => 1,    // Single step: download
+            CachingStage::GeneratingDocs => 2, // 1. Run rustdoc, 2. Save docs
+            CachingStage::Indexing => 3,       // 1. Load docs, 2. Create index, 3. Commit
+            CachingStage::Completed => 1,      // Single step: complete
         }
     }
 }
@@ -277,7 +277,12 @@ impl TaskManager {
     }
 
     /// Update task step
-    pub async fn update_step(&self, task_id: &str, step: u8, description: impl Into<String>) -> bool {
+    pub async fn update_step(
+        &self,
+        task_id: &str,
+        step: u8,
+        description: impl Into<String>,
+    ) -> bool {
         if let Some(mut task) = self.tasks.get_mut(task_id) {
             task.set_step(step, description);
             true

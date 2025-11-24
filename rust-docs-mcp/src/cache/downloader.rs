@@ -115,7 +115,12 @@ impl CrateDownloader {
     }
 
     /// Download a crate from crates.io
-    async fn download_crate(&self, name: &str, version: &str, progress_callback: Option<ProgressCallback>) -> Result<PathBuf> {
+    async fn download_crate(
+        &self,
+        name: &str,
+        version: &str,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<PathBuf> {
         // Check if already cached
         if self.storage.is_cached(name, version) {
             tracing::info!("Crate {}-{} already cached", name, version);
@@ -582,7 +587,7 @@ mod tests {
 
         // Test that download doesn't fail with 403
         // Note: This is an integration test that requires internet access
-        match downloader.download_crate("serde", "1.0.0").await {
+        match downloader.download_crate("serde", "1.0.0", None).await {
             Ok(path) => {
                 assert!(path.exists());
                 println!("Successfully downloaded crate to: {path:?}");
@@ -608,7 +613,7 @@ mod tests {
         let downloader = CrateDownloader::new(storage);
 
         match downloader
-            .download_crate("google-sheets4", "6.0.0+20240621")
+            .download_crate("google-sheets4", "6.0.0+20240621", None)
             .await
         {
             Ok(path) => {

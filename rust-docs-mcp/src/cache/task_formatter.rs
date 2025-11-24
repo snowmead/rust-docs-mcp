@@ -80,7 +80,9 @@ pub fn format_single_task(task: &CachingTask) -> String {
             let stage_info = if let Some(stage) = &task.stage {
                 let step_str = if let Some(step) = task.current_step {
                     let total = stage.total_steps();
-                    let desc = task.step_description.as_ref()
+                    let desc = task
+                        .step_description
+                        .as_ref()
                         .map(|d| format!(": {}", d))
                         .unwrap_or_default();
                     format!("\n**Step**: {} of {}{}", step, total, desc)
@@ -263,7 +265,8 @@ pub fn format_task_list(tasks: Vec<CachingTask>) -> String {
         }
     }
 
-    let total = in_progress.len() + completed.len() + failed.len() + cancelled.len() + pending.len();
+    let total =
+        in_progress.len() + completed.len() + failed.len() + cancelled.len() + pending.len();
 
     // Build summary
     let mut output = String::from("# Caching Operations\n\n");
@@ -339,7 +342,9 @@ pub fn format_task_list(tasks: Vec<CachingTask>) -> String {
         output.push_str("- **Cancel tasks**: Use `cache_operations` with task_id and cancel: true for each task\n");
     }
     if !completed.is_empty() || !failed.is_empty() || !cancelled.is_empty() {
-        output.push_str("- **Clear all completed/failed/cancelled**: `cache_operations({clear: true})`\n");
+        output.push_str(
+            "- **Clear all completed/failed/cancelled**: `cache_operations({clear: true})`\n",
+        );
     }
 
     output
@@ -355,7 +360,12 @@ fn format_task_summary(task: &CachingTask) -> String {
 
     let mut output = format!(
         "### Task: `{}`\n**Crate**: {}-{}  \n**Source**: {}{}  \n**Status**: {}  \n",
-        task.task_id, task.crate_name, task.version, task.source_type, source_info, task.status.display()
+        task.task_id,
+        task.crate_name,
+        task.version,
+        task.source_type,
+        source_info,
+        task.status.display()
     );
 
     match task.status {
@@ -365,30 +375,59 @@ fn format_task_summary(task: &CachingTask) -> String {
 
                 if let Some(step) = task.current_step {
                     let total = stage.total_steps();
-                    let desc = task.step_description.as_ref()
+                    let desc = task
+                        .step_description
+                        .as_ref()
                         .map(|d| format!(": {}", d))
                         .unwrap_or_default();
                     output.push_str(&format!("**Step**: {} of {}{}  \n", step, total, desc));
                 }
             }
-            output.push_str(&format!("**Started**: {}  \n", format_timestamp(task.started_at)));
-            output.push_str(&format!("**Elapsed**: {}\n\n", format_duration(task.elapsed_secs())));
+            output.push_str(&format!(
+                "**Started**: {}  \n",
+                format_timestamp(task.started_at)
+            ));
+            output.push_str(&format!(
+                "**Elapsed**: {}\n\n",
+                format_duration(task.elapsed_secs())
+            ));
             output.push_str("**Actions**:\n");
-            output.push_str(&format!("- Cancel: `cache_operations({{task_id: \"{}\", cancel: true}})`\n", task.task_id));
+            output.push_str(&format!(
+                "- Cancel: `cache_operations({{task_id: \"{}\", cancel: true}})`\n",
+                task.task_id
+            ));
         }
         TaskStatus::Pending => {
-            output.push_str(&format!("**Started**: {}  \n", format_timestamp(task.started_at)));
+            output.push_str(&format!(
+                "**Started**: {}  \n",
+                format_timestamp(task.started_at)
+            ));
             output.push_str("\n**Actions**:\n");
-            output.push_str(&format!("- Cancel: `cache_operations({{task_id: \"{}\", cancel: true}})`\n", task.task_id));
+            output.push_str(&format!(
+                "- Cancel: `cache_operations({{task_id: \"{}\", cancel: true}})`\n",
+                task.task_id
+            ));
         }
         TaskStatus::Completed => {
-            output.push_str(&format!("**Duration**: {}  \n", format_duration(task.elapsed_secs())));
-            output.push_str(&format!("**Completed**: {}\n\n", format_timestamp(task.completed_at.unwrap_or(task.started_at))));
+            output.push_str(&format!(
+                "**Duration**: {}  \n",
+                format_duration(task.elapsed_secs())
+            ));
+            output.push_str(&format!(
+                "**Completed**: {}\n\n",
+                format_timestamp(task.completed_at.unwrap_or(task.started_at))
+            ));
             output.push_str("**Actions**:\n");
-            output.push_str(&format!("- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n", task.task_id));
+            output.push_str(&format!(
+                "- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n",
+                task.task_id
+            ));
         }
         TaskStatus::Failed => {
-            output.push_str(&format!("**Duration**: {}  \n", format_duration(task.elapsed_secs())));
+            output.push_str(&format!(
+                "**Duration**: {}  \n",
+                format_duration(task.elapsed_secs())
+            ));
             if let Some(error) = &task.error {
                 // Truncate long errors for list view
                 let error_preview = if error.len() > 100 {
@@ -399,14 +438,29 @@ fn format_task_summary(task: &CachingTask) -> String {
                 output.push_str(&format!("**Error**: {}\n\n", error_preview));
             }
             output.push_str("**Actions**:\n");
-            output.push_str(&format!("- View details: `cache_operations({{task_id: \"{}\"}})`\n", task.task_id));
-            output.push_str(&format!("- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n", task.task_id));
+            output.push_str(&format!(
+                "- View details: `cache_operations({{task_id: \"{}\"}})`\n",
+                task.task_id
+            ));
+            output.push_str(&format!(
+                "- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n",
+                task.task_id
+            ));
         }
         TaskStatus::Cancelled => {
-            output.push_str(&format!("**Duration**: {}  \n", format_duration(task.elapsed_secs())));
-            output.push_str(&format!("**Cancelled**: {}\n\n", format_timestamp(task.completed_at.unwrap_or(task.started_at))));
+            output.push_str(&format!(
+                "**Duration**: {}  \n",
+                format_duration(task.elapsed_secs())
+            ));
+            output.push_str(&format!(
+                "**Cancelled**: {}\n\n",
+                format_timestamp(task.completed_at.unwrap_or(task.started_at))
+            ));
             output.push_str("**Actions**:\n");
-            output.push_str(&format!("- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n", task.task_id));
+            output.push_str(&format!(
+                "- Clear: `cache_operations({{task_id: \"{}\", clear: true}})`\n",
+                task.task_id
+            ));
         }
     }
 
@@ -434,7 +488,10 @@ pub fn format_clear_result(tasks: Vec<CachingTask>) -> String {
     }
 
     let mut output = String::from("# Tasks Cleared\n\n");
-    output.push_str(&format!("Successfully cleared {} task(s) from memory:\n\n", tasks.len()));
+    output.push_str(&format!(
+        "Successfully cleared {} task(s) from memory:\n\n",
+        tasks.len()
+    ));
 
     for task in tasks {
         let status_str = match task.status {

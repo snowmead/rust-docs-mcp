@@ -41,7 +41,12 @@ impl DocGenerator {
     }
 
     /// Generate documentation for a crate
-    pub async fn generate_docs(&self, name: &str, version: &str, progress_callback: Option<ProgressCallback>) -> Result<PathBuf> {
+    pub async fn generate_docs(
+        &self,
+        name: &str,
+        version: &str,
+        progress_callback: Option<ProgressCallback>,
+    ) -> Result<PathBuf> {
         tracing::info!(
             "DocGenerator::generate_docs starting for {}-{}",
             name,

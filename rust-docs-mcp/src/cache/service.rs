@@ -54,7 +54,8 @@ impl CrateCache {
         // Check if crate is downloaded but docs not generated
         if !self.storage.is_cached(name, version) {
             tracing::info!("Crate {}-{} not cached, downloading", name, version);
-            self.download_or_copy_crate(name, version, source, None).await?;
+            self.download_or_copy_crate(name, version, source, None)
+                .await?;
         } else {
             tracing::info!(
                 "Crate {}-{} already cached, skipping download",
@@ -144,7 +145,8 @@ impl CrateCache {
 
         // Check if crate is downloaded
         if !self.storage.is_cached(name, version) {
-            self.download_or_copy_crate(name, version, source, None).await?;
+            self.download_or_copy_crate(name, version, source, None)
+                .await?;
         }
 
         // Generate documentation for the specific workspace member
@@ -230,8 +232,15 @@ impl CrateCache {
     }
 
     /// Generate JSON documentation for a crate
-    pub async fn generate_docs(&self, name: &str, version: &str, progress_callback: Option<crate::cache::downloader::ProgressCallback>) -> Result<PathBuf> {
-        self.doc_generator.generate_docs(name, version, progress_callback).await
+    pub async fn generate_docs(
+        &self,
+        name: &str,
+        version: &str,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
+    ) -> Result<PathBuf> {
+        self.doc_generator
+            .generate_docs(name, version, progress_callback)
+            .await
     }
 
     /// Generate JSON documentation for a workspace member
@@ -332,7 +341,8 @@ impl CrateCache {
     ) -> Result<PathBuf> {
         // Check if crate is already downloaded
         if !self.storage.is_cached(name, version) {
-            self.download_or_copy_crate(name, version, source, None).await?;
+            self.download_or_copy_crate(name, version, source, None)
+                .await?;
         }
 
         self.storage.source_path(name, version)
@@ -819,11 +829,18 @@ impl CrateCache {
             // It's a workspace, get the members and return workspace response
             match WorkspaceHandler::get_workspace_members(&cargo_toml_path) {
                 Ok(members) => {
-                    let response = self.generate_workspace_response(&crate_name, &version, members, &source, false);
+                    let response = self.generate_workspace_response(
+                        &crate_name,
+                        &version,
+                        members,
+                        &source,
+                        false,
+                    );
                     return response.to_json();
                 }
                 Err(e) => {
-                    return CacheResponse::error(format!("Failed to get workspace members: {e}")).to_json();
+                    return CacheResponse::error(format!("Failed to get workspace members: {e}"))
+                        .to_json();
                 }
             }
         }
@@ -831,7 +848,11 @@ impl CrateCache {
         // Not a workspace - generate docs
         // Update to doc generation stage
         if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
-            tm.update_stage(tid, crate::cache::task_manager::CachingStage::GeneratingDocs).await;
+            tm.update_stage(
+                tid,
+                crate::cache::task_manager::CachingStage::GeneratingDocs,
+            )
+            .await;
             tm.update_step(tid, 1, "Running cargo rustdoc").await;
         }
 
@@ -839,7 +860,8 @@ impl CrateCache {
             Ok(_) => {
                 // Update to indexing stage
                 if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
-                    tm.update_stage(tid, crate::cache::task_manager::CachingStage::Indexing).await;
+                    tm.update_stage(tid, crate::cache::task_manager::CachingStage::Indexing)
+                        .await;
                     tm.update_step(tid, 1, "Creating search index").await;
                 }
 

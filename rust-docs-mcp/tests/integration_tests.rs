@@ -14,7 +14,8 @@ use rust_docs_mcp::cache::outputs::{
     CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
-    CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams, ListCrateVersionsParams,
+    CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams,
+    ListCrateVersionsParams,
 };
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
@@ -43,8 +44,9 @@ const CLIPPY_BRANCH: &str = "master";
 
 // Response validation helpers
 fn parse_cache_task_started(response: &str) -> Result<CacheTaskStartedOutput> {
-    serde_json::from_str(response)
-        .map_err(|e| anyhow::anyhow!("Failed to parse task started response: {e}\nResponse: {response}"))
+    serde_json::from_str(response).map_err(|e| {
+        anyhow::anyhow!("Failed to parse task started response: {e}\nResponse: {response}")
+    })
 }
 
 fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
@@ -73,8 +75,8 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
 enum TaskResult {
     Success,
     WorkspaceDetected(String), // Contains workspace info
-    BinaryOnly(String),         // Contains binary-only error
-    Failed(String),             // Contains error message
+    BinaryOnly(String),        // Contains binary-only error
+    Failed(String),            // Contains error message
     Cancelled,
 }
 
@@ -240,7 +242,10 @@ async fn test_cache_from_crates_io() -> Result<()> {
 
     // Wait for task to complete
     let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
-    assert!(matches!(result, TaskResult::Success), "Expected success, got: {result:?}");
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Expected success, got: {result:?}"
+    );
 
     // Verify it's in the cache by listing versions
     let list_params = ListCrateVersionsParams {
@@ -339,7 +344,8 @@ async fn test_cache_from_github_branch() -> Result<()> {
     let task_output = parse_cache_task_started(&response)?;
 
     // Wait for task completion - clippy is binary-only so should fail
-    let result = wait_for_task_completion(&service, &task_output.task_id, LARGE_CRATE_TEST_TIMEOUT).await?;
+    let result =
+        wait_for_task_completion(&service, &task_output.task_id, LARGE_CRATE_TEST_TIMEOUT).await?;
 
     // Clippy is a binary-only package, so we should expect a binary-only error
     assert!(
@@ -486,7 +492,10 @@ serde = {{ workspace = true }}
 
     // Verify the response mentions workspace detection
     if let TaskResult::WorkspaceDetected(msg) = result {
-        assert!(msg.contains("Workspace detected"), "Should mention workspace: {msg}");
+        assert!(
+            msg.contains("Workspace detected"),
+            "Should mention workspace: {msg}"
+        );
     }
 
     Ok(())
@@ -512,7 +521,10 @@ async fn test_cache_update() -> Result<()> {
     let response1 = service.cache_crate(Parameters(params1)).await;
     let task1 = parse_cache_task_started(&response1)?;
     let result1 = wait_for_task_completion(&service, &task1.task_id, TEST_TIMEOUT).await?;
-    assert!(matches!(result1, TaskResult::Success), "Initial cache failed: {result1:?}");
+    assert!(
+        matches!(result1, TaskResult::Success),
+        "Initial cache failed: {result1:?}"
+    );
 
     // Cache again with update flag
     let params2 = CacheCrateParams {
@@ -530,7 +542,10 @@ async fn test_cache_update() -> Result<()> {
     let response2 = service.cache_crate(Parameters(params2)).await;
     let task2 = parse_cache_task_started(&response2)?;
     let result2 = wait_for_task_completion(&service, &task2.task_id, TEST_TIMEOUT).await?;
-    assert!(matches!(result2, TaskResult::Success), "Update cache failed: {result2:?}");
+    assert!(
+        matches!(result2, TaskResult::Success),
+        "Update cache failed: {result2:?}"
+    );
 
     Ok(())
 }
@@ -579,7 +594,10 @@ async fn test_invalid_inputs() -> Result<()> {
     // Try parsing as error first, then as async task
     if response.contains("# Error") {
         // Synchronous error
-        assert!(response.contains("Error"), "Expected error in response: {response}");
+        assert!(
+            response.contains("Error"),
+            "Expected error in response: {response}"
+        );
     } else {
         // Async task
         let task = parse_cache_task_started(&response)?;
@@ -605,8 +623,10 @@ async fn test_invalid_inputs() -> Result<()> {
 
     let response = service.cache_crate(Parameters(params)).await;
     // Local path validation happens synchronously before spawning
-    assert!(response.contains("Error") || response.contains("does not exist"),
-            "Expected error for non-existent path: {response}");
+    assert!(
+        response.contains("Error") || response.contains("does not exist"),
+        "Expected error for non-existent path: {response}"
+    );
 
     Ok(())
 }
@@ -775,7 +795,10 @@ edition = "2021"
     );
 
     if let TaskResult::WorkspaceDetected(msg) = result1 {
-        assert!(msg.contains("Workspace detected"), "Should mention workspace: {msg}");
+        assert!(
+            msg.contains("Workspace detected"),
+            "Should mention workspace: {msg}"
+        );
     }
 
     // Now cache with specific members
@@ -1490,7 +1513,10 @@ async fn test_step_tracking() -> Result<()> {
         // Extract step if present
         if let Some((current, total, desc)) = extract_step_from_response(&response) {
             // Only record if different from last value
-            let last_matches = step_updates.last().map(|(c, t, _)| *c == current && *t == total).unwrap_or(false);
+            let last_matches = step_updates
+                .last()
+                .map(|(c, t, _)| *c == current && *t == total)
+                .unwrap_or(false);
             if !last_matches {
                 println!("Step update: {} of {} {:?}", current, total, desc);
                 step_updates.push((current, total, desc));
@@ -1529,10 +1555,7 @@ async fn test_step_tracking() -> Result<()> {
 
     // 3. Steps should make sense (start at 1)
     if let Some((first_step, _, _)) = step_updates.first() {
-        assert_eq!(
-            *first_step, 1,
-            "First step should be 1, got {first_step}"
-        );
+        assert_eq!(*first_step, 1, "First step should be 1, got {first_step}");
     }
 
     println!("✓ Step tracking test passed");
@@ -1544,4 +1567,3 @@ async fn test_step_tracking() -> Result<()> {
 
     Ok(())
 }
-
