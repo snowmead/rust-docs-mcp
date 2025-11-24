@@ -176,12 +176,11 @@ impl SearchIndexer {
             documents.push(doc);
 
             // Report progress every 50 items during document creation (0-70%)
-            if let Some(ref callback) = progress_callback {
-                if i % 50 == 0 || i == total_items - 1 {
+            if let Some(ref callback) = progress_callback
+                && (i % 50 == 0 || i == total_items - 1) {
                     let percent = ((i * 70) / total_items.max(1)).min(70) as u8;
                     callback(percent);
                 }
-            }
         }
 
         // Then add all documents to the writer
@@ -190,12 +189,11 @@ impl SearchIndexer {
             writer.add_document(doc.clone())?;
 
             // Report progress during writing (70-95%)
-            if let Some(ref callback) = progress_callback {
-                if i % 50 == 0 || i == documents.len() - 1 {
+            if let Some(ref callback) = progress_callback
+                && (i % 50 == 0 || i == documents.len() - 1) {
                     let percent = (70 + ((i * 25) / documents.len().max(1))).min(95) as u8;
                     callback(percent);
                 }
-            }
         }
 
         writer.commit()?;

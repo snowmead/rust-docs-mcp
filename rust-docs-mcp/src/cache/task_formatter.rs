@@ -17,22 +17,22 @@ fn format_timestamp(time: SystemTime) -> String {
 /// Format duration in seconds to human-readable string
 fn format_duration(secs: u64) -> String {
     if secs < 60 {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else if secs < 3600 {
         let mins = secs / 60;
         let remaining_secs = secs % 60;
         if remaining_secs == 0 {
-            format!("{}m", mins)
+            format!("{mins}m")
         } else {
-            format!("{}m {}s", mins, remaining_secs)
+            format!("{mins}m {remaining_secs}s")
         }
     } else {
         let hours = secs / 3600;
         let remaining_mins = (secs % 3600) / 60;
         if remaining_mins == 0 {
-            format!("{}h", hours)
+            format!("{hours}h")
         } else {
-            format!("{}h {}m", hours, remaining_mins)
+            format!("{hours}h {remaining_mins}m")
         }
     }
 }
@@ -40,7 +40,7 @@ fn format_duration(secs: u64) -> String {
 /// Format the cache_crate tool result when a task is started
 pub fn format_task_started(task: &CachingTask) -> String {
     let source_info = if let Some(details) = &task.source_details {
-        format!(" ({})", details)
+        format!(" ({details})")
     } else {
         String::new()
     };
@@ -70,7 +70,7 @@ The caching operation is running in the background.
 /// Format a single task with full details
 pub fn format_single_task(task: &CachingTask) -> String {
     let source_info = if let Some(details) = &task.source_details {
-        format!(" ({})", details)
+        format!(" ({details})")
     } else {
         String::new()
     };
@@ -83,9 +83,9 @@ pub fn format_single_task(task: &CachingTask) -> String {
                     let desc = task
                         .step_description
                         .as_ref()
-                        .map(|d| format!(": {}", d))
+                        .map(|d| format!(": {d}"))
                         .unwrap_or_default();
-                    format!("\n**Step**: {} of {}{}", step, total, desc)
+                    format!("\n**Step**: {step} of {total}{desc}")
                 } else {
                     String::new()
                 };
@@ -159,7 +159,7 @@ The crate has been successfully cached and documentation is available. You can n
             let error_msg = task
                 .error
                 .as_ref()
-                .map(|e| format!("```\n{}\n```", e))
+                .map(|e| format!("```\n{e}\n```"))
                 .unwrap_or_else(|| "Unknown error".to_string());
 
             format!(
@@ -271,7 +271,7 @@ pub fn format_task_list(tasks: Vec<CachingTask>) -> String {
     // Build summary
     let mut output = String::from("# Caching Operations\n\n");
     output.push_str("## Summary\n");
-    output.push_str(&format!("- **Total Operations**: {}\n", total));
+    output.push_str(&format!("- **Total Operations**: {total}\n"));
     if !in_progress.is_empty() {
         output.push_str(&format!("- **In Progress**: {}\n", in_progress.len()));
     }
@@ -353,7 +353,7 @@ pub fn format_task_list(tasks: Vec<CachingTask>) -> String {
 /// Format a concise task summary for list view
 fn format_task_summary(task: &CachingTask) -> String {
     let source_info = if let Some(details) = &task.source_details {
-        format!(" ({})", details)
+        format!(" ({details})")
     } else {
         String::new()
     };
@@ -378,9 +378,9 @@ fn format_task_summary(task: &CachingTask) -> String {
                     let desc = task
                         .step_description
                         .as_ref()
-                        .map(|d| format!(": {}", d))
+                        .map(|d| format!(": {d}"))
                         .unwrap_or_default();
-                    output.push_str(&format!("**Step**: {} of {}{}  \n", step, total, desc));
+                    output.push_str(&format!("**Step**: {step} of {total}{desc}  \n"));
                 }
             }
             output.push_str(&format!(
@@ -435,7 +435,7 @@ fn format_task_summary(task: &CachingTask) -> String {
                 } else {
                     error.clone()
                 };
-                output.push_str(&format!("**Error**: {}\n\n", error_preview));
+                output.push_str(&format!("**Error**: {error_preview}\n\n"));
             }
             output.push_str("**Actions**:\n");
             output.push_str(&format!(

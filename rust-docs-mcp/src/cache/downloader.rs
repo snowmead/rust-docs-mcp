@@ -215,12 +215,11 @@ impl CrateDownloader {
                 .context("Failed to write to temporary file")?;
 
             // Report progress if callback provided and total size known
-            if let Some(ref callback) = progress_callback {
-                if total_bytes > 0 {
+            if let Some(ref callback) = progress_callback
+                && total_bytes > 0 {
                     let percent = ((downloaded_bytes * 100) / total_bytes).min(100) as u8;
                     callback(percent);
                 }
-            }
         }
 
         // Extract the crate

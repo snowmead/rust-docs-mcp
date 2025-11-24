@@ -515,7 +515,7 @@ impl CacheTools {
         // Expand path (handles ~ and relative paths)
         let expanded_path = match shellexpand::full(path) {
             Ok(p) => p,
-            Err(e) => return Err(format!("Failed to expand path: {}", e)),
+            Err(e) => return Err(format!("Failed to expand path: {e}")),
         };
         let local_path = Path::new(expanded_path.as_ref());
 
@@ -555,8 +555,7 @@ impl CacheTools {
                             // Validate provided version matches
                             if provided != actual_version {
                                 return Err(format!(
-                                    "Version mismatch: provided '{}' does not match actual '{}' in Cargo.toml",
-                                    provided, actual_version
+                                    "Version mismatch: provided '{provided}' does not match actual '{actual_version}' in Cargo.toml"
                                 ));
                             }
                             Ok((actual_version, false))
@@ -565,10 +564,10 @@ impl CacheTools {
                             Ok((actual_version, true))
                         }
                     }
-                    Err(e) => Err(format!("Failed to read version from Cargo.toml: {}", e)),
+                    Err(e) => Err(format!("Failed to read version from Cargo.toml: {e}")),
                 }
             }
-            Err(e) => Err(format!("Failed to check workspace status: {}", e)),
+            Err(e) => Err(format!("Failed to check workspace status: {e}")),
         }
     }
 
@@ -616,7 +615,7 @@ impl CacheTools {
                 } else {
                     "tag"
                 };
-                let details = format!("{}, {}: {}", github_url, ref_type, version);
+                let details = format!("{github_url}, {ref_type}: {version}");
                 (params.crate_name.clone(), version, Some(details))
             }
             "local" => {
@@ -632,13 +631,13 @@ impl CacheTools {
                     match Self::resolve_local_version(&path, params.version.as_deref()) {
                         Ok(result) => result,
                         Err(error_msg) => {
-                            return format!("# Error\n\n{}", error_msg);
+                            return format!("# Error\n\n{error_msg}");
                         }
                     };
 
                 // Add auto-detection note to source details
                 let details = if auto_detected {
-                    format!("{} (version auto-detected from Cargo.toml)", path)
+                    format!("{path} (version auto-detected from Cargo.toml)")
                 } else {
                     path
                 };
@@ -799,7 +798,7 @@ impl CacheTools {
 
             return match self.task_manager.cancel_task(task_id).await {
                 Some(task) => task_formatter::format_cancel_result(&task),
-                None => format!("# Error\n\nTask `{}` not found.", task_id),
+                None => format!("# Error\n\nTask `{task_id}` not found."),
             };
         }
 
@@ -813,10 +812,9 @@ impl CacheTools {
                         task_formatter::format_clear_result(vec![task])
                     }
                     Some(_) => format!(
-                        "# Error\n\nCannot clear task `{}` because it is still in progress. Cancel it first or wait for completion.",
-                        task_id
+                        "# Error\n\nCannot clear task `{task_id}` because it is still in progress. Cancel it first or wait for completion."
                     ),
-                    None => format!("# Error\n\nTask `{}` not found.", task_id),
+                    None => format!("# Error\n\nTask `{task_id}` not found."),
                 }
             } else {
                 // Clear all terminal tasks
@@ -830,7 +828,7 @@ impl CacheTools {
             // Get specific task
             match self.task_manager.get_task(task_id).await {
                 Some(task) => task_formatter::format_single_task(&task),
-                None => format!("# Error\n\nTask `{}` not found.", task_id),
+                None => format!("# Error\n\nTask `{task_id}` not found."),
             }
         } else {
             // List all tasks with optional filter
