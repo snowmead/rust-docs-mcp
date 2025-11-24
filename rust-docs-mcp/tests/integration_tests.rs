@@ -11,7 +11,7 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams,
@@ -29,7 +29,6 @@ use rust_docs_mcp::docs::tools::{
 };
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
-use std::collections::HashMap;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -49,20 +48,6 @@ fn parse_cache_task_started(response: &str) -> Result<CacheTaskStartedOutput> {
     })
 }
 
-fn parse_cache_response(response: &str) -> Result<CacheCrateOutput> {
-    serde_json::from_str(response)
-        .map_err(|e| anyhow::anyhow!("Failed to parse cache response: {e}\nResponse: {response}"))
-}
-
-fn is_binary_only_response(response: &str) -> bool {
-    // Binary-only packages will return an error with this message
-    if let Ok(output) = parse_cache_response(response) {
-        matches!(output, CacheCrateOutput::Error { error } if error.contains("binary-only") || error.contains("no library"))
-    } else {
-        false
-    }
-}
-
 /// Helper to create a test service with temporary cache
 fn create_test_service() -> Result<(RustDocsService, TempDir)> {
     let temp_dir = TempDir::new()?;
@@ -72,6 +57,7 @@ fn create_test_service() -> Result<(RustDocsService, TempDir)> {
 
 /// Result of waiting for a caching task
 #[derive(Debug)]
+#[allow(dead_code)]
 enum TaskResult {
     Success,
     WorkspaceDetected(String), // Contains workspace info
@@ -1518,7 +1504,7 @@ async fn test_step_tracking() -> Result<()> {
                 .map(|(c, t, _)| *c == current && *t == total)
                 .unwrap_or(false);
             if !last_matches {
-                println!("Step update: {} of {} {:?}", current, total, desc);
+                println!("Step update: {current} of {total} {desc:?}");
                 step_updates.push((current, total, desc));
             }
         }
@@ -1535,7 +1521,7 @@ async fn test_step_tracking() -> Result<()> {
         tokio::time::sleep(poll_interval).await;
     }
 
-    println!("Step updates observed: {:?}", step_updates);
+    println!("Step updates observed: {step_updates:?}");
 
     // Verify step tracking requirements:
 
