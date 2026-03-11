@@ -56,6 +56,7 @@
             [
               openssl
               pkg-config
+              gcc.cc.lib
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
               darwin.apple_sdk.frameworks.Security
@@ -64,6 +65,7 @@
 
           nativeBuildInputs = with pkgs; [
             pkg-config
+            autoPatchelfHook
           ];
         };
 
