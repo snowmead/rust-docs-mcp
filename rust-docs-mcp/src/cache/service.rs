@@ -58,6 +58,13 @@ impl CrateCache {
     }
 
     /// Ensure a crate's documentation is available, downloading and generating if necessary
+    /// Resolve a potentially partial crate version to an exact version via crates.io
+    pub async fn resolve_crates_io_version(&self, name: &str, version: &str) -> Result<String> {
+        self.downloader
+            .resolve_crates_io_version(name, version)
+            .await
+    }
+
     pub async fn ensure_crate_docs(
         &self,
         name: &str,
@@ -65,6 +72,20 @@ impl CrateCache {
         source: Option<&str>,
     ) -> Result<Arc<rustdoc_types::Crate>> {
         tracing::info!("ensure_crate_docs called for {}-{}", name, version);
+
+        // Resolve partial versions (e.g. "9" → "9.3.1") for crates.io sources
+        let version = if source.is_none() {
+            match self.resolve_crates_io_version(name, version).await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::warn!("Version resolution failed, using as-is: {e}");
+                    version.to_string()
+                }
+            }
+        } else {
+            version.to_string()
+        };
+        let version = version.as_str();
 
         // Check if docs already exist
         if self.storage.has_docs(name, version, None) {

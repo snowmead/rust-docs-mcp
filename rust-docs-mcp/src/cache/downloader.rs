@@ -85,6 +85,76 @@ impl CrateDownloader {
         )
     }
 
+    /// Resolve a potentially partial version (e.g. "9" or "9.3") to the latest
+    /// matching exact version on crates.io. If the version already contains two
+    /// dots (looks like full semver), it is returned as-is.
+    pub async fn resolve_crates_io_version(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<String> {
+        // If it already looks like a full semver version (has two dots), return as-is
+        if version.matches('.').count() >= 2 {
+            return Ok(version.to_string());
+        }
+
+        let url = format!("https://crates.io/api/v1/crates/{name}");
+        tracing::debug!("Resolving version for {name} prefix={version} via {url}");
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to query crates.io for {name}"))?;
+
+        if !response.status().is_success() {
+            bail!(
+                "Failed to look up crate {name} on crates.io: HTTP {}",
+                response.status()
+            );
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse crates.io response")?;
+
+        let versions = body["versions"]
+            .as_array()
+            .context("Unexpected crates.io response format")?;
+
+        // Find the latest non-yanked version that starts with the given prefix
+        let prefix_dot = format!("{version}.");
+        let matching_version = versions
+            .iter()
+            .filter_map(|v| {
+                let num = v["num"].as_str()?;
+                let yanked = v["yanked"].as_bool().unwrap_or(false);
+                if yanked {
+                    return None;
+                }
+                // Match if version equals the prefix exactly or starts with "prefix."
+                if num == version || num.starts_with(&prefix_dot) {
+                    Some(num.to_string())
+                } else {
+                    None
+                }
+            })
+            .next(); // crates.io returns versions newest-first
+
+        match matching_version {
+            Some(resolved) => {
+                tracing::info!("Resolved {name} version {version} → {resolved}");
+                Ok(resolved)
+            }
+            None => bail!(
+                "No matching version found for {name} with prefix '{version}'. \
+                 Try specifying an exact version (e.g. '9.3.1')."
+            ),
+        }
+    }
+
     /// Download or copy a crate from the specified source
     pub async fn download_or_copy_crate(
         &self,
