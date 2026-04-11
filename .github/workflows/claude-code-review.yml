@@ -18,8 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
       id-token: write
 
     steps:
@@ -35,7 +35,15 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           plugin_marketplaces: 'https://github.com/anthropics/claude-code.git'
           plugins: 'code-review@claude-code-plugins'
-          prompt: '/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+          # The plugin command only posts comments when invoked with
+          # --comment. Step 7 of the command at
+          # https://github.com/anthropics/claude-code/blob/main/plugins/code-review/commands/code-review.md —
+          # "If --comment argument was NOT provided, stop here. Do not
+          # post any GitHub comments." Do NOT add a claude_args
+          # --allowedTools block here — that flag REPLACES the default
+          # tool allowlist and breaks the plugin's subagent launches
+          # (Task), file reads, and internal gh commands.
+          prompt: '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
 
