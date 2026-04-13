@@ -69,7 +69,7 @@ impl DepsTools {
                         match process_cargo_metadata(
                             &metadata,
                             &params.crate_name,
-                            &params.version,
+                            &version,
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
