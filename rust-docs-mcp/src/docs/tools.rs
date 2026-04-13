@@ -150,10 +150,14 @@ impl DocsTools {
         params: ListItemsParams,
     ) -> Result<ListCrateItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
+        let version = cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+            .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await
@@ -202,10 +206,14 @@ impl DocsTools {
         params: SearchItemsParams,
     ) -> Result<SearchItemsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
+        let version = cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+            .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await
@@ -302,10 +310,14 @@ impl DocsTools {
         params: SearchItemsPreviewParams,
     ) -> Result<SearchItemsPreviewOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
+        let version = cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+            .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await
@@ -379,10 +391,21 @@ impl DocsTools {
 
     pub async fn get_item_details(&self, params: GetItemDetailsParams) -> GetItemDetailsOutput {
         let cache = self.cache.write().await;
+        let version = match cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return GetItemDetailsOutput::Error {
+                    error: format!("Failed to resolve version: {e}"),
+                };
+            }
+        };
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await
@@ -467,10 +490,14 @@ impl DocsTools {
         params: GetItemDocsParams,
     ) -> Result<GetItemDocsOutput, DocsErrorOutput> {
         let cache = self.cache.write().await;
+        let version = cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+            .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await
@@ -500,7 +527,18 @@ impl DocsTools {
 
     pub async fn get_item_source(&self, params: GetItemSourceParams) -> GetItemSourceOutput {
         let cache = self.cache.write().await;
-        let source_base_path = match cache.get_source_path(&params.crate_name, &params.version) {
+        let version = match cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return GetItemSourceOutput::Error {
+                    error: format!("Failed to resolve version: {e}"),
+                };
+            }
+        };
+        let source_base_path = match cache.get_source_path(&params.crate_name, &version) {
             Ok(path) => path,
             Err(e) => {
                 return GetItemSourceOutput::Error {
@@ -512,7 +550,7 @@ impl DocsTools {
         match cache
             .ensure_crate_or_member_docs(
                 &params.crate_name,
-                &params.version,
+                &version,
                 params.member.as_deref(),
             )
             .await

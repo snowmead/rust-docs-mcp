@@ -144,11 +144,26 @@ impl SearchTools {
         &self,
         params: SearchItemsFuzzyParams,
     ) -> Result<SearchItemsFuzzyOutput, SearchErrorOutput> {
+        // Resolve version up front so all operations use the same resolved version
+        let resolved_version = {
+            let cache = self.cache.read().await;
+            cache
+                .resolve_version(&params.crate_name, &params.version)
+                .await
+                .map_err(|e| SearchErrorOutput::new(format!("Failed to resolve version: {e}")))?
+        };
+
         let query = params.query.clone();
         let fuzzy_enabled = params.fuzzy_enabled.unwrap_or(true);
         let crate_name = params.crate_name.clone();
-        let version = params.version.clone();
         let member = params.member.clone();
+
+        // Rebuild params with the resolved version for all downstream operations
+        let params = SearchItemsFuzzyParams {
+            version: resolved_version.clone(),
+            ..params
+        };
+
         let result = async {
             // First check with read lock if docs already exist
             {
@@ -249,7 +264,7 @@ impl SearchTools {
                     total_results: total,
                     fuzzy_enabled,
                     crate_name,
-                    version,
+                    version: resolved_version,
                     member,
                 })
             }

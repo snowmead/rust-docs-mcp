@@ -64,6 +64,30 @@ impl CrateCache {
             .await
     }
 
+    /// Resolve a partial version string if needed, with guards to skip resolution
+    /// for already-cached crates or versions that already look like full semver.
+    ///
+    /// This should be called by tool methods before passing the version to
+    /// `ensure_crate_or_member_docs` and any other version-dependent operations
+    /// (e.g. `get_source_path`, `load_dependencies`, search index ops).
+    pub async fn resolve_version(&self, name: &str, version: &str) -> Result<String> {
+        if !self.storage.is_cached(name, version) && version.matches('.').count() < 2 {
+            match self.resolve_crates_io_version(name, version).await {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    if e.to_string().contains("Available versions") {
+                        Err(e)
+                    } else {
+                        tracing::warn!("Version resolution failed, using as-is: {e}");
+                        Ok(version.to_string())
+                    }
+                }
+            }
+        } else {
+            Ok(version.to_string())
+        }
+    }
+
     /// Ensure a crate's documentation is available, downloading and generating if necessary
     pub async fn ensure_crate_docs(
         &self,
@@ -213,7 +237,11 @@ impl CrateCache {
         self.load_docs(name, version, Some(member_path)).await
     }
 
-    /// Ensure documentation is available for a crate or workspace member
+    /// Ensure documentation is available for a crate or workspace member.
+    ///
+    /// **Important**: Callers should resolve partial versions via [`resolve_version`]
+    /// *before* calling this method, and use the resolved version for all subsequent
+    /// operations (e.g. `get_source_path`, `load_dependencies`, search index ops).
     pub async fn ensure_crate_or_member_docs(
         &self,
         name: &str,
