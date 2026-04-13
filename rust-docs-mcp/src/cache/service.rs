@@ -78,6 +78,12 @@ impl CrateCache {
             match self.resolve_crates_io_version(name, version).await {
                 Ok(v) => v,
                 Err(e) => {
+                    // If the error contains available versions, propagate it
+                    // so agents can see the version list and choose
+                    let err_msg = e.to_string();
+                    if err_msg.contains("Available versions") {
+                        return Err(e);
+                    }
                     tracing::warn!("Version resolution failed, using as-is: {e}");
                     version.to_string()
                 }
