@@ -29,14 +29,17 @@
         pkgs,
         ...
       }: let
-        # Use rust-toolchain.toml for the exact nightly version
-        rustToolchain = inputs'.fenix.packages.fromToolchainFile {
-          file = ./rust-toolchain.toml;
-          sha256 = "";
-        };
-
-        # Nightly toolchain for runtime (used by the binary to fetch docs)
-        rustNightly = rustToolchain;
+        # Use fenix's rolling latest nightly so the flake doesn't break every
+        # time the preferred dated nightly in rust-toolchain.toml changes.
+        # The runtime's toolchain probe (resolve_toolchain) validates
+        # compatibility at startup anyway.
+        rustNightly = inputs'.fenix.packages.latest.withComponents [
+          "cargo"
+          "clippy"
+          "rustc"
+          "rustfmt"
+          "rust-src"
+        ];
 
         craneLib = inputs.crane.mkLib pkgs;
 
