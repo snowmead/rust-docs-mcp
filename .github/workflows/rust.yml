@@ -73,7 +73,7 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Run unit tests
-      run: cargo test --workspace --lib --bins --verbose
+      run: cargo test --workspace --lib --bins --verbose -- --include-ignored
     
     - name: Run doc tests
       run: cargo test --workspace --doc --verbose
@@ -101,4 +101,4 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Run integration tests
-      run: cargo test --workspace --test integration_tests --verbose
+      run: cargo test --workspace --test integration_tests --verbose -- --include-ignored

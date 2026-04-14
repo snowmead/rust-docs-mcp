@@ -859,6 +859,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_problematic_crate_download() {
         // Initialize logging for the test
         let _ = tracing_subscriber::fmt()
@@ -1121,6 +1122,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_fetch_crates_io_versions_returns_semver_sorted() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter("rust_docs_mcp=debug")
@@ -1166,6 +1168,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_resolve_version_not_found_includes_available_versions() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter("rust_docs_mcp=debug")
@@ -1191,6 +1194,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_resolve_version_partial_prefix_works() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter("rust_docs_mcp=debug")
@@ -1217,6 +1221,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_download_nonexistent_version_includes_available_versions() {
         let _ = tracing_subscriber::fmt()
             .with_env_filter("rust_docs_mcp=debug")

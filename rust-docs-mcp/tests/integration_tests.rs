@@ -203,6 +203,7 @@ async fn get_test_item_id(service: &RustDocsService) -> Result<i32> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_crates_io() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -253,6 +254,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_github() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -300,6 +302,7 @@ async fn test_cache_from_github() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_github_branch() -> Result<()> {
     // Initialize tracing for this test
     let _ = tracing_subscriber::fmt()
@@ -343,6 +346,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_local_path() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -488,6 +492,7 @@ serde = {{ workspace = true }}
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_update() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -618,6 +623,7 @@ async fn test_invalid_inputs() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_concurrent_caching() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     let service = std::sync::Arc::new(service);
@@ -815,6 +821,7 @@ edition = "2021"
 // ===== DOCUMENTATION TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_list_crate_items() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -858,6 +865,7 @@ async fn test_list_crate_items() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_preview() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -914,6 +922,7 @@ async fn test_search_items_preview() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_full() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -948,6 +957,7 @@ async fn test_search_items_full() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_item_details() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -984,6 +994,7 @@ async fn test_get_item_details() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_item_docs_and_source() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1043,6 +1054,7 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 // ===== SEARCH TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_fuzzy() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1095,6 +1107,7 @@ async fn test_search_items_fuzzy() -> Result<()> {
 // ===== ANALYSIS TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_structure() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1164,6 +1177,7 @@ async fn test_structure() -> Result<()> {
 // ===== DEPENDENCY TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_dependencies() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1231,6 +1245,7 @@ async fn test_get_dependencies() -> Result<()> {
 // ===== METADATA TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_crates_metadata() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1271,6 +1286,7 @@ async fn test_get_crates_metadata() -> Result<()> {
 // ===== EDGE CASES TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_invalid_item_ids() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1322,6 +1338,7 @@ async fn test_invalid_item_ids() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_empty_search_results() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1453,6 +1470,7 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 // ===== PROGRESS TRACKING TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_step_tracking() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 

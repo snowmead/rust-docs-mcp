@@ -1,0 +1,29 @@
+name: Nix
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  check:
+    name: nix flake check
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: DeterminateSystems/nix-installer-action@main
+
+    - uses: DeterminateSystems/magic-nix-cache-action@main
+
+    - name: Check flake
+      run: nix flake check --all-systems
+
+    - name: Check dev shell
+      run: nix develop --command rustc --version

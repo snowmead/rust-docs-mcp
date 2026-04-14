@@ -127,6 +127,12 @@
               inherit cargoArtifacts;
               partitions = 1;
               partitionType = "count";
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              # autoPatchelfHook only runs during fixupPhase, but nextest
+              # executes test binaries during checkPhase — set LD_LIBRARY_PATH
+              # so they can find libssl and other shared libs.
+              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [pkgs.openssl];
             });
         };
       };
