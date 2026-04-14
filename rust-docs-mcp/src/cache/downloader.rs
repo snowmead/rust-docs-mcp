@@ -141,7 +141,7 @@ impl CrateDownloader {
         }
 
         let display: Vec<&str> = versions.iter().take(20).map(|s| s.as_str()).collect();
-        let mut result = format!("Available versions (sorted by semver, newest first):\n");
+        let mut result = "Available versions (sorted by semver, newest first):\n".to_string();
         for v in &display {
             result.push_str(&format!("  - {v}\n"));
         }
@@ -325,7 +325,7 @@ impl CrateDownloader {
                     "Version '{version}' not found for crate '{name}' on crates.io (HTTP {status}).\n\n{versions_msg}"
                 );
             }
-            bail!("Failed to download {}-{}: HTTP {}", name, version, status);
+            bail!("Failed to download {name}-{version}: HTTP {status}");
         }
 
         // Save to a temporary file first - make path unique to avoid concurrent conflicts
@@ -1203,7 +1203,7 @@ mod tests {
         // "1" should resolve to latest 1.x.x for serde
         let result = downloader.resolve_crates_io_version("serde", "1").await;
 
-        assert!(result.is_ok(), "Should resolve prefix '1': {:?}", result);
+        assert!(result.is_ok(), "Should resolve prefix '1': {result:?}");
         let resolved = result.unwrap();
         assert!(
             resolved.starts_with("1."),

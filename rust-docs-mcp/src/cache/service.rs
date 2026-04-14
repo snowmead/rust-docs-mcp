@@ -867,8 +867,7 @@ impl CrateCache {
                 Ok(v) => v,
                 Err(e) => {
                     return CacheResponse::error(format!(
-                        "Version resolution failed for '{}': {}",
-                        crate_name, e
+                        "Version resolution failed for '{crate_name}': {e}",
                     ))
                     .to_json();
                 }
