@@ -248,20 +248,7 @@ impl CrateCache {
         version: &str,
         member: Option<&str>,
     ) -> Result<Arc<rustdoc_types::Crate>> {
-        // Resolve partial versions (e.g. "9" → "9.3.1") for crates.io sources
-        // before branching into member/non-member paths so both benefit
-        let version = match self.resolve_crates_io_version(name, version).await {
-            Ok(v) => v,
-            Err(e) => {
-                // If the error contains available versions, propagate it
-                // so agents can see the version list and choose
-                if e.to_string().contains("Available versions") {
-                    return Err(e);
-                }
-                tracing::warn!("Version resolution failed, using as-is: {e}");
-                version.to_string()
-            }
-        };
+        let version = self.resolve_version(name, version).await?;
         let version = version.as_str();
 
         // If member is specified, use workspace member logic
