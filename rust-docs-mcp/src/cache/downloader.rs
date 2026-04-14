@@ -1088,6 +1088,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_format_available_versions_empty() {
         let versions: Vec<String> = vec![];
         let result = CrateDownloader::format_available_versions(&versions);
