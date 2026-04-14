@@ -155,11 +155,7 @@ impl DocsTools {
             .await
             .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {
@@ -211,11 +207,7 @@ impl DocsTools {
             .await
             .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {
@@ -315,11 +307,7 @@ impl DocsTools {
             .await
             .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {
@@ -403,11 +391,7 @@ impl DocsTools {
             }
         };
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {
@@ -495,11 +479,7 @@ impl DocsTools {
             .await
             .map_err(|e| DocsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {
@@ -548,11 +528,7 @@ impl DocsTools {
         };
 
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(crate_data) => {

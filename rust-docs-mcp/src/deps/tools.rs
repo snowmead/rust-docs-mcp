@@ -51,19 +51,12 @@ impl DepsTools {
 
         // First ensure the crate is cached
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(_) => {
                 // Load the dependency metadata
-                match cache
-                    .load_dependencies(&params.crate_name, &version)
-                    .await
-                {
+                match cache.load_dependencies(&params.crate_name, &version).await {
                     Ok(metadata) => {
                         // Process the metadata to extract dependency information
                         match process_cargo_metadata(
