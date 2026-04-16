@@ -5,7 +5,7 @@
 //! - GitHub
 //! - Local paths
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
@@ -1394,13 +1394,91 @@ async fn test_empty_search_results() -> Result<()> {
     Ok(())
 }
 
+// ===== FEATURE FALLBACK TESTS =====
+
+/// Tests the feature fallback strategy (--all-features → default → --no-default-features)
+/// using a local crate that intentionally fails to compile with --all-features.
+/// This test requires no network access and works on all platforms.
+#[tokio::test]
+async fn test_feature_fallback_with_broken_feature() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rust_docs_mcp=debug")
+        .try_init();
+
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Create a local crate whose `broken` feature triggers a compile_error.
+    // --all-features will fail; default features (which exclude `broken`) will succeed.
+    let crate_dir = TempDir::new()?;
+    std::fs::write(
+        crate_dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "feature-fallback-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+broken = []
+"#,
+    )?;
+    let src_dir = crate_dir.path().join("src");
+    std::fs::create_dir(&src_dir)?;
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        r#"//! Feature fallback fixture crate.
+//! The `broken` feature intentionally fails to compile to exercise the
+//! feature fallback strategy in rustdoc generation.
+
+#[cfg(feature = "broken")]
+compile_error!("The `broken` feature is intentionally uncompilable (fallback test fixture)");
+
+/// A function that always works.
+pub fn always_works() -> &'static str {
+    "ok"
+}
+"#,
+    )?;
+
+    let params = CacheCrateParams {
+        crate_name: "feature-fallback-fixture".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(crate_dir.path().to_str().unwrap().to_string()),
+        members: None,
+        update: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task.task_id, TEST_TIMEOUT).await?;
+
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Feature fallback should have succeeded by skipping the `broken` feature: {result:?}"
+    );
+
+    // Verify the crate is actually queryable
+    let versions_response = service
+        .list_crate_versions(Parameters(ListCrateVersionsParams {
+            crate_name: "feature-fallback-fixture".to_string(),
+        }))
+        .await;
+    assert!(
+        versions_response.contains("0.1.0"),
+        "Cached version not found: {versions_response}"
+    );
+
+    Ok(())
+}
+
 // ===== PLATFORM-SPECIFIC COMPILATION TESTS =====
 
 #[tokio::test]
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "Test designed for macOS platform-specific compilation issues"
-)]
+#[cfg(target_os = "macos")]
+#[ignore = "requires network access"]
 async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     // NOTE: This test depends on external resources and may fail due to:
     // - Network connectivity issues
