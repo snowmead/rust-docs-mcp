@@ -298,19 +298,26 @@ impl FeatureStrategy {
             }
         }
     }
+}
 
-    /// Get a description of this strategy for logging
-    fn description(&self) -> String {
+impl std::fmt::Display for FeatureStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AllFeatures => "all features enabled".to_string(),
-            Self::DefaultFeatures => "default features only".to_string(),
-            Self::NoDefaultFeatures => "no default features".to_string(),
+            Self::AllFeatures => f.write_str("all features enabled"),
+            Self::DefaultFeatures => f.write_str("default features only"),
+            Self::NoDefaultFeatures => f.write_str("no default features"),
+            Self::Specific(features) if features.is_empty() => {
+                f.write_str("specific features (none)")
+            }
             Self::Specific(features) => {
-                if features.is_empty() {
-                    "specific features (none)".to_string()
-                } else {
-                    format!("specific features: {}", features.join(", "))
+                f.write_str("specific features: ")?;
+                for (i, feat) in features.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    f.write_str(feat)?;
                 }
+                Ok(())
             }
         }
     }
@@ -465,10 +472,7 @@ pub async fn run_cargo_rustdoc_json(
     let mut failed_attempts = Vec::new();
 
     for (i, strategy) in strategies.iter().enumerate() {
-        tracing::debug!(
-            "Attempting documentation generation with {}",
-            strategy.description()
-        );
+        tracing::debug!("Attempting documentation generation with {strategy}");
 
         // Build args with current feature strategy
         let feature_args = strategy.args();
@@ -530,57 +534,36 @@ pub async fn run_cargo_rustdoc_json(
                     // Check if this is a compilation error
                     if is_compilation_error(&stderr_with_lib) && i < strategies.len() - 1 {
                         tracing::warn!(
-                            "Compilation failed with {}, will try next strategy",
-                            strategy.description()
+                            "Compilation failed with {strategy}, will try next strategy"
                         );
                         failed_attempts.push(FailedAttempt::new(
-                            strategy.description().to_string(),
+                            strategy.to_string(),
                             stderr_with_lib.to_string(),
                         ));
                         continue; // Try next strategy
                     }
 
-                    bail!(
-                        "Failed to generate documentation with {}: {}",
-                        strategy.description(),
-                        stderr_with_lib
-                    );
+                    bail!("Failed to generate documentation with {strategy}: {stderr_with_lib}");
                 }
 
                 // Success with --lib
-                tracing::info!(
-                    "Successfully generated documentation with {}",
-                    strategy.description()
-                );
+                tracing::info!("Successfully generated documentation with {strategy}");
                 return Ok(());
             }
 
             // Check if this is a compilation error that we should retry
             if is_compilation_error(&stderr) && i < strategies.len() - 1 {
-                tracing::warn!(
-                    "Compilation failed with {}, will try next strategy",
-                    strategy.description()
-                );
-                failed_attempts.push(FailedAttempt::new(
-                    strategy.description().to_string(),
-                    stderr.to_string(),
-                ));
+                tracing::warn!("Compilation failed with {strategy}, will try next strategy");
+                failed_attempts.push(FailedAttempt::new(strategy.to_string(), stderr.to_string()));
                 continue; // Try next strategy
             }
 
             // Other errors or last strategy failed
-            bail!(
-                "Failed to generate documentation with {}: {}",
-                strategy.description(),
-                stderr
-            );
+            bail!("Failed to generate documentation with {strategy}: {stderr}");
         }
 
         // Success
-        tracing::info!(
-            "Successfully generated documentation with {}",
-            strategy.description()
-        );
+        tracing::info!("Successfully generated documentation with {strategy}");
         return Ok(());
     }
 
@@ -665,22 +648,26 @@ mod tests {
     }
 
     #[test]
-    fn test_feature_strategy_description() {
+    fn test_feature_strategy_display() {
         assert_eq!(
-            FeatureStrategy::AllFeatures.description(),
+            FeatureStrategy::AllFeatures.to_string(),
             "all features enabled"
         );
         assert_eq!(
-            FeatureStrategy::DefaultFeatures.description(),
+            FeatureStrategy::DefaultFeatures.to_string(),
             "default features only"
         );
         assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.description(),
+            FeatureStrategy::NoDefaultFeatures.to_string(),
             "no default features"
         );
         assert_eq!(
-            FeatureStrategy::Specific(vec!["axum".to_string(), "ssr".to_string()]).description(),
+            FeatureStrategy::Specific(vec!["axum".to_string(), "ssr".to_string()]).to_string(),
             "specific features: axum, ssr"
+        );
+        assert_eq!(
+            FeatureStrategy::Specific(vec![]).to_string(),
+            "specific features (none)"
         );
     }
 
