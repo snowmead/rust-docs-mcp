@@ -403,22 +403,6 @@ async fn execute_rustdoc(
 ///   in parallel, each must use a unique target directory to prevent cargo from
 ///   conflicting with itself. See [`DocGenerator::generate_workspace_member_docs`](crate::cache::docgen::DocGenerator::generate_workspace_member_docs)
 ///   for the implementation pattern.
-fn build_feature_strategies(features: Option<Vec<String>>) -> Vec<FeatureStrategy> {
-    if let Some(feats) = features {
-        vec![
-            FeatureStrategy::Specific(feats),
-            FeatureStrategy::DefaultFeatures,
-            FeatureStrategy::NoDefaultFeatures,
-        ]
-    } else {
-        vec![
-            FeatureStrategy::AllFeatures,
-            FeatureStrategy::DefaultFeatures,
-            FeatureStrategy::NoDefaultFeatures,
-        ]
-    }
-}
-
 pub async fn run_cargo_rustdoc_json(
     source_path: &Path,
     package: Option<&str>,
@@ -464,10 +448,18 @@ pub async fn run_cargo_rustdoc_json(
         base_args.push(pkg.to_string());
     }
 
-    // Try different feature strategies in order.
-    // When specific features are requested, use them first instead of --all-features.
-    // This allows crates with mutually exclusive features to be cached successfully.
-    let strategies = build_feature_strategies(features);
+    // Try different feature strategies in order. When specific features are
+    // requested, prepend them so the user-supplied set is tried first; the
+    // fallback chain (AllFeatures -> DefaultFeatures -> NoDefaultFeatures)
+    // still runs afterward if compilation fails.
+    let mut strategies = vec![
+        FeatureStrategy::AllFeatures,
+        FeatureStrategy::DefaultFeatures,
+        FeatureStrategy::NoDefaultFeatures,
+    ];
+    if let Some(feats) = features {
+        strategies.insert(0, FeatureStrategy::Specific(feats));
+    }
 
     let mut failed_attempts = Vec::new();
 
@@ -669,38 +661,6 @@ mod tests {
             FeatureStrategy::Specific(vec![]).to_string(),
             "specific features (none)"
         );
-    }
-
-    #[test]
-    fn test_build_feature_strategies_with_none() {
-        let strategies = build_feature_strategies(None);
-        assert_eq!(strategies.len(), 3);
-        assert!(matches!(strategies[0], FeatureStrategy::AllFeatures));
-        assert!(matches!(strategies[1], FeatureStrategy::DefaultFeatures));
-        assert!(matches!(strategies[2], FeatureStrategy::NoDefaultFeatures));
-    }
-
-    #[test]
-    fn test_build_feature_strategies_with_specific_features() {
-        let features = Some(vec!["axum".to_string(), "ssr".to_string()]);
-        let strategies = build_feature_strategies(features);
-        assert_eq!(strategies.len(), 3);
-        assert!(matches!(strategies[0], FeatureStrategy::Specific(_)));
-        assert!(matches!(strategies[1], FeatureStrategy::DefaultFeatures));
-        assert!(matches!(strategies[2], FeatureStrategy::NoDefaultFeatures));
-        if let FeatureStrategy::Specific(feats) = &strategies[0] {
-            assert_eq!(feats, &vec!["axum".to_string(), "ssr".to_string()]);
-        }
-    }
-
-    #[test]
-    fn test_build_feature_strategies_with_empty_features() {
-        let strategies = build_feature_strategies(Some(vec![]));
-        assert_eq!(strategies.len(), 3);
-        assert!(matches!(strategies[0], FeatureStrategy::Specific(_)));
-        if let FeatureStrategy::Specific(feats) = &strategies[0] {
-            assert!(feats.is_empty());
-        }
     }
 
     #[test]
