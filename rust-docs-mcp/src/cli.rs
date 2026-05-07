@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 
 use crate::analysis::tools::AnalyzeCrateStructureParams;
 use crate::cache::tools::{CacheCrateParams, ListCrateVersionsParams};
@@ -47,11 +47,42 @@ pub enum CliTool {
     Structure,
 }
 
+/// Result of a one-shot CLI tool invocation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliCallResult {
+    /// Tool output to emit on stdout.
+    pub output: String,
+    /// Whether the output represents a tool-level failure.
+    pub failed: bool,
+}
+
 /// Run the requested tool and return its output string.
 ///
 /// `params_json` may be `None` for parameterless tools; otherwise it
 /// should be the JSON representation of the tool's parameter struct.
 pub async fn call(
+    cache_dir: Option<PathBuf>,
+    tool: CliTool,
+    params_json: Option<String>,
+) -> Result<String> {
+    Ok(call_with_status(cache_dir, tool, params_json).await?.output)
+}
+
+/// Run the requested tool and return both output and failure status.
+///
+/// Tool-level failures are represented as JSON on stdout. This wrapper lets
+/// binary callers preserve that stdout while still choosing a non-zero exit.
+pub async fn call_with_status(
+    cache_dir: Option<PathBuf>,
+    tool: CliTool,
+    params_json: Option<String>,
+) -> Result<CliCallResult> {
+    let output = call_output(cache_dir, tool, params_json).await?;
+    let failed = output_indicates_error(&output);
+    Ok(CliCallResult { output, failed })
+}
+
+async fn call_output(
     cache_dir: Option<PathBuf>,
     tool: CliTool,
     params_json: Option<String>,
@@ -92,7 +123,7 @@ pub async fn call(
             Ok(runtime.get_item_source(params).await)
         }
         CliTool::ListCachedCrates => {
-            // No params needed
+            ensure_empty_params("list-cached-crates", params_json)?;
             Ok(runtime.list_cached_crates().await)
         }
         CliTool::ListCrateVersions => {
@@ -116,4 +147,34 @@ fn parse_params<T: serde::de::DeserializeOwned>(name: &str, json: Option<String>
     let json = json.unwrap_or_else(|| "{}".to_string());
     serde_json::from_str::<T>(&json)
         .with_context(|| format!("Failed to parse {name} as {}", std::any::type_name::<T>()))
+}
+
+fn ensure_empty_params(tool_name: &str, json: Option<String>) -> Result<()> {
+    let Some(json) = json else {
+        return Ok(());
+    };
+
+    let value: serde_json::Value = serde_json::from_str(&json)
+        .with_context(|| format!("Failed to parse params for {tool_name}"))?;
+
+    match value {
+        serde_json::Value::Object(map) if map.is_empty() => Ok(()),
+        _ => bail!("{tool_name} does not accept parameters; omit --params or pass {{}}"),
+    }
+}
+
+/// Return true when a tool output JSON object represents an error.
+///
+/// The existing output types encode failures either as `{ "error": ... }`
+/// or as a tagged cache response `{ "status": "error", ... }`.
+pub fn output_indicates_error(output: &str) -> bool {
+    let Ok(serde_json::Value::Object(object)) = serde_json::from_str(output) else {
+        return false;
+    };
+
+    object
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|status| status == "error")
+        || object.contains_key("error")
 }

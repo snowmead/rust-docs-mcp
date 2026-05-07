@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
 use tracing_subscriber::EnvFilter;
@@ -136,8 +137,14 @@ async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result
             params_file,
         } => {
             let params_json = read_params(params, params_file)?;
-            let output = rust_docs_mcp::cli::call(cache_dir, tool, params_json).await?;
-            println!("{output}");
+            let result = rust_docs_mcp::cli::call_with_status(cache_dir, tool, params_json).await?;
+            println!("{}", result.output);
+            std::io::stdout().flush()?;
+
+            if result.failed {
+                process::exit(1);
+            }
+
             Ok(())
         }
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,

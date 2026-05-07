@@ -245,7 +245,9 @@ rust-docs-mcp --help            # Show help
 > **Note:** `call cache-crate` is **blocking** — it downloads the crate,
 > generates documentation, and builds the search index before returning.
 > This is different from MCP mode where `cache_crate` returns a task ID
-> immediately and completes in the background.
+> immediately and completes in the background. If a one-shot tool returns
+> an error JSON response, the CLI prints that JSON to stdout and exits with
+> status 1.
 >
 > Available one-shot tools: `cache-crate`, `search-items-fuzzy`,
 > `search-items-preview`, `search-items`, `list-crate-items`,
