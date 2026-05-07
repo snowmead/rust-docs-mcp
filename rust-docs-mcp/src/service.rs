@@ -1,7 +1,5 @@
 use rmcp::handler::server::wrapper::Parameters;
 use std::path::PathBuf;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
 use anyhow::Result;
 use rmcp::schemars::{self, JsonSchema};
@@ -19,21 +17,18 @@ use rmcp::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::tools::{AnalysisTools, AnalyzeCrateStructureParams};
-use crate::cache::{
-    CrateCache,
-    task_manager::TaskManager,
-    tools::{
-        CacheCrateParams, CacheOperationsParams, CacheTools, GetCratesMetadataParams,
-        ListCrateVersionsParams, RemoveCrateParams,
-    },
+use crate::analysis::tools::AnalyzeCrateStructureParams;
+use crate::cache::tools::{
+    CacheCrateParams, CacheOperationsParams, GetCratesMetadataParams, ListCrateVersionsParams,
+    RemoveCrateParams,
 };
-use crate::deps::tools::{DepsTools, GetDependenciesParams};
+use crate::deps::tools::GetDependenciesParams;
 use crate::docs::tools::{
-    DocsTools, GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
+    GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
     SearchItemsParams, SearchItemsPreviewParams,
 };
-use crate::search::tools::{SearchItemsFuzzyParams, SearchTools};
+use crate::runtime::RustDocsRuntime;
+use crate::search::tools::SearchItemsFuzzyParams;
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 struct CacheDependenciesArgs {
@@ -57,27 +52,16 @@ struct CacheDependenciesArgs {
 pub struct RustDocsService {
     tool_router: ToolRouter<Self>,
     prompt_router: PromptRouter<Self>,
-    cache_tools: CacheTools,
-    docs_tools: DocsTools,
-    deps_tools: DepsTools,
-    analysis_tools: AnalysisTools,
-    search_tools: SearchTools,
+    runtime: RustDocsRuntime,
 }
 
 #[tool_router]
 impl RustDocsService {
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
-        let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
-        let task_manager = Arc::new(TaskManager::new());
-
         Ok(Self {
             tool_router: Self::tool_router(),
             prompt_router: Self::prompt_router(),
-            cache_tools: CacheTools::new(cache.clone(), task_manager),
-            docs_tools: DocsTools::new(cache.clone()),
-            deps_tools: DepsTools::new(cache.clone()),
-            analysis_tools: AnalysisTools::new(cache.clone()),
-            search_tools: SearchTools::new(cache),
+            runtime: RustDocsRuntime::new(cache_dir)?,
         })
     }
 
@@ -112,27 +96,21 @@ OPTIONAL PARAMETERS (all source types):
 MONITORING: Use cache_operations tool to monitor progress, cancel, or check status of caching operations."
     )]
     pub async fn cache_crate(&self, Parameters(params): Parameters<CacheCrateParams>) -> String {
-        self.cache_tools.cache_crate(params).await
+        self.runtime.cache_crate_background(params).await
     }
 
     #[tool(
         description = "Remove a cached crate version from local storage. Use to free up disk space or remove outdated versions. This only affects the local cache - the crate can be re-downloaded later if needed."
     )]
     pub async fn remove_crate(&self, Parameters(params): Parameters<RemoveCrateParams>) -> String {
-        match self.cache_tools.remove_crate(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.remove_crate(params).await
     }
 
     #[tool(
         description = "List all locally cached crates with their versions and sizes. Use to see what crates are available offline and how much disk space they use. Shows cache metadata including when each crate was cached."
     )]
     pub async fn list_cached_crates(&self) -> String {
-        match self.cache_tools.list_cached_crates().await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.list_cached_crates().await
     }
 
     #[tool(
@@ -142,10 +120,7 @@ MONITORING: Use cache_operations tool to monitor progress, cancel, or check stat
         &self,
         Parameters(params): Parameters<ListCrateVersionsParams>,
     ) -> String {
-        match self.cache_tools.list_crate_versions(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.list_crate_versions(params).await
     }
 
     #[tool(
@@ -155,8 +130,7 @@ MONITORING: Use cache_operations tool to monitor progress, cancel, or check stat
         &self,
         Parameters(params): Parameters<GetCratesMetadataParams>,
     ) -> String {
-        let output = self.cache_tools.get_crates_metadata(params).await;
-        output.to_json()
+        self.runtime.get_crates_metadata(params).await
     }
 
     #[tool(
@@ -174,7 +148,7 @@ Usage:
         &self,
         Parameters(params): Parameters<CacheOperationsParams>,
     ) -> String {
-        self.cache_tools.cache_operations(params).await
+        self.runtime.cache_operations(params).await
     }
 
     // Docs tools
@@ -185,20 +159,14 @@ Usage:
         &self,
         Parameters(params): Parameters<ListItemsParams>,
     ) -> String {
-        match self.docs_tools.list_crate_items(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.list_crate_items(params).await
     }
 
     #[tool(
         description = "Search for items by name pattern in a crate. Use when looking for specific functions, types, or modules. Returns FULL details including documentation. WARNING: May exceed token limits for large results. Use search_items_preview first for exploration, then get_item_details for specific items. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
     pub async fn search_items(&self, Parameters(params): Parameters<SearchItemsParams>) -> String {
-        match self.docs_tools.search_items(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.search_items(params).await
     }
 
     #[tool(
@@ -208,10 +176,7 @@ Usage:
         &self,
         Parameters(params): Parameters<SearchItemsPreviewParams>,
     ) -> String {
-        match self.docs_tools.search_items_preview(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.search_items_preview(params).await
     }
 
     #[tool(
@@ -221,17 +186,14 @@ Usage:
         &self,
         Parameters(params): Parameters<GetItemDetailsParams>,
     ) -> String {
-        self.docs_tools.get_item_details(params).await.to_json()
+        self.runtime.get_item_details(params).await
     }
 
     #[tool(
         description = "Get ONLY the documentation string for a specific item. Use when you need just the docs without other details. More efficient than get_item_details if you only need the documentation text. Returns null if no documentation exists. For workspace crates, specify the member parameter with the member path (e.g., 'crates/rmcp')."
     )]
     pub async fn get_item_docs(&self, Parameters(params): Parameters<GetItemDocsParams>) -> String {
-        match self.docs_tools.get_item_docs(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.get_item_docs(params).await
     }
 
     #[tool(
@@ -241,7 +203,7 @@ Usage:
         &self,
         Parameters(params): Parameters<GetItemSourceParams>,
     ) -> String {
-        self.docs_tools.get_item_source(params).await.to_json()
+        self.runtime.get_item_source(params).await
     }
 
     // Deps tools
@@ -252,10 +214,7 @@ Usage:
         &self,
         Parameters(params): Parameters<GetDependenciesParams>,
     ) -> String {
-        match self.deps_tools.get_dependencies(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.get_dependencies(params).await
     }
 
     // Analysis tools
@@ -266,10 +225,7 @@ Usage:
         &self,
         Parameters(params): Parameters<AnalyzeCrateStructureParams>,
     ) -> String {
-        match self.analysis_tools.structure(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.structure(params).await
     }
 
     // Search tools
@@ -280,10 +236,7 @@ Usage:
         &self,
         Parameters(params): Parameters<SearchItemsFuzzyParams>,
     ) -> String {
-        match self.search_tools.search_items_fuzzy(params).await {
-            Ok(output) => output.to_json(),
-            Err(error) => error.to_json(),
-        }
+        self.runtime.search_items_fuzzy(params).await
     }
 }
 

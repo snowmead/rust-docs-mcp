@@ -23,6 +23,22 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Start the MCP stdio server (default mode)
+    Serve,
+    /// Execute a one-shot tool and print the result
+    Call {
+        /// Tool to invoke
+        #[arg(value_enum)]
+        tool: rust_docs_mcp::cli::CliTool,
+
+        /// JSON parameters for the tool (inline)
+        #[arg(long, conflicts_with = "params_file")]
+        params: Option<String>,
+
+        /// Path to a file containing JSON parameters
+        #[arg(long, conflicts_with = "params")]
+        params_file: Option<PathBuf>,
+    },
     /// Install the current executable to a directory in PATH
     Install {
         /// Target directory to install to (defaults to ~/.local/bin)
@@ -58,8 +74,14 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Handle subcommands
-    if let Some(command) = args.command {
-        return handle_command(command, args.cache_dir).await;
+    match &args.command {
+        // MCP serve: explicit `serve` or no subcommand at all.
+        None | Some(Commands::Serve) => {
+            // If there are other subcommand args we skip tracing init.
+        }
+        Some(_) => {
+            return handle_command(args.command.unwrap(), args.cache_dir).await;
+        }
     }
 
     // Initialize tracing to stderr to avoid conflicts with stdio transport
@@ -87,8 +109,37 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Read params from `--params` or `--params-file`, returning the raw
+/// JSON string (or `None` when neither is provided).
+fn read_params(inline: Option<String>, file: Option<PathBuf>) -> Result<Option<String>> {
+    match (inline, file) {
+        (Some(json), _) => Ok(Some(json)),
+        (_, Some(path)) => {
+            let content = std::fs::read_to_string(&path).map_err(|e| {
+                anyhow::anyhow!("Failed to read params file {}: {e}", path.display())
+            })?;
+            Ok(Some(content))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
 async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result<()> {
     match command {
+        Commands::Serve => {
+            // Handled in main before tracing init; unreachable here.
+            unreachable!("Serve is handled in main")
+        }
+        Commands::Call {
+            tool,
+            params,
+            params_file,
+        } => {
+            let params_json = read_params(params, params_file)?;
+            let output = rust_docs_mcp::cli::call(cache_dir, tool, params_json).await?;
+            println!("{output}");
+            Ok(())
+        }
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,
         Commands::Update {
             target_dir,

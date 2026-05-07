@@ -11,12 +11,14 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCachedCratesOutput,
+    ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams,
     ListCrateVersionsParams,
 };
+use rust_docs_mcp::cli::{self, CliTool};
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
 use rust_docs_mcp::docs::outputs::{
@@ -27,6 +29,7 @@ use rust_docs_mcp::docs::tools::{
     GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
     SearchItemsParams, SearchItemsPreviewParams,
 };
+use rust_docs_mcp::runtime::RustDocsRuntime;
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
 use std::time::Duration;
@@ -1550,6 +1553,159 @@ async fn test_step_tracking() -> Result<()> {
         println!("  - First step: {} of {}", first.0, first.1);
         println!("  - Last step: {} of {}", last.0, last.1);
     }
+
+    Ok(())
+}
+
+// ── CLI / Runtime one-shot tests ──────────────────────────────────────
+
+/// Verify the shared runtime can cache a crate **blocking** and the
+/// result JSON reports success.
+#[tokio::test]
+async fn test_runtime_cache_blocking() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    let params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+    };
+
+    let output = runtime.cache_crate_blocking(params).await;
+    let parsed: CacheCrateOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse cache output: {output}"))?;
+
+    assert!(parsed.is_success(), "Expected success, got: {parsed:?}");
+
+    Ok(())
+}
+
+/// Verify the shared runtime can do a one-shot fuzzy search against
+/// an already-cached crate.
+#[tokio::test]
+async fn test_runtime_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    // Cache first (blocking)
+    let cache_params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+    };
+    let cache_output = runtime.cache_crate_blocking(cache_params).await;
+    let cache_parsed: CacheCrateOutput = serde_json::from_str(&cache_output)?;
+    assert!(cache_parsed.is_success(), "Cache failed: {cache_parsed:?}");
+
+    // Now search
+    let search_params = SearchItemsFuzzyParams {
+        crate_name: "semver".to_string(),
+        version: "1.0.0".to_string(),
+        query: "Version".to_string(),
+        fuzzy_enabled: Some(true),
+        fuzzy_distance: Some(1),
+        limit: Some(5),
+        kind_filter: None,
+        member: None,
+    };
+
+    let output = runtime.search_items_fuzzy(search_params).await;
+    let parsed: SearchItemsFuzzyOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse search output: {output}"))?;
+
+    assert!(
+        !parsed.results.is_empty(),
+        "Expected at least one search result"
+    );
+
+    Ok(())
+}
+
+/// CLI dispatch: cache_crate via the `cli::call` function.
+#[tokio::test]
+async fn test_cli_call_cache_crate() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let parsed: CacheCrateOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI cache output: {output}"))?;
+    assert!(parsed.is_success());
+
+    Ok(())
+}
+
+/// CLI dispatch: search after cache.
+#[tokio::test]
+async fn test_cli_call_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    // Search
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::SearchItemsFuzzy,
+        Some(
+            r#"{"crate_name":"semver","version":"1.0.0","query":"Version","limit":5}"#.to_string(),
+        ),
+    )
+    .await?;
+
+    let parsed: SearchItemsFuzzyOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI search output: {output}"))?;
+    assert!(!parsed.results.is_empty());
+
+    Ok(())
+}
+
+/// CLI dispatch: list-cached-crates with no params.
+#[tokio::test]
+async fn test_cli_call_list_cached_crates() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache a crate first
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        None,
+    )
+    .await?;
+
+    let parsed: ListCachedCratesOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI list output: {output}"))?;
+    assert!(parsed.total_crates >= 1);
 
     Ok(())
 }

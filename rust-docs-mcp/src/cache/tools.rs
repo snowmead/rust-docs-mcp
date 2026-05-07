@@ -191,6 +191,69 @@ pub struct CacheTools {
     task_manager: Arc<TaskManager>,
 }
 
+/// Convert [`CacheCrateParams`] into a [`CrateSource`], returning a
+/// user-facing error string when validation fails.
+pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource, String> {
+    match params.source_type.as_str() {
+        "cratesio" => {
+            let version = params.version.clone().ok_or_else(|| {
+                "Missing required parameter 'version' for source_type='cratesio'".to_string()
+            })?;
+            Ok(CrateSource::CratesIO(CacheCrateFromCratesIOParams {
+                crate_name: params.crate_name.clone(),
+                version,
+                members: params.members.clone(),
+                update: params.update,
+            }))
+        }
+        "github" => {
+            let github_url = params.github_url.clone().ok_or_else(|| {
+                "Missing required parameter 'github_url' for source_type='github'".to_string()
+            })?;
+
+            match (&params.branch, &params.tag) {
+                (Some(_), Some(_)) => {
+                    return Err(
+                        "Only one of 'branch' or 'tag' can be specified for source_type='github', not both"
+                            .to_string(),
+                    );
+                }
+                (None, None) => {
+                    return Err(
+                        "Either 'branch' or 'tag' must be specified for source_type='github'"
+                            .to_string(),
+                    );
+                }
+                _ => {}
+            }
+
+            Ok(CrateSource::GitHub(CacheCrateFromGitHubParams {
+                crate_name: params.crate_name.clone(),
+                github_url,
+                branch: params.branch.clone(),
+                tag: params.tag.clone(),
+                members: params.members.clone(),
+                update: params.update,
+            }))
+        }
+        "local" => {
+            let path = params.path.clone().ok_or_else(|| {
+                "Missing required parameter 'path' for source_type='local'".to_string()
+            })?;
+            Ok(CrateSource::LocalPath(CacheCrateFromLocalParams {
+                crate_name: params.crate_name.clone(),
+                version: params.version.clone(),
+                path,
+                members: params.members.clone(),
+                update: params.update,
+            }))
+        }
+        other => Err(format!(
+            "Invalid source_type '{other}'. Must be one of: 'cratesio', 'github', 'local'"
+        )),
+    }
+}
+
 impl CacheTools {
     /// Create a new CacheTools instance
     pub fn new(cache: Arc<RwLock<CrateCache>>, task_manager: Arc<TaskManager>) -> Self {
@@ -758,7 +821,22 @@ impl CacheTools {
         output.to_json()
     }
 
-    /// Helper to convert CacheCrateParams to CrateSource
+    /// Blocking (one-shot) cache: validate params, run the full pipeline,
+    /// and return the result JSON. The call does **not** return until
+    /// download, doc generation, and search-index creation finish.
+    pub async fn cache_crate_blocking(&self, params: CacheCrateParams) -> String {
+        let source = match params_to_source_checked(&params) {
+            Ok(source) => source,
+            Err(error) => return CacheCrateOutput::Error { error }.to_json(),
+        };
+
+        let cache = self.cache.write().await;
+        cache.cache_crate_with_source(source, None, None).await
+    }
+
+    /// Helper to convert CacheCrateParams to CrateSource (unchecked –
+    /// uses `unwrap()`). Only call from the spawned-task path where
+    /// validation has already happened.
     fn params_to_source(params: &CacheCrateParams) -> CrateSource {
         match params.source_type.as_str() {
             "cratesio" => CrateSource::CratesIO(CacheCrateFromCratesIOParams {
