@@ -194,13 +194,13 @@ cargo install rust-docs-mcp
 - Rust nightly toolchain (for Rustdoc JSON generation)
 
   ```bash
-  rustup toolchain install nightly
+  rustup toolchain install nightly-2026-05-22
   ```
 
-  Runtime prefers `nightly-2025-06-24` because it matches the rustdoc JSON
-  schema used by `rustdoc-types`, but it will fall back to `nightly` when that
-  toolchain produces the same JSON format version. You can override the choice
-  with:
+  Runtime prefers `nightly-2026-05-22`, which provides rustc
+  `1.97.0-nightly (e96c36b6f 2026-05-21)`, so documentation generation can
+  compile modern crates. The `rustdoc-types` dependency is kept in sync with
+  that rustdoc JSON format. You can override the choice with:
 
   ```bash
   export RUST_DOCS_MCP_TOOLCHAIN=nightly

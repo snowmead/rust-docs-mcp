@@ -3372,9 +3372,9 @@ dependencies = [
 
 [[package]]
 name = "rustdoc-types"
-version = "0.53.0"
+version = "0.57.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "53175c56be456e96171b9c3efcd8e5216fbb7b40cc6355a1953090556621205b"
+checksum = "7e6919c49bdd9cca072b3b502d16c073d0a4d3b7283ff6e0c86a5f6e6b07bbfe"
 dependencies = [
  "rustc-hash 2.1.1",
  "serde",

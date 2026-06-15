@@ -12,8 +12,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 
-/// Preferred nightly toolchain version known to match `rustdoc-types`.
-pub const PREFERRED_TOOLCHAIN: &str = "nightly-2025-06-24";
+/// Preferred nightly toolchain. Keep this new enough to compile modern crates
+/// and keep `rustdoc-types` in sync with its rustdoc JSON format.
+pub const PREFERRED_TOOLCHAIN: &str = "nightly-2026-05-22";
 
 /// Fallback nightly alias to try when the preferred dated toolchain is unavailable.
 pub const FALLBACK_TOOLCHAIN: &str = "nightly";
@@ -156,7 +157,7 @@ fn is_missing_toolchain_error(stderr: &str, toolchain: &str) -> bool {
     // Extract toolchain name from rustup's error format: 'toolchain-name'
     // Then check it matches our query, allowing for an architecture suffix
     // (e.g., "nightly" -> "nightly-aarch64-apple-darwin") but not a date suffix
-    // (e.g., "nightly" should NOT match "nightly-2025-06-24-aarch64-apple-darwin")
+    // (e.g., "nightly" should NOT match "nightly-2026-05-22-aarch64-apple-darwin")
     stderr.split('\'').nth(1).is_some_and(|name| {
         name == toolchain
             || name
