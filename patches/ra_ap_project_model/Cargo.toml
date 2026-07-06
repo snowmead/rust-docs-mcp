@@ -96,9 +96,6 @@ version = "0.1.14"
 features = ["std"]
 default-features = false
 
-[dev-dependencies.expect-test]
-version = "1.5.1"
-
 [lints.clippy]
 assigning_clones = "allow"
 dbg_macro = "warn"
