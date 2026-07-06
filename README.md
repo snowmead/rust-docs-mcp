@@ -264,7 +264,3 @@ Add the server to your MCP configuration:
   }
 }
 ```
-
-## Star History
-
-[![Star History Chart](./assets/star-history.png)](https://www.star-history.com/?repos=snowmead%2Frust-docs-mcp&type=date&legend=top-left)
