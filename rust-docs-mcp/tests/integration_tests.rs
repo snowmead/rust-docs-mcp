@@ -35,6 +35,7 @@ use tempfile::TempDir;
 // Test constants
 const TEST_TIMEOUT: Duration = Duration::from_secs(30);
 const LARGE_CRATE_TEST_TIMEOUT: Duration = Duration::from_secs(120);
+const HEAVY_NETWORK_TEST_TIMEOUT: Duration = Duration::from_secs(600);
 const SEMVER_VERSION: &str = "1.0.0";
 const SERDE_VERSION: &str = "v1.0.136";
 const SERDE_GITHUB_URL: &str = "https://github.com/serde-rs/serde";
@@ -162,6 +163,7 @@ async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     // Start the async caching operation
@@ -217,6 +219,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     // Start async caching operation
@@ -267,6 +270,7 @@ async fn test_cache_from_github() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -319,6 +323,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -380,6 +385,7 @@ edition = "2021"
         path: Some(test_crate_dir.path().to_str().unwrap().to_string()),
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -460,6 +466,7 @@ serde = {{ workspace = true }}
         path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: None, // Should detect workspace and return member list
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -502,6 +509,7 @@ async fn test_cache_update() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response1 = service.cache_crate(Parameters(params1)).await;
@@ -523,6 +531,7 @@ async fn test_cache_update() -> Result<()> {
         path: None,
         members: None,
         update: Some(true),
+        features: None,
     };
 
     let response2 = service.cache_crate(Parameters(params2)).await;
@@ -551,6 +560,7 @@ async fn test_invalid_inputs() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -574,6 +584,7 @@ async fn test_invalid_inputs() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -605,6 +616,7 @@ async fn test_invalid_inputs() -> Result<()> {
         path: Some("/this/path/does/not/exist".to_string()),
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -643,6 +655,7 @@ async fn test_concurrent_caching() -> Result<()> {
             path: None,
             members: None,
             update: None,
+            features: None,
         };
         let start = std::time::Instant::now();
         let response = service.cache_crate(Parameters(params)).await;
@@ -705,6 +718,7 @@ async fn test_concurrent_caching() -> Result<()> {
             path: None,
             members: None,
             update: Some(false), // Should not re-download if already cached
+            features: None,
         };
         let response = service.cache_crate(Parameters(params)).await;
         let task = parse_cache_task_started(&response)?;
@@ -768,6 +782,7 @@ edition = "2021"
         path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: None,
         update: None,
+        features: None,
     };
 
     let response1 = service.cache_crate(Parameters(params1)).await;
@@ -798,6 +813,7 @@ edition = "2021"
         path: Some(workspace_dir.path().to_str().unwrap().to_string()),
         members: Some(vec!["lib-a".to_string(), "lib-b".to_string()]),
         update: None,
+        features: None,
     };
 
     let response2 = service.cache_crate(Parameters(params2)).await;
@@ -1415,6 +1431,7 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     // Use a longer timeout for bevy as it's a large crate
@@ -1467,6 +1484,7 @@ async fn test_step_tracking() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -1550,6 +1568,326 @@ async fn test_step_tracking() -> Result<()> {
         println!("  - First step: {} of {}", first.0, first.1);
         println!("  - Last step: {} of {}", last.0, last.1);
     }
+
+    Ok(())
+}
+
+// Integration tests for the `features` parameter
+
+/// Write a Cargo.toml + src/lib.rs for a crate that gates two public symbols
+/// behind the `axum` and `actix` features. Both features are non-default, so the
+/// presence of each symbol in the generated docs reflects which features were
+/// enabled at `cargo rustdoc` time.
+fn write_features_crate_sources(dir: &std::path::Path, package_name: &str) -> Result<()> {
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        format!(
+            r#"[package]
+name = "{package_name}"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+axum = []
+actix = []
+"#
+        ),
+    )?;
+    let src_dir = dir.join("src");
+    std::fs::create_dir(&src_dir)?;
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        r#"//! Test crate gating symbols behind axum/actix features.
+
+#[cfg(feature = "axum")]
+pub mod axum_module {
+    pub fn axum_handler() {}
+}
+
+#[cfg(feature = "actix")]
+pub mod actix_module {
+    pub fn actix_handler() {}
+}
+"#,
+    )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cache_with_specific_features() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    let fixture_dir = TempDir::new()?;
+    write_features_crate_sources(fixture_dir.path(), "test-features-crate")?;
+
+    let params = CacheCrateParams {
+        crate_name: "test-features-crate".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(fixture_dir.path().to_str().unwrap().to_string()),
+        members: None,
+        update: None,
+        features: Some(vec!["axum".to_string()]),
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Failed to cache with features=[axum]: {result:?}"
+    );
+
+    let search_axum = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-crate".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "axum_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: None,
+        }))
+        .await;
+    let axum_output: SearchItemsPreviewOutput = serde_json::from_str(&search_axum)?;
+    assert!(
+        !axum_output.items.is_empty(),
+        "axum_handler not found in docs although features=[axum] was requested: {search_axum}"
+    );
+
+    let search_actix = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-crate".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "actix_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: None,
+        }))
+        .await;
+    let actix_output: SearchItemsPreviewOutput = serde_json::from_str(&search_actix)?;
+    assert!(
+        actix_output.items.is_empty(),
+        "actix_handler visible in docs, but only features=[axum] was requested: {search_actix}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cache_workspace_member_with_features() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Create a minimal workspace with a single member that has the features fixture
+    let workspace_dir = TempDir::new()?;
+    std::fs::write(
+        workspace_dir.path().join("Cargo.toml"),
+        r#"[workspace]
+members = ["member-a"]
+resolver = "2"
+"#,
+    )?;
+    let member_dir = workspace_dir.path().join("member-a");
+    std::fs::create_dir(&member_dir)?;
+    write_features_crate_sources(&member_dir, "member-a")?;
+
+    let params = CacheCrateParams {
+        crate_name: "test-features-workspace".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(workspace_dir.path().to_str().unwrap().to_string()),
+        members: Some(vec!["member-a".to_string()]),
+        update: None,
+        features: Some(vec!["axum".to_string()]),
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Failed to cache workspace member with features=[axum]: {result:?}"
+    );
+
+    let search_axum = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-workspace".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "axum_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: Some("member-a".to_string()),
+        }))
+        .await;
+    let axum_output: SearchItemsPreviewOutput = serde_json::from_str(&search_axum)?;
+    assert!(
+        !axum_output.items.is_empty(),
+        "axum_handler not found in workspace member docs: {search_axum}"
+    );
+
+    let search_actix = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-workspace".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "actix_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: Some("member-a".to_string()),
+        }))
+        .await;
+    let actix_output: SearchItemsPreviewOutput = serde_json::from_str(&search_actix)?;
+    assert!(
+        actix_output.items.is_empty(),
+        "actix_handler visible in workspace member docs although only features=[axum] was requested: {search_actix}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Heavy network test (compiles leptos-use ~60s+), starves the 2-core CI runner. Run with --ignored."]
+async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
+    // End-to-end reproduction of the real-world scenario that motivated PR #57:
+    // a crate with mutually exclusive features (axum vs actix) that cannot be
+    // cached with --all-features. Takes ~80s locally (mostly cargo compile).
+    let (service, _temp_dir) = create_test_service()?;
+
+    let params = CacheCrateParams {
+        crate_name: "leptos-use".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("0.18.3".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: Some(vec!["axum".to_string()]),
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let result =
+        wait_for_task_completion(&service, &task_output.task_id, HEAVY_NETWORK_TEST_TIMEOUT)
+            .await?;
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Failed to cache leptos-use@0.18.3 with features=[axum]: {result:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "Documents a pre-existing cache-key bug (features not part of cache identity). Expected to FAIL today; will pass once the cache key includes a features fingerprint."]
+async fn test_cache_respects_feature_change() -> Result<()> {
+    // This test documents a known, pre-existing bug that is NOT in scope of PR #57
+    // but became user-reachable once features are honored: the on-disk cache is
+    // keyed only by (name, version), so a second cache_crate call with a different
+    // feature set short-circuits on has_docs() and returns the first call's docs.
+    // The user sees success but gets the wrong feature set's docs.
+    //
+    // Once the cache key includes a features fingerprint (or features-differing
+    // calls trigger invalidation), this test will pass and #[ignore] can be removed.
+    let (service, _temp_dir) = create_test_service()?;
+
+    let fixture_dir = TempDir::new()?;
+    write_features_crate_sources(fixture_dir.path(), "test-features-cachekey")?;
+
+    // First cache with features=["axum"]
+    let params_axum = CacheCrateParams {
+        crate_name: "test-features-cachekey".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(fixture_dir.path().to_str().unwrap().to_string()),
+        members: None,
+        update: None,
+        features: Some(vec!["axum".to_string()]),
+    };
+    let response = service.cache_crate(Parameters(params_axum)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(
+        matches!(result, TaskResult::Success),
+        "First cache (features=[axum]) failed: {result:?}"
+    );
+
+    // Second cache of same (name, version) but features=["actix"] — no update flag
+    let params_actix = CacheCrateParams {
+        crate_name: "test-features-cachekey".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(fixture_dir.path().to_str().unwrap().to_string()),
+        members: None,
+        update: None,
+        features: Some(vec!["actix".to_string()]),
+    };
+    let response = service.cache_crate(Parameters(params_actix)).await;
+    let task_output = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task_output.task_id, TEST_TIMEOUT).await?;
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Second cache (features=[actix]) failed: {result:?}"
+    );
+
+    // These two assertions FAIL today because the second call short-circuits on
+    // has_docs() without regenerating. They should pass once the cache key is
+    // feature-aware.
+    let search_actix = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-cachekey".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "actix_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: None,
+        }))
+        .await;
+    let actix_output: SearchItemsPreviewOutput = serde_json::from_str(&search_actix)?;
+    assert!(
+        !actix_output.items.is_empty(),
+        "actix_handler NOT visible after features=[actix] was requested — the cache returned stale docs from the first features=[axum] call"
+    );
+
+    let search_axum = service
+        .search_items_preview(Parameters(SearchItemsPreviewParams {
+            crate_name: "test-features-cachekey".to_string(),
+            version: "0.1.0".to_string(),
+            pattern: "axum_handler".to_string(),
+            limit: Some(10),
+            offset: None,
+            kind_filter: None,
+            path_filter: None,
+            member: None,
+        }))
+        .await;
+    let axum_output: SearchItemsPreviewOutput = serde_json::from_str(&search_axum)?;
+    assert!(
+        axum_output.items.is_empty(),
+        "axum_handler still visible after re-cache with features=[actix] — stale docs from the first call were not invalidated"
+    );
 
     Ok(())
 }

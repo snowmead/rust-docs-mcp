@@ -86,10 +86,12 @@ ones released yesterday.
   - **For cratesio**: Provide `version` (e.g., `{crate_name: "serde", source_type: "cratesio", version: "1.0.215"}`)
   - **For github**: Provide `github_url` and either `branch` OR `tag` (e.g., `{crate_name: "my-crate", source_type: "github", github_url: "https://github.com/user/repo", tag: "v1.0.0"}`)
   - **For local**: Provide `path`, optional `version` (e.g., `{crate_name: "my-crate", source_type: "local", path: "~/projects/my-crate"}`)
+  - **Optional `features`**: Specific features to enable instead of `--all-features`. Use for crates with mutually exclusive features (e.g., `{crate_name: "leptos-use", source_type: "cratesio", version: "0.15.8", features: ["axum"]}`)
 - `remove_crate` - Remove cached crate versions to free disk space
 - `list_cached_crates` - View all cached crates with versions and sizes
 - `list_crate_versions` - List cached versions for a specific crate
 - `get_crates_metadata` - Batch metadata queries for multiple crates
+- `cache_operations` - Manage and monitor background caching operations (list, status, cancel, clear)
 
 ### Documentation Queries
 

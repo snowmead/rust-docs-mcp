@@ -111,6 +111,7 @@ impl DocGenerator {
         name: &str,
         version: &str,
         progress_callback: Option<ProgressCallback>,
+        features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
         tracing::info!(
             "DocGenerator::generate_docs starting for {}-{}",
@@ -146,7 +147,7 @@ impl DocGenerator {
         }
 
         // Run cargo rustdoc with JSON output using unified function
-        rustdoc::run_cargo_rustdoc_json(&source_path, None, None).await?;
+        rustdoc::run_cargo_rustdoc_json(&source_path, None, None, features).await?;
 
         // Rustdoc complete - report 70%
         if let Some(ref callback) = progress_callback {
@@ -199,6 +200,7 @@ impl DocGenerator {
         version: &str,
         member_path: &str,
         progress_callback: Option<ProgressCallback>,
+        features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
         let source_path = self.storage.source_path(name, version)?;
         let member_full_path = source_path.join(member_path);
@@ -248,6 +250,7 @@ impl DocGenerator {
             &source_path,
             Some(&package_name),
             Some(&member_target_dir),
+            features,
         )
         .await?;
 

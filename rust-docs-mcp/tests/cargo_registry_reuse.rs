@@ -154,6 +154,7 @@ async fn test_cache_crate_reuses_cargo_registry_source() -> Result<()> {
         path: None,
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
