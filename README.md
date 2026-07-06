@@ -200,7 +200,10 @@ cargo install rust-docs-mcp
   Runtime prefers `nightly-2026-05-22`, which provides rustc
   `1.97.0-nightly (e96c36b6f 2026-05-21)`, so documentation generation can
   compile modern crates. The `rustdoc-types` dependency is kept in sync with
-  that rustdoc JSON format. You can override the choice with:
+  that rustdoc JSON format. If the dated toolchain is missing, the runtime
+  falls back to plain `nightly`, but only when it emits the same rustdoc JSON
+  format version (57); newer nightlies will be rejected. You can override the
+  choice with:
 
   ```bash
   export RUST_DOCS_MCP_TOOLCHAIN=nightly
