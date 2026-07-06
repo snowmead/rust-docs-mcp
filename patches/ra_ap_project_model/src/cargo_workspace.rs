@@ -26,6 +26,8 @@ const MINIMUM_TOOLCHAIN_VERSION_SUPPORTING_LOCKFILE_PATH: semver::Version = semv
     build: semver::BuildMetadata::EMPTY,
 };
 
+// rust-docs-mcp patch: Cargo 1.95+ removed `--lockfile-path`. See
+// patches/ra_ap_project_model/README.md.
 const MINIMUM_TOOLCHAIN_VERSION_USING_LOCKFILE_ENV: semver::Version = semver::Version {
     major: 1,
     minor: 95,

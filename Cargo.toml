@@ -4,6 +4,7 @@ resolver = "2"
 exclude = ["cargo-modules/tests/projects/**"]
 
 [patch.crates-io]
+# See patches/ra_ap_project_model/README.md for why this vendored crate exists.
 ra_ap_project_model = { path = "patches/ra_ap_project_model" }
 
 # Profile configuration for the workspace

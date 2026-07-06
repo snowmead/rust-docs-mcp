@@ -43,9 +43,6 @@ mod manifest_path;
 mod sysroot;
 mod workspace;
 
-#[cfg(test)]
-mod tests;
-
 use std::{
     fmt,
     fs::{self, ReadDir, read_dir},
