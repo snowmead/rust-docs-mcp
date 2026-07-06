@@ -448,18 +448,17 @@ pub async fn run_cargo_rustdoc_json(
         base_args.push(pkg.to_string());
     }
 
-    // Try different feature strategies in order. When specific features are
-    // requested, prepend them so the user-supplied set is tried first; the
-    // fallback chain (AllFeatures -> DefaultFeatures -> NoDefaultFeatures)
-    // still runs afterward if compilation fails.
-    let mut strategies = vec![
-        FeatureStrategy::AllFeatures,
-        FeatureStrategy::DefaultFeatures,
-        FeatureStrategy::NoDefaultFeatures,
-    ];
-    if let Some(feats) = features {
-        strategies.insert(0, FeatureStrategy::Specific(feats));
-    }
+    // When features are requested, use only the caller's set (no fallback).
+    // Otherwise try AllFeatures, DefaultFeatures, NoDefaultFeatures in order.
+    let strategies = if let Some(feats) = features {
+        vec![FeatureStrategy::Specific(feats)]
+    } else {
+        vec![
+            FeatureStrategy::AllFeatures,
+            FeatureStrategy::DefaultFeatures,
+            FeatureStrategy::NoDefaultFeatures,
+        ]
+    };
 
     let mut failed_attempts = Vec::new();
 

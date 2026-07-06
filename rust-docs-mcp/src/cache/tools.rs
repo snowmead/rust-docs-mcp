@@ -66,7 +66,7 @@ pub struct CacheCrateParams {
     )]
     pub update: Option<bool>,
     #[schemars(
-        description = "Specific features to enable instead of --all-features. Use this for crates with mutually exclusive features (e.g., leptos-use has conflicting 'actix' and 'axum' features). When provided, uses --no-default-features --features=a,b,c. When omitted, uses --all-features with automatic fallback."
+        description = "Specific features to enable instead of --all-features. Use this for crates with mutually exclusive features (e.g., leptos-use has conflicting 'actix' and 'axum' features). When provided, uses --no-default-features --features=a,b,c with no fallback. When omitted, uses --all-features with automatic fallback."
     )]
     pub features: Option<Vec<String>>,
 }

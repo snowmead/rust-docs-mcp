@@ -110,7 +110,7 @@ OPTIONAL PARAMETERS (all source types):
 - update: Force re-cache even if already cached (default: false)
 - features: Specific features to enable instead of --all-features. Use for crates with mutually exclusive features.
   Example: {crate_name: 'leptos-use', source_type: 'cratesio', version: '0.15.8', features: ['axum']}
-  When provided, uses --no-default-features --features=a,b,c. When omitted, uses --all-features with automatic fallback.
+  When provided, uses --no-default-features --features=a,b,c with no fallback. When omitted, uses --all-features with automatic fallback.
 
 MONITORING: Use cache_operations tool to monitor progress, cancel, or check status of caching operations."
     )]

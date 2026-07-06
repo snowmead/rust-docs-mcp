@@ -1759,6 +1759,7 @@ resolver = "2"
 }
 
 #[tokio::test]
+#[ignore = "Heavy network test (compiles leptos-use ~60s+), starves the 2-core CI runner. Run with --ignored."]
 async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
     // End-to-end reproduction of the real-world scenario that motivated PR #57:
     // a crate with mutually exclusive features (axum vs actix) that cannot be
