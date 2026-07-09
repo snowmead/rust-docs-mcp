@@ -65,6 +65,37 @@ impl CrateCache {
         })
     }
 
+    /// Resolve a potentially partial crate version to an exact version via crates.io
+    pub async fn resolve_crates_io_version(&self, name: &str, version: &str) -> Result<String> {
+        self.downloader
+            .resolve_crates_io_version(name, version)
+            .await
+    }
+
+    /// Resolve a partial version string if needed, with guards to skip resolution
+    /// for already-cached crates or versions that already look like full semver.
+    ///
+    /// This should be called by tool methods before passing the version to
+    /// `ensure_crate_or_member_docs` and any other version-dependent operations
+    /// (e.g. `get_source_path`, `load_dependencies`, search index ops).
+    pub async fn resolve_version(&self, name: &str, version: &str) -> Result<String> {
+        if !self.storage.is_cached(name, version) && version.matches('.').count() < 2 {
+            match self.resolve_crates_io_version(name, version).await {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    if e.to_string().contains("Available versions") {
+                        Err(e)
+                    } else {
+                        tracing::warn!("Version resolution failed, using as-is: {e}");
+                        Ok(version.to_string())
+                    }
+                }
+            }
+        } else {
+            Ok(version.to_string())
+        }
+    }
+
     /// Ensure a crate's documentation is available, downloading and generating if necessary
     pub async fn ensure_crate_docs(
         &self,
@@ -216,13 +247,20 @@ impl CrateCache {
         self.load_docs(name, version, Some(member_path)).await
     }
 
-    /// Ensure documentation is available for a crate or workspace member
+    /// Ensure documentation is available for a crate or workspace member.
+    ///
+    /// **Important**: Callers should resolve partial versions via [`resolve_version`]
+    /// *before* calling this method, and use the resolved version for all subsequent
+    /// operations (e.g. `get_source_path`, `load_dependencies`, search index ops).
     pub async fn ensure_crate_or_member_docs(
         &self,
         name: &str,
         version: &str,
         member: Option<&str>,
     ) -> Result<Arc<rustdoc_types::Crate>> {
+        let version = self.resolve_version(name, version).await?;
+        let version = version.as_str();
+
         // If member is specified, use workspace member logic
         if let Some(member_path) = member {
             return self
@@ -829,6 +867,21 @@ impl CrateCache {
         // Extract parameters from source
         let (crate_name, version, members, source_str, update, features) =
             self.extract_source_params(&source);
+
+        // Resolve partial versions for crates.io sources before any download/cache checks
+        let version = if matches!(&source, CrateSource::CratesIO(_)) {
+            match self.resolve_crates_io_version(&crate_name, &version).await {
+                Ok(v) => v,
+                Err(e) => {
+                    return CacheResponse::error(format!(
+                        "Version resolution failed for '{crate_name}': {e}",
+                    ))
+                    .to_json();
+                }
+            }
+        } else {
+            version
+        };
 
         tracing::info!(
             "cache_crate_with_source: starting for {}-{}, update={}, members={:?}",

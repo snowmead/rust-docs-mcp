@@ -44,28 +44,25 @@ impl DepsTools {
         params: GetDependenciesParams,
     ) -> Result<GetDependenciesOutput, DepsErrorOutput> {
         let cache = self.cache.write().await;
+        let version = cache
+            .resolve_version(&params.crate_name, &params.version)
+            .await
+            .map_err(|e| DepsErrorOutput::new(format!("Failed to resolve version: {e}")))?;
 
         // First ensure the crate is cached
         match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
+            .ensure_crate_or_member_docs(&params.crate_name, &version, params.member.as_deref())
             .await
         {
             Ok(_) => {
                 // Load the dependency metadata
-                match cache
-                    .load_dependencies(&params.crate_name, &params.version)
-                    .await
-                {
+                match cache.load_dependencies(&params.crate_name, &version).await {
                     Ok(metadata) => {
                         // Process the metadata to extract dependency information
                         match process_cargo_metadata(
                             &metadata,
                             &params.crate_name,
-                            &params.version,
+                            &version,
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
@@ -97,7 +94,7 @@ impl DepsTools {
                     }
                     Err(e) => Err(DepsErrorOutput::new(format!(
                         "Dependencies not available for {}-{}. Error: {}",
-                        params.crate_name, params.version, e
+                        params.crate_name, version, e
                     ))),
                 }
             }

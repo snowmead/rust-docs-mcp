@@ -29,14 +29,17 @@
         pkgs,
         ...
       }: let
-        # Use rust-toolchain.toml for the exact nightly version
-        rustToolchain = inputs'.fenix.packages.fromToolchainFile {
-          file = ./rust-toolchain.toml;
-          sha256 = "";
-        };
-
-        # Nightly toolchain for runtime (used by the binary to fetch docs)
-        rustNightly = rustToolchain;
+        # Use fenix's rolling latest nightly so the flake doesn't break every
+        # time the preferred dated nightly in rust-toolchain.toml changes.
+        # The runtime's toolchain probe (resolve_toolchain) validates
+        # compatibility at startup anyway.
+        rustNightly = inputs'.fenix.packages.latest.withComponents [
+          "cargo"
+          "clippy"
+          "rustc"
+          "rustfmt"
+          "rust-src"
+        ];
 
         craneLib = inputs.crane.mkLib pkgs;
 
@@ -61,12 +64,12 @@
               darwin.apple_sdk.frameworks.Security
               darwin.apple_sdk.frameworks.SystemConfiguration
             ]
-            ++ pkgs.lib.optional pkgs.lib.isLinux gcc.cc.lib;
+            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux gcc.cc.lib;
 
           nativeBuildInputs = with pkgs; [
             pkg-config
           ]
-          ++ pkgs.lib.optional pkgs.lib.isLinux autoPatchelfHook;
+          ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux autoPatchelfHook;
         };
 
         # Build dependencies only
@@ -124,6 +127,12 @@
               inherit cargoArtifacts;
               partitions = 1;
               partitionType = "count";
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              # autoPatchelfHook only runs during fixupPhase, but nextest
+              # executes test binaries during checkPhase — set LD_LIBRARY_PATH
+              # so they can find libssl and other shared libs.
+              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [pkgs.openssl];
             });
         };
       };

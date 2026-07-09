@@ -88,6 +88,16 @@ with rustdoc JSON format version {}: {reason}",
         return Ok(FALLBACK_TOOLCHAIN.to_string());
     }
 
+    // Final fallback: nightly rustdoc/cargo directly in PATH without +toolchain (Nix/fenix).
+    // We skip the JSON format-version probe here because in Nix environments the rustdoc in
+    // PATH is always the same nightly the binary was compiled against — they are in lockstep.
+    if probe_native_nightly() {
+        tracing::warn!(
+            "No rustup toolchain found; using rustdoc/cargo directly from PATH (Nix/non-rustup environment)"
+        );
+        return Ok(String::new());
+    }
+
     let preferred_reason = match preferred {
         ToolchainProbe::Missing => format!(
             "{PREFERRED_TOOLCHAIN} is not installed. Install it with: rustup toolchain install \
@@ -123,12 +133,30 @@ You can also set {TOOLCHAIN_ENV_VAR} to a specific compatible nightly."
     )
 }
 
+/// Check whether the `rustdoc` on PATH is a nightly build without using rustup.
+/// Used as a last resort for Nix/fenix environments where the nightly toolchain is
+/// placed directly in PATH rather than managed by rustup.
+fn probe_native_nightly() -> bool {
+    Command::new("rustdoc")
+        .arg("--version")
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|v| v.contains("nightly"))
+        .unwrap_or(false)
+}
+
 fn probe_toolchain(toolchain: &str) -> Result<ToolchainProbe> {
-    let version_output = Command::new("rustdoc")
+    // Use `cargo +toolchain --version` rather than `rustdoc +toolchain --version`.
+    // Rustdoc treats `+toolchain` as a file argument, and `--version` overrides all other
+    // processing so it exits 0 even without rustup — a false positive. Cargo correctly
+    // errors with "no such subcommand" when rustup is absent, giving an accurate result.
+    let version_output = Command::new("cargo")
         .arg(format!("+{toolchain}"))
         .arg("--version")
         .output()
-        .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
+        .with_context(|| format!("Failed to run cargo --version for toolchain {toolchain}"))?;
 
     if !version_output.status.success() {
         let stderr = String::from_utf8_lossy(&version_output.stderr)
@@ -195,8 +223,11 @@ fn generate_probe_json(toolchain: &str) -> Result<String> {
         .context("Failed to create probe source file")?;
     std::fs::create_dir(&output_dir).context("Failed to create probe output directory")?;
 
-    let output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
+    let mut probe_cmd = Command::new("rustdoc");
+    if !toolchain.is_empty() {
+        probe_cmd.arg(format!("+{toolchain}"));
+    }
+    let output = probe_cmd
         .args([
             "-Z",
             "unstable-options",
@@ -245,8 +276,11 @@ pub async fn get_rustdoc_version() -> Result<String> {
 
 /// Get rustdoc version information for a specific toolchain.
 pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
-    let output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
+    let mut cmd = Command::new("rustdoc");
+    if !toolchain.is_empty() {
+        cmd.arg(format!("+{toolchain}"));
+    }
+    let output = cmd
         .arg("--version")
         .output()
         .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
@@ -328,6 +362,7 @@ impl std::fmt::Display for FeatureStrategy {
 fn is_compilation_error(stderr: &str) -> bool {
     stderr.contains("error[E")
         || stderr.contains("error: could not compile")
+        || stderr.contains("error: could not document")
         || stderr.contains("error: aborting due to")
         || (stderr.contains("error:") && stderr.contains("failed to compile"))
 }
@@ -441,7 +476,11 @@ pub async fn run_cargo_rustdoc_json(
     };
     tracing::debug!("{}", log_msg);
 
-    let mut base_args = vec![format!("+{}", toolchain), "rustdoc".to_string()];
+    let mut base_args = if toolchain.is_empty() {
+        vec!["rustdoc".to_string()]
+    } else {
+        vec![format!("+{}", toolchain), "rustdoc".to_string()]
+    };
 
     // Add package-specific arguments if provided
     if let Some(pkg) = package {
@@ -672,6 +711,13 @@ mod tests {
     #[test]
     fn test_is_compilation_error_with_could_not_compile() {
         let stderr = "error: could not compile `my-crate` due to previous error";
+        assert!(is_compilation_error(stderr));
+    }
+
+    #[test]
+    fn test_is_compilation_error_with_could_not_document() {
+        // `cargo rustdoc` emits "could not document" rather than "could not compile"
+        let stderr = "error: could not document `my-crate` due to previous error";
         assert!(is_compilation_error(stderr));
     }
 

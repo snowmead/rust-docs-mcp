@@ -209,6 +209,7 @@ async fn get_test_item_id(service: &RustDocsService) -> Result<i32> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_crates_io() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -260,6 +261,7 @@ async fn test_cache_from_crates_io() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_github() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -308,6 +310,7 @@ async fn test_cache_from_github() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_github_branch() -> Result<()> {
     // Initialize tracing for this test
     let _ = tracing_subscriber::fmt()
@@ -352,6 +355,7 @@ async fn test_cache_from_github_branch() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_from_local_path() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -499,6 +503,7 @@ serde = {{ workspace = true }}
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cache_update() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -634,6 +639,7 @@ async fn test_invalid_inputs() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_concurrent_caching() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     let service = std::sync::Arc::new(service);
@@ -835,6 +841,7 @@ edition = "2021"
 // ===== DOCUMENTATION TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_list_crate_items() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -878,6 +885,7 @@ async fn test_list_crate_items() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_preview() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -934,6 +942,7 @@ async fn test_search_items_preview() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_full() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -968,6 +977,7 @@ async fn test_search_items_full() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_item_details() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1004,6 +1014,7 @@ async fn test_get_item_details() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_item_docs_and_source() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1063,6 +1074,7 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 // ===== SEARCH TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_search_items_fuzzy() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1115,6 +1127,7 @@ async fn test_search_items_fuzzy() -> Result<()> {
 // ===== ANALYSIS TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_structure() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1184,6 +1197,7 @@ async fn test_structure() -> Result<()> {
 // ===== DEPENDENCY TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_dependencies() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1251,6 +1265,7 @@ async fn test_get_dependencies() -> Result<()> {
 // ===== METADATA TOOLS TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_get_crates_metadata() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1291,6 +1306,7 @@ async fn test_get_crates_metadata() -> Result<()> {
 // ===== EDGE CASES TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_invalid_item_ids() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1342,6 +1358,7 @@ async fn test_invalid_item_ids() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_empty_search_results() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
     setup_test_crate(&service).await?;
@@ -1397,13 +1414,92 @@ async fn test_empty_search_results() -> Result<()> {
     Ok(())
 }
 
+// ===== FEATURE FALLBACK TESTS =====
+
+/// Tests the feature fallback strategy (--all-features → default → --no-default-features)
+/// using a local crate that intentionally fails to compile with --all-features.
+/// This test requires no network access and works on all platforms.
+#[tokio::test]
+async fn test_feature_fallback_with_broken_feature() -> Result<()> {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter("rust_docs_mcp=debug")
+        .try_init();
+
+    let (service, _temp_dir) = create_test_service()?;
+
+    // Create a local crate whose `broken` feature triggers a compile_error.
+    // --all-features will fail; default features (which exclude `broken`) will succeed.
+    let crate_dir = TempDir::new()?;
+    std::fs::write(
+        crate_dir.path().join("Cargo.toml"),
+        r#"[package]
+name = "feature-fallback-fixture"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+broken = []
+"#,
+    )?;
+    let src_dir = crate_dir.path().join("src");
+    std::fs::create_dir(&src_dir)?;
+    std::fs::write(
+        src_dir.join("lib.rs"),
+        r#"//! Feature fallback fixture crate.
+//! The `broken` feature intentionally fails to compile to exercise the
+//! feature fallback strategy in rustdoc generation.
+
+#[cfg(feature = "broken")]
+compile_error!("The `broken` feature is intentionally uncompilable (fallback test fixture)");
+
+/// A function that always works.
+pub fn always_works() -> &'static str {
+    "ok"
+}
+"#,
+    )?;
+
+    let params = CacheCrateParams {
+        crate_name: "feature-fallback-fixture".to_string(),
+        source_type: "local".to_string(),
+        version: Some("0.1.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: Some(crate_dir.path().to_str().unwrap().to_string()),
+        members: None,
+        update: None,
+        features: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    let task = parse_cache_task_started(&response)?;
+    let result = wait_for_task_completion(&service, &task.task_id, TEST_TIMEOUT).await?;
+
+    assert!(
+        matches!(result, TaskResult::Success),
+        "Feature fallback should have succeeded by skipping the `broken` feature: {result:?}"
+    );
+
+    // Verify the crate is actually queryable
+    let versions_response = service
+        .list_crate_versions(Parameters(ListCrateVersionsParams {
+            crate_name: "feature-fallback-fixture".to_string(),
+        }))
+        .await;
+    assert!(
+        versions_response.contains("0.1.0"),
+        "Cached version not found: {versions_response}"
+    );
+
+    Ok(())
+}
+
 // ===== PLATFORM-SPECIFIC COMPILATION TESTS =====
 
 #[tokio::test]
-#[cfg_attr(
-    not(target_os = "macos"),
-    ignore = "Test designed for macOS platform-specific compilation issues"
-)]
+#[cfg(target_os = "macos")]
+#[ignore = "requires network access"]
 async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     // NOTE: This test depends on external resources and may fail due to:
     // - Network connectivity issues
@@ -1474,6 +1570,7 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
 // ===== PROGRESS TRACKING TESTS =====
 
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_step_tracking() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
