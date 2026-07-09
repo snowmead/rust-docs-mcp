@@ -5,7 +5,7 @@
 //! - GitHub
 //! - Local paths
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
@@ -1465,6 +1465,7 @@ pub fn always_works() -> &'static str {
         path: Some(crate_dir.path().to_str().unwrap().to_string()),
         members: None,
         update: None,
+        features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
