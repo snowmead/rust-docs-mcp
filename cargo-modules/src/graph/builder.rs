@@ -282,7 +282,7 @@ impl<'a> GraphBuilder<'a> {
             Self::walk_and_push_ty(ty.clone(), self.db, self.edition, dependencies_callback);
         }
 
-        for (_id, ty) in inference_result.type_of_for_iterator.iter() {
+        for ty in inference_result.type_of_for_iterator.values() {
             Self::walk_and_push_ty(ty.clone(), self.db, self.edition, dependencies_callback);
         }
 

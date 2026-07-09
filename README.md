@@ -86,10 +86,12 @@ ones released yesterday.
   - **For cratesio**: Provide `version` (e.g., `{crate_name: "serde", source_type: "cratesio", version: "1.0.215"}`)
   - **For github**: Provide `github_url` and either `branch` OR `tag` (e.g., `{crate_name: "my-crate", source_type: "github", github_url: "https://github.com/user/repo", tag: "v1.0.0"}`)
   - **For local**: Provide `path`, optional `version` (e.g., `{crate_name: "my-crate", source_type: "local", path: "~/projects/my-crate"}`)
+  - **Optional `features`**: Specific features to enable instead of `--all-features`. Use for crates with mutually exclusive features (e.g., `{crate_name: "leptos-use", source_type: "cratesio", version: "0.15.8", features: ["axum"]}`)
 - `remove_crate` - Remove cached crate versions to free disk space
 - `list_cached_crates` - View all cached crates with versions and sizes
 - `list_crate_versions` - List cached versions for a specific crate
 - `get_crates_metadata` - Batch metadata queries for multiple crates
+- `cache_operations` - Manage and monitor background caching operations (list, status, cancel, clear)
 
 ### Documentation Queries
 
@@ -194,13 +196,16 @@ cargo install rust-docs-mcp
 - Rust nightly toolchain (for Rustdoc JSON generation)
 
   ```bash
-  rustup toolchain install nightly
+  rustup toolchain install nightly-2026-05-22
   ```
 
-  Runtime prefers `nightly-2025-06-24` because it matches the rustdoc JSON
-  schema used by `rustdoc-types`, but it will fall back to `nightly` when that
-  toolchain produces the same JSON format version. You can override the choice
-  with:
+  Runtime prefers `nightly-2026-05-22`, which provides rustc
+  `1.97.0-nightly (e96c36b6f 2026-05-21)`, so documentation generation can
+  compile modern crates. The `rustdoc-types` dependency is kept in sync with
+  that rustdoc JSON format. If the dated toolchain is missing, the runtime
+  falls back to plain `nightly`, but only when it emits the same rustdoc JSON
+  format version (57); newer nightlies will be rejected. You can override the
+  choice with:
 
   ```bash
   export RUST_DOCS_MCP_TOOLCHAIN=nightly
@@ -259,13 +264,3 @@ Add the server to your MCP configuration:
   }
 }
 ```
-
-## Star History
-
-<a href="https://www.star-history.com/#snowmead/rust-docs-mcp&Date">
-    <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=snowmead/rust-docs-mcp&type=Date&theme=dark" />
-        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=snowmead/rust-docs-mcp&type=Date" />
-        <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=snowmead/rust-docs-mcp&type=Date" />
-    </picture>
-</a>

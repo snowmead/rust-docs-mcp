@@ -252,7 +252,7 @@ impl TaskManager {
             .collect();
 
         // Sort by started_at descending (newest first)
-        result.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        result.sort_by_key(|task| std::cmp::Reverse(task.started_at));
         result
     }
 

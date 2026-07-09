@@ -13,6 +13,14 @@ use std::sync::Arc;
 
 /// Cache key for the in-memory LRU of parsed `rustdoc_types::Crate` objects.
 type DocsCacheKey = (String, String, Option<String>);
+type SourceParams = (
+    String,
+    String,
+    Option<Vec<String>>,
+    Option<String>,
+    bool,
+    Option<Vec<String>>,
+);
 
 /// Service for managing crate caching and documentation generation
 pub struct CrateCache {
@@ -94,6 +102,7 @@ impl CrateCache {
         name: &str,
         version: &str,
         source: Option<&str>,
+        features: Option<Vec<String>>,
     ) -> Result<Arc<rustdoc_types::Crate>> {
         tracing::info!("ensure_crate_docs called for {}-{}", name, version);
 
@@ -169,7 +178,7 @@ impl CrateCache {
         // Note: progress_callback is None here because this method is called from
         // various places. The progress-aware path goes through cache_crate_with_source
         // which passes progress callbacks directly to generate_docs.
-        match self.generate_docs(name, version, None).await {
+        match self.generate_docs(name, version, None, features).await {
             Ok(_) => {
                 // Load and return the generated docs
                 self.load_docs(name, version, None).await
@@ -193,6 +202,7 @@ impl CrateCache {
         version: &str,
         source: Option<&str>,
         member_path: &str,
+        features: Option<Vec<String>>,
     ) -> Result<Arc<rustdoc_types::Crate>> {
         // Check if docs already exist for this member
         if self.storage.has_docs(name, version, Some(member_path)) {
@@ -206,7 +216,7 @@ impl CrateCache {
         }
 
         // Generate documentation for the specific workspace member
-        self.generate_workspace_member_docs(name, version, member_path, None)
+        self.generate_workspace_member_docs(name, version, member_path, None, features)
             .await?;
 
         // Get package name for the member
@@ -254,7 +264,7 @@ impl CrateCache {
         // If member is specified, use workspace member logic
         if let Some(member_path) = member {
             return self
-                .ensure_workspace_member_docs(name, version, None, member_path)
+                .ensure_workspace_member_docs(name, version, None, member_path, None)
                 .await;
         }
 
@@ -278,7 +288,7 @@ impl CrateCache {
         }
 
         // Regular crate, use normal flow
-        self.ensure_crate_docs(name, version, None).await
+        self.ensure_crate_docs(name, version, None, None).await
     }
 
     /// Download or copy a crate based on source type
@@ -300,9 +310,10 @@ impl CrateCache {
         name: &str,
         version: &str,
         progress_callback: Option<crate::cache::downloader::ProgressCallback>,
+        features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
         self.doc_generator
-            .generate_docs(name, version, progress_callback)
+            .generate_docs(name, version, progress_callback, features)
             .await
     }
 
@@ -313,9 +324,10 @@ impl CrateCache {
         version: &str,
         member_path: &str,
         progress_callback: Option<crate::cache::downloader::ProgressCallback>,
+        features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
         self.doc_generator
-            .generate_workspace_member_docs(name, version, member_path, progress_callback)
+            .generate_workspace_member_docs(name, version, member_path, progress_callback, features)
             .await
     }
 
@@ -510,11 +522,12 @@ impl CrateCache {
         members: &Option<Vec<String>>,
         source_str: Option<&str>,
         source: &CrateSource,
+        features: Option<Vec<String>>,
     ) -> Result<CacheResponse> {
         // If members are specified, cache those specific workspace members
         if let Some(members) = members {
             let response = self
-                .cache_workspace_members(crate_name, version, members, source_str, true)
+                .cache_workspace_members(crate_name, version, members, source_str, features, true)
                 .await;
 
             // Check if all failed for proper error handling
@@ -542,7 +555,7 @@ impl CrateCache {
             Ok(self.generate_workspace_response(crate_name, version, members, source, true))
         } else {
             // Not a workspace, proceed with normal caching
-            self.ensure_crate_docs(crate_name, version, source_str)
+            self.ensure_crate_docs(crate_name, version, source_str, features)
                 .await?;
 
             Ok(CacheResponse::success_updated(crate_name, version))
@@ -550,10 +563,7 @@ impl CrateCache {
     }
 
     /// Extract source parameters from CrateSource enum
-    fn extract_source_params(
-        &self,
-        source: &CrateSource,
-    ) -> (String, String, Option<Vec<String>>, Option<String>, bool) {
+    fn extract_source_params(&self, source: &CrateSource) -> SourceParams {
         match source {
             CrateSource::CratesIO(params) => (
                 params.crate_name.clone(),
@@ -561,6 +571,7 @@ impl CrateCache {
                 params.members.clone(),
                 None,
                 params.update.unwrap_or(false),
+                params.features.clone(),
             ),
             CrateSource::GitHub(params) => {
                 let version = if let Some(branch) = &params.branch {
@@ -586,6 +597,7 @@ impl CrateCache {
                     params.members.clone(),
                     source_str,
                     params.update.unwrap_or(false),
+                    params.features.clone(),
                 )
             }
             CrateSource::LocalPath(params) => (
@@ -597,6 +609,7 @@ impl CrateCache {
                 params.members.clone(),
                 Some(params.path.clone()),
                 params.update.unwrap_or(false),
+                params.features.clone(),
             ),
         }
     }
@@ -615,6 +628,7 @@ impl CrateCache {
         version: &str,
         members: &[String],
         source_str: Option<&str>,
+        features: Option<Vec<String>>,
         updated: bool,
     ) -> CacheResponse {
         use futures::future::join_all;
@@ -634,6 +648,7 @@ impl CrateCache {
             .iter()
             .map(|member| {
                 let member_clone = member.clone();
+                let features = features.clone();
                 let sem = std::sync::Arc::clone(&sem);
                 async move {
                     let _permit = sem.acquire().await.expect("semaphore closed");
@@ -643,6 +658,7 @@ impl CrateCache {
                             version,
                             source_str,
                             &member_clone,
+                            features,
                         )
                         .await;
                     (member_clone, result)
@@ -707,6 +723,7 @@ impl CrateCache {
         members: &Option<Vec<String>>,
         source_str: Option<&str>,
         source: &CrateSource,
+        features: Option<Vec<String>>,
     ) -> String {
         // Create transaction for safe update
         let mut transaction = CacheTransaction::new(&self.storage, crate_name, version);
@@ -722,7 +739,9 @@ impl CrateCache {
 
         // Try to re-cache the crate
         let update_result = self
-            .cache_crate_with_update_impl(crate_name, version, members, source_str, source)
+            .cache_crate_with_update_impl(
+                crate_name, version, members, source_str, source, features,
+            )
             .await;
 
         // Check if update was successful
@@ -751,9 +770,10 @@ impl CrateCache {
         version: &str,
         members: &[String],
         source_str: Option<&str>,
+        features: Option<Vec<String>>,
         updated: bool,
     ) -> CacheResponse {
-        self.cache_workspace_members(crate_name, version, members, source_str, updated)
+        self.cache_workspace_members(crate_name, version, members, source_str, features, updated)
             .await
     }
 
@@ -845,7 +865,7 @@ impl CrateCache {
         };
 
         // Extract parameters from source
-        let (crate_name, version, members, source_str, update) =
+        let (crate_name, version, members, source_str, update, features) =
             self.extract_source_params(&source);
 
         // Resolve partial versions for crates.io sources before any download/cache checks
@@ -889,6 +909,7 @@ impl CrateCache {
                     &members,
                     source_str.as_deref(),
                     &source,
+                    features.clone(),
                 )
                 .await;
         }
@@ -906,6 +927,7 @@ impl CrateCache {
                     &version,
                     &members,
                     source_str.as_deref(),
+                    features.clone(),
                     false,
                 )
                 .await;
@@ -995,7 +1017,10 @@ impl CrateCache {
             tm.update_step(tid, 1, "Running cargo rustdoc").await;
         }
 
-        match self.generate_docs(&crate_name, &version, None).await {
+        match self
+            .generate_docs(&crate_name, &version, None, features)
+            .await
+        {
             Ok(_) => {
                 // Update to indexing stage
                 if let (Some(tm), Some(tid)) = (&task_manager, &task_id) {
