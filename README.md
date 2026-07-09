@@ -223,7 +223,22 @@ cargo build --release
 ### CLI Commands
 
 ```bash
-rust-docs-mcp                   # Start MCP server
+rust-docs-mcp                   # Start MCP server (same as `serve`)
+rust-docs-mcp serve             # Start MCP server explicitly
+
+# One-shot operations (stateless – print JSON to stdout and exit)
+rust-docs-mcp call cache-crate \
+  --params '{"crate_name":"serde","source_type":"cratesio","version":"1.0.215"}'
+
+rust-docs-mcp call search-items-fuzzy \
+  --params '{"crate_name":"serde","version":"1.0.215","query":"Deserialize","limit":10}'
+
+rust-docs-mcp call list-cached-crates
+
+rust-docs-mcp call list-crate-versions \
+  --params '{"crate_name":"serde"}'
+
+# Maintenance commands
 rust-docs-mcp install           # Install to ~/.local/bin
 rust-docs-mcp install --force   # Force overwrite existing installation
 rust-docs-mcp doctor            # Verify system environment and dependencies
@@ -231,6 +246,19 @@ rust-docs-mcp doctor --json     # Output diagnostic results in JSON format
 rust-docs-mcp update            # Update to latest version from GitHub
 rust-docs-mcp --help            # Show help
 ```
+
+> **Note:** `call cache-crate` is **blocking** — it downloads the crate,
+> generates documentation, and builds the search index before returning.
+> This is different from MCP mode where `cache_crate` returns a task ID
+> immediately and completes in the background. If a one-shot tool returns
+> an error JSON response, the CLI prints that JSON to stdout and exits with
+> status 1.
+>
+> Available one-shot tools: `cache-crate`, `search-items-fuzzy`,
+> `search-items-preview`, `search-items`, `list-crate-items`,
+> `get-item-details`, `get-item-docs`, `get-item-source`,
+> `list-cached-crates`, `list-crate-versions`, `get-dependencies`,
+> `structure`.
 
 ### Troubleshooting
 

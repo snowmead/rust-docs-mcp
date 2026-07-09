@@ -11,12 +11,14 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCachedCratesOutput,
+    ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams,
     ListCrateVersionsParams,
 };
+use rust_docs_mcp::cli::{self, CliTool, output_indicates_error};
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
 use rust_docs_mcp::docs::outputs::{
@@ -27,8 +29,10 @@ use rust_docs_mcp::docs::tools::{
     GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
     SearchItemsParams, SearchItemsPreviewParams,
 };
+use rust_docs_mcp::runtime::RustDocsRuntime;
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use std::process::Command;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -1572,6 +1576,86 @@ async fn test_step_tracking() -> Result<()> {
     Ok(())
 }
 
+// ── CLI / Runtime one-shot tests ──────────────────────────────────────
+
+#[test]
+fn test_cli_output_indicates_error() {
+    assert!(output_indicates_error(r#"{"error":"boom"}"#));
+    assert!(output_indicates_error(
+        r#"{"status":"error","error":"boom"}"#
+    ));
+    assert!(!output_indicates_error(r#"{"status":"success"}"#));
+    assert!(!output_indicates_error(
+        r#"{"status":"partial_success","errors":["boom"]}"#
+    ));
+}
+
+#[tokio::test]
+async fn test_cli_call_with_status_marks_tool_error() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let result = cli::call_with_status(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio"}"#.to_string()),
+    )
+    .await?;
+
+    assert!(
+        result.failed,
+        "Expected tool error for output: {}",
+        result.output
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result.output)?;
+    assert_eq!(
+        parsed.get("status").and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert!(
+        parsed
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|error| error.contains("version")),
+        "Expected missing version error, got: {parsed}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_binary_tool_error_exits_nonzero_and_prints_json() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust-docs-mcp"))
+        .arg("--cache-dir")
+        .arg(temp_dir.path())
+        .args([
+            "call",
+            "cache-crate",
+            "--params",
+            r#"{"crate_name":"semver","source_type":"cratesio"}"#,
+        ])
+        .output()?;
+
+    assert!(!output.status.success(), "Expected non-zero exit status");
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())?;
+    assert_eq!(
+        parsed.get("status").and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert!(
+        parsed
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|error| error.contains("version")),
+        "Expected missing version error, got: {parsed}"
+    );
+
+    Ok(())
+}
+
 // Integration tests for the `features` parameter
 
 /// Write a Cargo.toml + src/lib.rs for a crate that gates two public symbols
@@ -1611,6 +1695,88 @@ pub mod actix_module {
 }
 "#,
     )?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cli_call_list_cached_crates_allows_empty_object() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        Some("{}".to_string()),
+    )
+    .await?;
+
+    let parsed: ListCachedCratesOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI list output: {output}"))?;
+    assert_eq!(parsed.total_crates, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cli_call_list_cached_crates_rejects_non_empty_params() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let error = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        Some(r#"{"unexpected":true}"#.to_string()),
+    )
+    .await
+    .expect_err("list-cached-crates should reject non-empty params");
+
+    assert!(
+        error.to_string().contains("does not accept parameters"),
+        "Unexpected error: {error}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cache_crate_background_rejects_invalid_params_before_task() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    let params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: None,
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    assert!(
+        response.contains("Missing required parameter 'version'"),
+        "Expected missing version error, got: {response}"
+    );
+    assert!(
+        serde_json::from_str::<CacheTaskStartedOutput>(&response).is_err(),
+        "Invalid params should not create a task: {response}"
+    );
+
+    let operations = service
+        .cache_operations(Parameters(CacheOperationsParams {
+            task_id: None,
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        }))
+        .await;
+    assert!(
+        operations.contains("**Total Operations**: 0")
+            || operations.contains("No caching operations found"),
+        "Invalid params should not register a task: {operations}"
+    );
+
     Ok(())
 }
 
@@ -1676,6 +1842,83 @@ async fn test_cache_with_specific_features() -> Result<()> {
     assert!(
         actix_output.items.is_empty(),
         "actix_handler visible in docs, but only features=[axum] was requested: {search_actix}"
+    );
+
+    Ok(())
+}
+
+/// Verify the shared runtime can cache a crate **blocking** and the
+/// result JSON reports success.
+#[tokio::test]
+async fn test_runtime_cache_blocking() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    let params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+
+    let output = runtime.cache_crate_blocking(params).await;
+    let parsed: CacheCrateOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse cache output: {output}"))?;
+
+    assert!(parsed.is_success(), "Expected success, got: {parsed:?}");
+
+    Ok(())
+}
+
+/// Verify the shared runtime can do a one-shot fuzzy search against
+/// an already-cached crate.
+#[tokio::test]
+async fn test_runtime_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    // Cache first (blocking)
+    let cache_params = CacheCrateParams {
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+    let cache_output = runtime.cache_crate_blocking(cache_params).await;
+    let cache_parsed: CacheCrateOutput = serde_json::from_str(&cache_output)?;
+    assert!(cache_parsed.is_success(), "Cache failed: {cache_parsed:?}");
+
+    // Now search
+    let search_params = SearchItemsFuzzyParams {
+        crate_name: "semver".to_string(),
+        version: "1.0.0".to_string(),
+        query: "Version".to_string(),
+        fuzzy_enabled: Some(true),
+        fuzzy_distance: Some(1),
+        limit: Some(5),
+        kind_filter: None,
+        member: None,
+    };
+
+    let output = runtime.search_items_fuzzy(search_params).await;
+    let parsed: SearchItemsFuzzyOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse search output: {output}"))?;
+
+    assert!(
+        !parsed.results.is_empty(),
+        "Expected at least one search result"
     );
 
     Ok(())
@@ -1758,6 +2001,25 @@ resolver = "2"
     Ok(())
 }
 
+/// CLI dispatch: cache_crate via the `cli::call` function.
+#[tokio::test]
+async fn test_cli_call_cache_crate() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let parsed: CacheCrateOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI cache output: {output}"))?;
+    assert!(parsed.is_success());
+
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "Heavy network test (compiles leptos-use ~60s+), starves the 2-core CI runner. Run with --ignored."]
 async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
@@ -1788,6 +2050,63 @@ async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
         matches!(result, TaskResult::Success),
         "Failed to cache leptos-use@0.18.3 with features=[axum]: {result:?}"
     );
+
+    Ok(())
+}
+
+/// CLI dispatch: search after cache.
+#[tokio::test]
+async fn test_cli_call_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    // Search
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::SearchItemsFuzzy,
+        Some(
+            r#"{"crate_name":"semver","version":"1.0.0","query":"Version","limit":5}"#.to_string(),
+        ),
+    )
+    .await?;
+
+    let parsed: SearchItemsFuzzyOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI search output: {output}"))?;
+    assert!(!parsed.results.is_empty());
+
+    Ok(())
+}
+
+/// CLI dispatch: list-cached-crates with no params.
+#[tokio::test]
+async fn test_cli_call_list_cached_crates() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache a crate first
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        None,
+    )
+    .await?;
+
+    let parsed: ListCachedCratesOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI list output: {output}"))?;
+    assert!(parsed.total_crates >= 1);
 
     Ok(())
 }
