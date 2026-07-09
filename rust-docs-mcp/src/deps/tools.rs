@@ -94,7 +94,7 @@ impl DepsTools {
                     }
                     Err(e) => Err(DepsErrorOutput::new(format!(
                         "Dependencies not available for {}-{}. Error: {}",
-                        params.crate_name, params.version, e
+                        params.crate_name, version, e
                     ))),
                 }
             }

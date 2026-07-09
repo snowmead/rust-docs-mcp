@@ -276,8 +276,11 @@ pub async fn get_rustdoc_version() -> Result<String> {
 
 /// Get rustdoc version information for a specific toolchain.
 pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
-    let output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
+    let mut cmd = Command::new("rustdoc");
+    if !toolchain.is_empty() {
+        cmd.arg(format!("+{toolchain}"));
+    }
+    let output = cmd
         .arg("--version")
         .output()
         .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
