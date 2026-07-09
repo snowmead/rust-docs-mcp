@@ -12,8 +12,9 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 
-/// Preferred nightly toolchain version known to match `rustdoc-types`.
-pub const PREFERRED_TOOLCHAIN: &str = "nightly-2025-06-24";
+/// Preferred nightly toolchain. Keep this new enough to compile modern crates
+/// and keep `rustdoc-types` in sync with its rustdoc JSON format.
+pub const PREFERRED_TOOLCHAIN: &str = "nightly-2026-05-22";
 
 /// Fallback nightly alias to try when the preferred dated toolchain is unavailable.
 pub const FALLBACK_TOOLCHAIN: &str = "nightly";
@@ -156,7 +157,7 @@ fn is_missing_toolchain_error(stderr: &str, toolchain: &str) -> bool {
     // Extract toolchain name from rustup's error format: 'toolchain-name'
     // Then check it matches our query, allowing for an architecture suffix
     // (e.g., "nightly" -> "nightly-aarch64-apple-darwin") but not a date suffix
-    // (e.g., "nightly" should NOT match "nightly-2025-06-24-aarch64-apple-darwin")
+    // (e.g., "nightly" should NOT match "nightly-2026-05-22-aarch64-apple-darwin")
     stderr.split('\'').nth(1).is_some_and(|name| {
         name == toolchain
             || name
@@ -268,7 +269,7 @@ pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
 ///
 /// The recommended order is: [`AllFeatures`](Self::AllFeatures) →
 /// [`DefaultFeatures`](Self::DefaultFeatures) → [`NoDefaultFeatures`](Self::NoDefaultFeatures)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 #[allow(clippy::enum_variant_names)]
 enum FeatureStrategy {
     /// Use --all-features (enables all feature flags)
@@ -277,6 +278,8 @@ enum FeatureStrategy {
     DefaultFeatures,
     /// Use --no-default-features (minimal)
     NoDefaultFeatures,
+    /// Use --no-default-features --features=a,b,c (specific features only)
+    Specific(Vec<String>),
 }
 
 impl FeatureStrategy {
@@ -286,15 +289,37 @@ impl FeatureStrategy {
             Self::AllFeatures => vec!["--all-features".to_string()],
             Self::DefaultFeatures => vec![],
             Self::NoDefaultFeatures => vec!["--no-default-features".to_string()],
+            Self::Specific(features) => {
+                let mut args = vec!["--no-default-features".to_string()];
+                if !features.is_empty() {
+                    args.push("--features".to_string());
+                    args.push(features.join(","));
+                }
+                args
+            }
         }
     }
+}
 
-    /// Get a description of this strategy for logging
-    fn description(&self) -> &str {
+impl std::fmt::Display for FeatureStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AllFeatures => "all features enabled",
-            Self::DefaultFeatures => "default features only",
-            Self::NoDefaultFeatures => "no default features",
+            Self::AllFeatures => f.write_str("all features enabled"),
+            Self::DefaultFeatures => f.write_str("default features only"),
+            Self::NoDefaultFeatures => f.write_str("no default features"),
+            Self::Specific(features) if features.is_empty() => {
+                f.write_str("specific features (none)")
+            }
+            Self::Specific(features) => {
+                f.write_str("specific features: ")?;
+                for (i, feat) in features.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str(", ")?;
+                    }
+                    f.write_str(feat)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -383,6 +408,7 @@ pub async fn run_cargo_rustdoc_json(
     source_path: &Path,
     package: Option<&str>,
     target_dir: Option<&Path>,
+    features: Option<Vec<String>>,
 ) -> Result<()> {
     let toolchain = resolve_toolchain()?;
 
@@ -423,20 +449,22 @@ pub async fn run_cargo_rustdoc_json(
         base_args.push(pkg.to_string());
     }
 
-    // Try different feature strategies in order
-    let strategies = [
-        FeatureStrategy::AllFeatures,
-        FeatureStrategy::DefaultFeatures,
-        FeatureStrategy::NoDefaultFeatures,
-    ];
+    // When features are requested, use only the caller's set (no fallback).
+    // Otherwise try AllFeatures, DefaultFeatures, NoDefaultFeatures in order.
+    let strategies = if let Some(feats) = features {
+        vec![FeatureStrategy::Specific(feats)]
+    } else {
+        vec![
+            FeatureStrategy::AllFeatures,
+            FeatureStrategy::DefaultFeatures,
+            FeatureStrategy::NoDefaultFeatures,
+        ]
+    };
 
     let mut failed_attempts = Vec::new();
 
     for (i, strategy) in strategies.iter().enumerate() {
-        tracing::debug!(
-            "Attempting documentation generation with {}",
-            strategy.description()
-        );
+        tracing::debug!("Attempting documentation generation with {strategy}");
 
         // Build args with current feature strategy
         let feature_args = strategy.args();
@@ -498,57 +526,36 @@ pub async fn run_cargo_rustdoc_json(
                     // Check if this is a compilation error
                     if is_compilation_error(&stderr_with_lib) && i < strategies.len() - 1 {
                         tracing::warn!(
-                            "Compilation failed with {}, will try next strategy",
-                            strategy.description()
+                            "Compilation failed with {strategy}, will try next strategy"
                         );
                         failed_attempts.push(FailedAttempt::new(
-                            strategy.description().to_string(),
+                            strategy.to_string(),
                             stderr_with_lib.to_string(),
                         ));
                         continue; // Try next strategy
                     }
 
-                    bail!(
-                        "Failed to generate documentation with {}: {}",
-                        strategy.description(),
-                        stderr_with_lib
-                    );
+                    bail!("Failed to generate documentation with {strategy}: {stderr_with_lib}");
                 }
 
                 // Success with --lib
-                tracing::info!(
-                    "Successfully generated documentation with {}",
-                    strategy.description()
-                );
+                tracing::info!("Successfully generated documentation with {strategy}");
                 return Ok(());
             }
 
             // Check if this is a compilation error that we should retry
             if is_compilation_error(&stderr) && i < strategies.len() - 1 {
-                tracing::warn!(
-                    "Compilation failed with {}, will try next strategy",
-                    strategy.description()
-                );
-                failed_attempts.push(FailedAttempt::new(
-                    strategy.description().to_string(),
-                    stderr.to_string(),
-                ));
+                tracing::warn!("Compilation failed with {strategy}, will try next strategy");
+                failed_attempts.push(FailedAttempt::new(strategy.to_string(), stderr.to_string()));
                 continue; // Try next strategy
             }
 
             // Other errors or last strategy failed
-            bail!(
-                "Failed to generate documentation with {}: {}",
-                strategy.description(),
-                stderr
-            );
+            bail!("Failed to generate documentation with {strategy}: {stderr}");
         }
 
         // Success
-        tracing::info!(
-            "Successfully generated documentation with {}",
-            strategy.description()
-        );
+        tracing::info!("Successfully generated documentation with {strategy}");
         return Ok(());
     }
 
@@ -618,21 +625,41 @@ mod tests {
             FeatureStrategy::NoDefaultFeatures.args(),
             vec!["--no-default-features".to_string()]
         );
+        assert_eq!(
+            FeatureStrategy::Specific(vec!["axum".to_string()]).args(),
+            vec![
+                "--no-default-features".to_string(),
+                "--features".to_string(),
+                "axum".to_string(),
+            ]
+        );
+        assert_eq!(
+            FeatureStrategy::Specific(vec![]).args(),
+            vec!["--no-default-features".to_string()]
+        );
     }
 
     #[test]
-    fn test_feature_strategy_description() {
+    fn test_feature_strategy_display() {
         assert_eq!(
-            FeatureStrategy::AllFeatures.description(),
+            FeatureStrategy::AllFeatures.to_string(),
             "all features enabled"
         );
         assert_eq!(
-            FeatureStrategy::DefaultFeatures.description(),
+            FeatureStrategy::DefaultFeatures.to_string(),
             "default features only"
         );
         assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.description(),
+            FeatureStrategy::NoDefaultFeatures.to_string(),
             "no default features"
+        );
+        assert_eq!(
+            FeatureStrategy::Specific(vec!["axum".to_string(), "ssr".to_string()]).to_string(),
+            "specific features: axum, ssr"
+        );
+        assert_eq!(
+            FeatureStrategy::Specific(vec![]).to_string(),
+            "specific features (none)"
         );
     }
 

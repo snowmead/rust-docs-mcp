@@ -104,7 +104,7 @@ impl BenchFixture {
             eprintln!("Fixture not found; generating (this may take several minutes)...");
             runtime.block_on(async {
                 cache
-                    .ensure_crate_docs(&name, &version, None)
+                    .ensure_crate_docs(&name, &version, None, None)
                     .await
                     .expect("ensure_crate_docs");
             });

@@ -88,10 +88,9 @@ pub fn build_item_info(crate_data: &Crate, id: &Id, item: &Item) -> Option<ItemI
     // crate's `paths` map for items (e.g. impl blocks) that don't store one.
     let name = if let Some(name) = &item.name {
         name.clone()
-    } else if let Some(path_summary) = crate_data.paths.get(id) {
-        path_summary.path.last()?.clone()
     } else {
-        return None;
+        let path_summary = crate_data.paths.get(id)?;
+        path_summary.path.last()?.clone()
     };
 
     Some(ItemInfo {

@@ -65,6 +65,10 @@ pub struct CacheCrateParams {
         description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
     )]
     pub update: Option<bool>,
+    #[schemars(
+        description = "Specific features to enable instead of --all-features. Use this for crates with mutually exclusive features (e.g., leptos-use has conflicting 'actix' and 'axum' features). When provided, uses --no-default-features --features=a,b,c with no fallback. When omitted, uses --all-features with automatic fallback."
+    )]
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -81,6 +85,10 @@ pub struct CacheCrateFromCratesIOParams {
         description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
     )]
     pub update: Option<bool>,
+    #[schemars(
+        description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
+    )]
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -105,6 +113,10 @@ pub struct CacheCrateFromGitHubParams {
         description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
     )]
     pub update: Option<bool>,
+    #[schemars(
+        description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
+    )]
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -127,6 +139,10 @@ pub struct CacheCrateFromLocalParams {
         description = "Force re-download and re-cache the crate even if it already exists. Defaults to false. The existing cache is preserved until the update succeeds."
     )]
     pub update: Option<bool>,
+    #[schemars(
+        description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
+    )]
+    pub features: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -204,6 +220,7 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 version,
                 members: params.members.clone(),
                 update: params.update,
+                features: params.features.clone(),
             }))
         }
         "github" => {
@@ -234,6 +251,7 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 tag: params.tag.clone(),
                 members: params.members.clone(),
                 update: params.update,
+                features: params.features.clone(),
             }))
         }
         "local" => {
@@ -246,6 +264,7 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 path,
                 members: params.members.clone(),
                 update: params.update,
+                features: params.features.clone(),
             }))
         }
         other => Err(format!(
