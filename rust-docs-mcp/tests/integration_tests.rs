@@ -5,7 +5,7 @@
 //! - GitHub
 //! - Local paths
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rmcp::handler::server::wrapper::Parameters;
 use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
@@ -1497,6 +1497,7 @@ pub fn always_works() -> &'static str {
 #[cfg(target_os = "macos")]
 #[ignore = "requires network access"]
 async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
+    use anyhow::Context;
     // NOTE: This test depends on external resources and may fail due to:
     // - Network connectivity issues
     // - crates.io downtime or rate limiting
