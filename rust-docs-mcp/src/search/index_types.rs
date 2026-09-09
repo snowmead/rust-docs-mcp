@@ -1,66 +1,83 @@
-//! Lightweight types for the search indexing pipeline.
-//!
-//! [`IndexCrate`] and [`IndexItem`] mirror the shape of
-//! [`rustdoc_types::Crate`] / [`rustdoc_types::Item`] but skip every field
-//! the indexer doesn't read — most importantly the deeply recursive
-//! [`rustdoc_types::ItemEnum`] subtree.  The `inner` field is replaced by a
-//! `kind_tag: &'static str` that captures only the enum discriminant (e.g.
-//! `"function"`, `"struct"`) via a custom serde `Deserialize` that calls
-//! [`serde::de::IgnoredAny`] to skip the value without allocating.
-//!
-//! This drops the indexing-path peak heap from ~2× docs.json to ~0.3–0.5×
-//! because the per-item `Function.sig`, `Impl.trait_`, `Generics.params`,
-//! etc. are never materialised.
+//! Types for indexing rustdoc JSON without allocating function signatures,
+//! generics, or implementation bodies. Only `use` and module payloads survive
+//! deserialization so import names and their public paths can be indexed.
 
 use rustdoc_types::{Id, ItemSummary, Visibility};
 use serde::Deserialize;
 use std::collections::HashMap;
 
-/// Trimmed crate representation for the indexing-only path.
-///
-/// Deserializes the same rustdoc JSON as [`rustdoc_types::Crate`] but only
-/// keeps the two maps the indexer iterates (`index` and `paths`).  All other
-/// top-level fields (`root`, `crate_version`, `includes_private`,
-/// `external_crates`, `target`, `format_version`) are silently skipped by
-/// serde's default behaviour for structs.
+/// The root and item/path maps needed to index names and public import paths.
 #[derive(Deserialize)]
 pub struct IndexCrate {
+    pub root: Id,
     pub index: HashMap<Id, IndexItem>,
     pub paths: HashMap<Id, ItemSummary>,
 }
 
-/// Lightweight stand-in for [`rustdoc_types::Item`].
-///
-/// Keeps only the fields the search indexer actually reads:
-///
-/// | Field | Used by |
-/// |-------|---------|
-/// | `name` | document name field |
-/// | `docs` | full-text search body |
-/// | `visibility` | stored metadata |
-/// | `kind_tag` (from `inner`) | kind facet (e.g. `"function"`) |
-///
-/// The expensive `inner` subtree (`ItemEnum`) is replaced by
-/// [`kind_tag`](Self::kind_tag), which is deserialised with a custom
-/// visitor that reads only the externally-tagged variant key and skips the
-/// value via [`serde::de::IgnoredAny`].
-#[derive(Deserialize)]
+/// Item metadata plus the small import/module payloads needed for path discovery.
 pub struct IndexItem {
     pub name: Option<String>,
     pub docs: Option<String>,
     pub visibility: Visibility,
-    /// The `ItemEnum` variant tag (e.g. `"function"`, `"struct"`).
-    ///
-    /// Stored as `String` rather than `&'static str` to keep the
-    /// `#[derive(Deserialize)]` compatible with serde's lifetime
-    /// inference. The allocation is negligible (~10 bytes) compared
-    /// to the kilobytes of `ItemEnum` subtree we skip per item.
-    #[serde(deserialize_with = "deserialize_kind_tag", rename = "inner")]
+    /// The item kind used as the search facet.
     pub kind_tag: String,
+    pub import: Option<rustdoc_types::Use>,
+    pub module: Option<rustdoc_types::Module>,
+}
+
+impl<'de> Deserialize<'de> for IndexItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct RawItem {
+            name: Option<String>,
+            docs: Option<String>,
+            visibility: Visibility,
+            #[serde(deserialize_with = "deserialize_inner")]
+            inner: IndexInner,
+        }
+        let raw = RawItem::deserialize(deserializer)?;
+        Ok(Self {
+            name: raw
+                .name
+                .or_else(|| raw.inner.import.as_ref().map(|i| i.name.clone())),
+            docs: raw.docs,
+            visibility: raw.visibility,
+            kind_tag: raw.inner.kind,
+            import: raw.inner.import,
+            module: raw.inner.module,
+        })
+    }
+}
+
+#[derive(Default)]
+struct IndexInner {
+    kind: String,
+    import: Option<rustdoc_types::Use>,
+    module: Option<rustdoc_types::Module>,
+}
+
+impl IndexCrate {
+    pub fn reexport_paths(&self) -> std::collections::HashMap<Id, Vec<String>> {
+        crate::docs::query::module_reexport_paths(
+            self.root,
+            |id| {
+                self.index.get(&id).and_then(|item| {
+                    item.module
+                        .as_ref()
+                        .map(|module| (item.name.as_deref().unwrap_or(""), module.items.as_slice()))
+                })
+            },
+            |id| {
+                self.index
+                    .get(&id)
+                    .and_then(|item| item.import.as_ref().map(|import| import.name.as_str()))
+            },
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Custom serde: extract only the ItemEnum variant tag from `inner`
+// Skip payloads that the indexer does not need.
 // ---------------------------------------------------------------------------
 
 /// Map a JSON variant-tag string to the same `&'static str` that
@@ -99,45 +116,66 @@ fn tag_to_kind(tag: &str) -> String {
     .to_string()
 }
 
-/// Deserialise the `inner` field of an Item as just the variant tag string.
+/// Read the variant tag, preserving only import and module payloads.
 ///
 /// Rustdoc JSON uses serde's default externally-tagged enum encoding:
 ///
 /// - **Newtype/struct variants** (most): `{"function": { ... }}`
-///   → handled by `visit_map`: read the single key, skip the value via
-///   [`serde::de::IgnoredAny`].
+///   Keep imports/modules; skip every other value with `IgnoredAny`.
 /// - **Unit variants** (`ExternType`): `"extern_type"`
 ///   → handled by `visit_str`: return the tag directly.
-fn deserialize_kind_tag<'de, D>(deserializer: D) -> Result<String, D::Error>
+fn deserialize_inner<'de, D>(deserializer: D) -> Result<IndexInner, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     struct KindTagVisitor;
 
     impl<'de> serde::de::Visitor<'de> for KindTagVisitor {
-        type Value = String;
+        type Value = IndexInner;
 
         fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
             f.write_str("an externally-tagged ItemEnum variant (map or string)")
         }
 
         // Unit variant: `"extern_type"`
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<String, E> {
-            Ok(tag_to_kind(v))
+        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<IndexInner, E> {
+            Ok(IndexInner {
+                kind: tag_to_kind(v),
+                ..Default::default()
+            })
         }
 
         // Newtype/struct variant: `{"function": { ... }}`
-        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<String, A::Error> {
+        fn visit_map<A: serde::de::MapAccess<'de>>(
+            self,
+            mut map: A,
+        ) -> Result<IndexInner, A::Error> {
             let key: String = map
                 .next_key()?
                 .ok_or_else(|| serde::de::Error::custom("empty map for ItemEnum inner"))?;
-            // Skip the entire value subtree without allocating.
-            map.next_value::<serde::de::IgnoredAny>()?;
-            Ok(tag_to_kind(&key))
+            let mut inner = IndexInner {
+                kind: tag_to_kind(&key),
+                ..Default::default()
+            };
+            match key.as_str() {
+                "use" => inner.import = Some(map.next_value()?),
+                "module" => inner.module = Some(map.next_value()?),
+                _ => {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+            Ok(inner)
         }
     }
 
     deserializer.deserialize_any(KindTagVisitor)
+}
+
+#[cfg(test)]
+fn deserialize_kind_tag<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    deserialize_inner(deserializer).map(|inner| inner.kind)
 }
 
 #[cfg(test)]

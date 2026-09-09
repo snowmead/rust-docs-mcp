@@ -19,6 +19,7 @@
 pub mod constants;
 pub mod docgen;
 pub mod downloader;
+pub mod features;
 pub mod member_utils;
 pub mod outputs;
 pub mod service;

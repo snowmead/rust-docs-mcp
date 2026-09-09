@@ -1,6 +1,6 @@
 [package]
 name = "rust-docs-mcp"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 authors = ["Michael Assaf <michael@snowmead.com>"]
 description = "MCP server providing comprehensive Rust crate analysis: documentation search, source code access, dependency trees, and module structure visualization with multi-source caching"
@@ -30,6 +30,7 @@ git2 = "0.20"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 rustdoc-types = { version = "0.57.3", features = ["rustc-hash"] }
 semver = "1.0"
+sha2 = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 shellexpand = "3.1"

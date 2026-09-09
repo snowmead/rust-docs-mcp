@@ -145,6 +145,8 @@ async fn test_cache_crate_reuses_cargo_registry_source() -> Result<()> {
     let service = RustDocsService::new(Some(cache_dir.path().to_path_buf()))?;
 
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: crate_name.clone(),
         source_type: "cratesio".to_string(),
         version: Some(crate_version.to_string()),

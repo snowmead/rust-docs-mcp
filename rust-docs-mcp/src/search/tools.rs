@@ -22,6 +22,9 @@
 //! let tools = SearchTools::new(cache);
 //!
 //! let params = SearchItemsFuzzyParams {
+//!     no_default_features: None,
+//!     all_features: None,
+//!     features: None,
 //!     crate_name: "serde".to_string(),
 //!     version: "1.0.0".to_string(),
 //!     query: "deserialize".to_string(),
@@ -71,6 +74,12 @@ pub struct SearchItemsFuzzyParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -81,17 +90,6 @@ pub struct SearchTools {
 impl SearchTools {
     pub fn new(cache: Arc<RwLock<CrateCache>>) -> Self {
         Self { cache }
-    }
-
-    /// Check if a crate has a search index
-    async fn has_search_index(
-        &self,
-        crate_name: &str,
-        version: &str,
-        member: Option<&str>,
-    ) -> bool {
-        let cache = self.cache.read().await;
-        cache.storage.has_search_index(crate_name, version, member)
     }
 
     /// Perform the actual search without holding any locks
@@ -150,69 +148,43 @@ impl SearchTools {
         let version = params.version.clone();
         let member = params.member.clone();
         let result = async {
-            // First check with read lock if docs already exist
             {
-                let cache = self.cache.read().await;
-                let has_docs = cache.has_docs(
+                let guard = self.cache.read().await;
+                let cache = guard.with_features(
+                    params.features.clone(),
+                    params.no_default_features,
+                    params.all_features,
+                )?;
+                if cache.has_docs(
                     &params.crate_name,
                     &params.version,
                     params.member.as_deref(),
-                );
-
-                if has_docs
-                    && self
-                        .has_search_index(
-                            &params.crate_name,
-                            &params.version,
-                            params.member.as_deref(),
-                        )
-                        .await
-                {
-                    // Docs and index exist, proceed with search using read lock only
-                    let storage = cache.storage.clone();
-                    drop(cache); // Release read lock early
-
-                    return self.perform_search(params, storage).await;
-                }
-            }
-
-            // Need to generate docs/index, acquire write lock
-            {
-                let cache = self.cache.write().await;
-                // Double-check in case another task generated it
-                let has_docs = cache.has_docs(
+                ) && cache.storage.has_search_index(
                     &params.crate_name,
                     &params.version,
                     params.member.as_deref(),
-                );
-
-                if !has_docs {
-                    cache
-                        .ensure_crate_or_member_docs(
-                            &params.crate_name,
-                            &params.version,
-                            params.member.as_deref(),
-                        )
-                        .await?;
+                ) {
+                    return self.perform_search(params, cache.storage.clone()).await;
                 }
             }
-
-            // Now perform search with read lock
-            let cache = self.cache.read().await;
-            let storage = cache.storage.clone();
-            drop(cache);
-
-            // Check if search index exists after ensuring docs
-            if !self
-                .has_search_index(
+            let guard = self.cache.write().await;
+            let cache = guard.with_features(
+                params.features.clone(),
+                params.no_default_features,
+                params.all_features,
+            )?;
+            cache
+                .ensure_crate_or_member_docs(
                     &params.crate_name,
                     &params.version,
                     params.member.as_deref(),
                 )
-                .await
-            {
-                // Docs exist but search index is missing - regenerate it
-                let cache = self.cache.write().await;
+                .await?;
+            if !cache.storage.has_search_index(
+                &params.crate_name,
+                &params.version,
+                params.member.as_deref(),
+            ) {
                 cache
                     .create_search_index(
                         &params.crate_name,
@@ -221,8 +193,7 @@ impl SearchTools {
                     )
                     .await?;
             }
-
-            self.perform_search(params, storage).await
+            self.perform_search(params, cache.storage.clone()).await
         }
         .await;
 

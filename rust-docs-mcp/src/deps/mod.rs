@@ -90,7 +90,7 @@ pub fn process_cargo_metadata(
             }
 
             // Find resolved version from the resolve section
-            let resolved_version = find_resolved_version(metadata, crate_name, crate_version, name);
+            let resolved_version = find_resolved_version(metadata, package, dep);
 
             direct_dependencies.push(Dependency {
                 name: name.to_string(),
@@ -117,12 +117,7 @@ pub fn process_cargo_metadata(
             // Find the node for our package and count its dependencies
             nodes
                 .iter()
-                .find(|n| {
-                    n["id"]
-                        .as_str()
-                        .map(|id| id.starts_with(&format!("{crate_name} {crate_version}")))
-                        .unwrap_or(false)
-                })
+                .find(|n| n["id"] == package["id"])
                 .and_then(|n| n["dependencies"].as_array())
                 .map(|deps| deps.len())
                 .unwrap_or(0)
@@ -148,38 +143,26 @@ pub fn process_cargo_metadata(
     })
 }
 
-/// Find the resolved version of a dependency from the resolve section
+/// Cargo package IDs are opaque. Join resolve nodes to packages by ID.
 fn find_resolved_version(
     metadata: &serde_json::Value,
-    parent_name: &str,
-    parent_version: &str,
-    dep_name: &str,
+    parent: &serde_json::Value,
+    dependency: &serde_json::Value,
 ) -> Option<String> {
-    let resolve = metadata["resolve"].as_object()?;
-    let nodes = resolve["nodes"].as_array()?;
-
-    // Find the parent node
-    let parent_node = nodes.iter().find(|n| {
-        n["id"]
+    let nodes = metadata["resolve"]["nodes"].as_array()?;
+    let parent_node = nodes.iter().find(|n| n["id"] == parent["id"])?;
+    let name = dependency["rename"]
+        .as_str()
+        .or_else(|| dependency["name"].as_str())?
+        .replace('-', "_");
+    let edge = parent_node["deps"].as_array()?.iter().find(|edge| {
+        edge["name"]
             .as_str()
-            .map(|id| id.starts_with(&format!("{parent_name} {parent_version}")))
-            .unwrap_or(false)
+            .is_some_and(|edge_name| edge_name.replace('-', "_") == name)
     })?;
-
-    // Find the dependency in the parent's deps
-    let deps = parent_node["deps"].as_array()?;
-    for dep in deps {
-        if dep["name"].as_str() == Some(dep_name) {
-            // Extract version from the pkg field
-            if let Some(pkg) = dep["pkg"].as_str() {
-                // pkg format is "name version (source)"
-                let parts: Vec<&str> = pkg.split(' ').collect();
-                if parts.len() >= 2 {
-                    return Some(parts[1].to_string());
-                }
-            }
-        }
-    }
-
-    None
+    let package = metadata["packages"]
+        .as_array()?
+        .iter()
+        .find(|p| p["id"] == edge["pkg"])?;
+    package["version"].as_str().map(str::to_owned)
 }

@@ -11,9 +11,10 @@ use crate::rustdoc;
 use crate::search::index_types::IndexCrate;
 use crate::search::indexer::SearchIndexer;
 use anyhow::{Context, Result, bail};
+use fs4::fs_std::FileExt;
+use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// Read and parse a rustdoc JSON file into a [`rustdoc_types::Crate`].
 ///
@@ -90,22 +91,11 @@ impl DocGenerator {
         Self { storage }
     }
 
-    /// Clean up the target directory to save disk space
-    fn cleanup_target_directory(&self, source_path: &Path) -> Result<()> {
-        let target_dir = source_path.join(TARGET_DIR);
-        if target_dir.exists() {
-            std::fs::remove_dir_all(&target_dir).with_context(|| {
-                format!(
-                    "Failed to clean up target directory: {}",
-                    target_dir.display()
-                )
-            })?;
-            tracing::info!("Cleaned up target directory to save disk space");
-        }
-        Ok(())
+    fn with_legacy_features(&self, features: Option<Vec<String>>) -> Result<Self> {
+        let options = self.storage.features.with_feature_list(features)?;
+        Ok(Self::new(self.storage.with_options(options)))
     }
 
-    /// Generate documentation for a crate
     pub async fn generate_docs(
         &self,
         name: &str,
@@ -113,87 +103,11 @@ impl DocGenerator {
         progress_callback: Option<ProgressCallback>,
         features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
-        tracing::info!(
-            "DocGenerator::generate_docs starting for {}-{}",
-            name,
-            version
-        );
-
-        let source_path = self.storage.source_path(name, version)?;
-        let docs_path = self.storage.docs_path(name, version, None)?;
-
-        // Check if docs already exist (another thread might have generated them)
-        if docs_path.exists() {
-            tracing::info!(
-                "Docs already exist for {}-{}, skipping generation",
-                name,
-                version
-            );
-            if let Some(callback) = progress_callback {
-                callback(100);
-            }
-            return Ok(docs_path);
-        }
-
-        if !source_path.exists() {
-            bail!("Source not found for {name}-{version}. Download it first.");
-        }
-
-        tracing::info!("Generating documentation for {}-{}", name, version);
-
-        // Report 10% at start of rustdoc
-        if let Some(ref callback) = progress_callback {
-            callback(10);
-        }
-
-        // Run cargo rustdoc with JSON output using unified function
-        rustdoc::run_cargo_rustdoc_json(&source_path, None, None, features).await?;
-
-        // Rustdoc complete - report 70%
-        if let Some(ref callback) = progress_callback {
-            callback(70);
-        }
-
-        // Find the generated JSON file in target/doc
-        let doc_dir = source_path.join(TARGET_DIR).join(DOC_DIR);
-        let json_file = self.find_json_doc(&doc_dir, name)?;
-
-        // Copy the JSON file to our cache location
-        std::fs::copy(&json_file, &docs_path).context("Failed to copy documentation to cache")?;
-
-        // Generate and save dependency information
-        self.generate_dependencies(name, version).await?;
-
-        // Update metadata to reflect that docs are now generated
-        self.storage.save_metadata(name, version)?;
-
-        // Report 80% before indexing
-        if let Some(ref callback) = progress_callback {
-            callback(80);
-        }
-
-        // Create search index for the crate
-        self.create_search_index(name, version, None, progress_callback.clone())
+        self.with_legacy_features(features)?
+            .generate(name, version, None, progress_callback)
             .await
-            .context("Failed to create search index")?;
-
-        // Clean up the target directory to save space
-        self.cleanup_target_directory(&source_path)?;
-
-        tracing::info!(
-            "Successfully generated documentation for {}-{}",
-            name,
-            version
-        );
-        tracing::info!(
-            "DocGenerator::generate_docs completed for {}-{}",
-            name,
-            version
-        );
-        Ok(docs_path)
     }
 
-    /// Generate JSON documentation for a workspace member
     pub async fn generate_workspace_member_docs(
         &self,
         name: &str,
@@ -202,97 +116,89 @@ impl DocGenerator {
         progress_callback: Option<ProgressCallback>,
         features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
+        self.with_legacy_features(features)?
+            .generate(name, version, Some(member_path), progress_callback)
+            .await
+    }
+
+    async fn generate(
+        &self,
+        name: &str,
+        version: &str,
+        member: Option<&str>,
+        progress: Option<ProgressCallback>,
+    ) -> Result<PathBuf> {
+        let docs_path = self.storage.docs_path(name, version, member)?;
+        // Separate processes can build the same variant. Hold an OS lock until publication.
+        let lock_dir = self.storage.cache_dir().join("locks");
+        self.storage.ensure_dir(&lock_dir)?;
+        let lock_key = serde_json::to_vec(&(name, version, member, &self.storage.features))?;
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(lock_dir.join(format!("{:x}.lock", Sha256::digest(lock_key))))?;
+        tokio::time::timeout(std::time::Duration::from_secs(3600), async {
+            while !lock.try_lock_exclusive()? {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            Ok::<_, std::io::Error>(())
+        })
+        .await
+        .context("Timed out waiting for documentation build lock")??;
+        if docs_path.exists() {
+            return Ok(docs_path);
+        }
         let source_path = self.storage.source_path(name, version)?;
-        let member_full_path = source_path.join(member_path);
-
-        if !source_path.exists() {
-            bail!("Source not found for {name}-{version}. Download it first.");
+        let manifest = match member {
+            Some(member) => source_path.join(member).join(CARGO_TOML),
+            None => source_path.join(CARGO_TOML),
+        };
+        let package = WorkspaceHandler::get_package_name(&manifest)?;
+        let destination = self.storage.artifact_path(name, version, member)?;
+        let parent = destination.parent().context("Invalid artifact path")?;
+        self.storage.ensure_dir(parent)?;
+        // Work in an isolated directory. Failed builds never become cache hits.
+        let staging = tempfile::tempdir_in(parent)?;
+        let target = tempfile::tempdir_in(self.storage.cache_dir())?;
+        if let Some(callback) = &progress {
+            callback(10);
         }
-
-        if !member_full_path.exists() {
-            bail!(
-                "Workspace member not found at path: {}",
-                member_full_path.display()
-            );
-        }
-
-        // Get the actual package name from the member's Cargo.toml
-        let member_cargo_toml = member_full_path.join(CARGO_TOML);
-        let package_name = WorkspaceHandler::get_package_name(&member_cargo_toml)?;
-
-        // Use the full member path directly
-        let docs_path = self.storage.docs_path(name, version, Some(member_path))?;
-
-        tracing::info!(
-            "Generating documentation for workspace member {} (package: {}) in {}-{}",
-            member_path,
-            package_name,
-            name,
-            version
-        );
-
-        // Create a unique target directory for this member to avoid conflicts when
-        // building multiple workspace members concurrently. Use a hash to ensure uniqueness
-        // and avoid potential collisions from paths like "foo/bar" and "foo-bar"
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        member_path.hash(&mut hasher);
-        let path_hash = hasher.finish();
-
-        let sanitized_member = member_path.replace(['/', '\\'], "-");
-        let member_target_dir =
-            source_path.join(format!("target-{sanitized_member}-{path_hash:x}"));
-
-        // Run cargo rustdoc with JSON output for the specific package using unified function
-        rustdoc::run_cargo_rustdoc_json(
-            &source_path,
-            Some(&package_name),
-            Some(&member_target_dir),
-            features,
+        let effective = rustdoc::run_cargo_rustdoc_json_with_options(
+            manifest
+                .parent()
+                .context("Manifest has no parent directory")?,
+            None,
+            Some(target.path()),
+            &self.storage.features,
         )
         .await?;
-
-        // Find the generated JSON file in the member-specific target/doc directory
-        let doc_dir = member_target_dir.join(DOC_DIR);
-        let json_file = self.find_json_doc(&doc_dir, &package_name)?;
-
-        // Ensure the member directory exists in cache
-        if let Some(parent) = docs_path.parent() {
-            self.storage.ensure_dir(parent)?;
-        } else {
-            bail!(
-                "Invalid docs path: no parent directory for {}",
-                docs_path.display()
-            );
-        }
-
-        // Copy the JSON file to our cache location
-        std::fs::copy(&json_file, &docs_path)
-            .context("Failed to copy workspace member documentation to cache")?;
-
-        // Generate and save dependency information for the member
-        self.generate_workspace_member_dependencies(name, version, member_path)
+        let json_file = self.find_json_doc(&target.path().join(DOC_DIR), &package)?;
+        let staged_storage = self.storage.staging_at(staging.path().to_path_buf());
+        std::fs::copy(json_file, staged_storage.docs_path(name, version, member)?)?;
+        let staged = DocGenerator::new(staged_storage);
+        staged
+            .generate_dependencies(name, version, member, &effective)
             .await?;
-
-        // Create search index for the workspace member
-        self.create_search_index(name, version, Some(member_path), progress_callback)
-            .await
-            .context("Failed to create search index for workspace member")?;
-
-        // Clean up the member-specific target directory to save space
-        if member_target_dir.exists() {
-            std::fs::remove_dir_all(&member_target_dir)
-                .context("Failed to remove member target directory")?;
+        staged
+            .create_search_index(name, version, member, progress)
+            .await?;
+        std::fs::write(
+            staging.path().join("build.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "requested": self.storage.features,
+                "effective": effective,
+                "toolchain": rustdoc::resolve_toolchain()?,
+                "format_version": rustdoc_types::FORMAT_VERSION,
+            }))?,
+        )?;
+        if destination.exists() {
+            std::fs::remove_dir_all(&destination)?;
         }
-
-        tracing::info!(
-            "Successfully generated documentation for workspace member {} in {}-{}",
-            member_path,
-            name,
-            version
-        );
+        std::fs::rename(staging.path(), &destination)
+            .context("Failed to publish documentation variant")?;
+        self.storage.save_metadata(name, version)?;
         Ok(docs_path)
     }
 
@@ -325,88 +231,39 @@ impl DocGenerator {
         );
     }
 
-    /// Generate and save dependency information for a crate
-    async fn generate_dependencies(&self, name: &str, version: &str) -> Result<()> {
-        let source_path = self.storage.source_path(name, version)?;
-        let deps_path = self.storage.dependencies_path(name, version, None)?;
-
-        tracing::info!("Generating dependency information for {}-{}", name, version);
-
-        // Run cargo metadata to get dependency information
-        let output = Command::new("cargo")
-            .args(["metadata", "--format-version", "1"])
-            .current_dir(&source_path)
-            .output()
-            .context("Failed to run cargo metadata")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate dependency metadata: {stderr}");
-        }
-
-        // Save the raw metadata output
-        tokio::fs::write(&deps_path, &output.stdout)
-            .await
-            .context("Failed to write dependencies to cache")?;
-
-        Ok(())
-    }
-
-    /// Generate and save dependency information for a workspace member
-    async fn generate_workspace_member_dependencies(
+    async fn generate_dependencies(
         &self,
         name: &str,
         version: &str,
-        member_path: &str,
+        member: Option<&str>,
+        effective: &crate::cache::features::FeatureOptions,
     ) -> Result<()> {
-        let source_path = self.storage.source_path(name, version)?;
-        let deps_path = self
-            .storage
-            .member_path(name, version, member_path)?
-            .join(DEPENDENCIES_FILE);
-
-        tracing::info!(
-            "Generating dependency information for workspace member {} in {}-{}",
-            member_path,
-            name,
-            version
-        );
-
-        // Path to the member's Cargo.toml
-        let member_cargo_toml = source_path.join(member_path).join(CARGO_TOML);
-
-        // Run cargo metadata with --manifest-path for the specific member
-        let output = Command::new("cargo")
-            .args([
-                "metadata",
-                "--format-version",
-                "1",
-                "--manifest-path",
-                &member_cargo_toml.to_string_lossy(),
-            ])
+        let source = self.storage.source_path(name, version)?;
+        let manifest = member
+            .map(|m| source.join(m))
+            .unwrap_or_else(|| source.clone())
+            .join(CARGO_TOML);
+        let output = tokio::process::Command::new("cargo")
+            .arg(format!("+{}", rustdoc::resolve_toolchain()?))
+            .args(["metadata", "--format-version", "1", "--manifest-path"])
+            .arg(manifest)
+            .args(effective.args())
+            .current_dir(source)
+            .kill_on_drop(true)
             .output()
+            .await
             .context("Failed to run cargo metadata")?;
-
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to generate dependency metadata: {stderr}");
-        }
-
-        // Ensure the member directory exists
-        if let Some(parent) = deps_path.parent() {
-            self.storage.ensure_dir(parent)?;
-        } else {
             bail!(
-                "Invalid deps path: no parent directory for {}",
-                deps_path.display()
+                "Failed to generate dependency metadata: {}",
+                String::from_utf8_lossy(&output.stderr)
             );
         }
-
-        // Save the raw metadata output
-        tokio::fs::write(&deps_path, &output.stdout)
-            .await
-            .context("Failed to write dependencies to cache")?;
-
+        tokio::fs::write(
+            self.storage.dependencies_path(name, version, member)?,
+            output.stdout,
+        )
+        .await?;
         Ok(())
     }
 

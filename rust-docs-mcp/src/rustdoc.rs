@@ -259,75 +259,27 @@ pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Strategy for selecting feature flags when generating rustdoc JSON output.
-///
-/// Provides a fallback mechanism to handle crates that fail to compile with
-/// certain feature combinations. Common scenarios include:
-/// - Platform-specific features that don't compile on all targets
-/// - Optional dependencies with conflicting version requirements
-/// - Features requiring specific system libraries
-///
-/// The recommended order is: [`AllFeatures`](Self::AllFeatures) →
-/// [`DefaultFeatures`](Self::DefaultFeatures) → [`NoDefaultFeatures`](Self::NoDefaultFeatures)
-#[derive(Debug, Clone)]
-#[allow(clippy::enum_variant_names)]
-enum FeatureStrategy {
-    /// Use --all-features (enables all feature flags)
-    AllFeatures,
-    /// Use default features only
-    DefaultFeatures,
-    /// Use --no-default-features (minimal)
-    NoDefaultFeatures,
-    /// Use --no-default-features --features=a,b,c (specific features only)
-    Specific(Vec<String>),
-}
-
-impl FeatureStrategy {
-    /// Get the command line arguments for this strategy
-    fn args(&self) -> Vec<String> {
-        match self {
-            Self::AllFeatures => vec!["--all-features".to_string()],
-            Self::DefaultFeatures => vec![],
-            Self::NoDefaultFeatures => vec!["--no-default-features".to_string()],
-            Self::Specific(features) => {
-                let mut args = vec!["--no-default-features".to_string()];
-                if !features.is_empty() {
-                    args.push("--features".to_string());
-                    args.push(features.join(","));
-                }
-                args
-            }
-        }
+fn check_msrv_error(stderr: &str, toolchain: &str) -> Result<()> {
+    if stderr.contains("requires rustc")
+        || stderr.contains("rustc is not supported")
+        || stderr.contains("is not supported by the following package")
+        || stderr.contains("error[E0658]")
+    {
+        bail!(
+            "Documentation build with {toolchain} failed because the crate requires compiler features unavailable in this toolchain. Set {TOOLCHAIN_ENV_VAR} to a newer installed nightly compatible with rustdoc JSON format {}. Run rust-docs-mcp doctor to inspect compatibility. No compiler was changed automatically.\n{stderr}",
+            rustdoc_types::FORMAT_VERSION
+        );
     }
-}
-
-impl std::fmt::Display for FeatureStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AllFeatures => f.write_str("all features enabled"),
-            Self::DefaultFeatures => f.write_str("default features only"),
-            Self::NoDefaultFeatures => f.write_str("no default features"),
-            Self::Specific(features) if features.is_empty() => {
-                f.write_str("specific features (none)")
-            }
-            Self::Specific(features) => {
-                f.write_str("specific features: ")?;
-                for (i, feat) in features.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    f.write_str(feat)?;
-                }
-                Ok(())
-            }
-        }
-    }
+    Ok(())
 }
 
 /// Check if an error is a compilation error
 fn is_compilation_error(stderr: &str) -> bool {
     stderr.contains("error[E")
         || stderr.contains("error: could not compile")
+        || stderr.contains("error: could not document")
+        || stderr.contains("requires rustc")
+        || stderr.contains("is not supported by the following package")
         || stderr.contains("error: aborting due to")
         || (stderr.contains("error:") && stderr.contains("failed to compile"))
 }
@@ -378,7 +330,10 @@ async fn execute_rustdoc(
     target_dir: Option<&Path>,
 ) -> Result<std::process::Output> {
     let mut command = TokioCommand::new("cargo");
-    command.args(args).current_dir(source_path);
+    command
+        .args(args)
+        .current_dir(source_path)
+        .kill_on_drop(true);
 
     // Set custom target directory if provided to avoid conflicts when building
     // multiple workspace members concurrently
@@ -410,6 +365,18 @@ pub async fn run_cargo_rustdoc_json(
     target_dir: Option<&Path>,
     features: Option<Vec<String>>,
 ) -> Result<()> {
+    let options = crate::cache::features::FeatureOptions::new(features, None, None)?;
+    run_cargo_rustdoc_json_with_options(source_path, package, target_dir, &options)
+        .await
+        .map(|_| ())
+}
+
+pub async fn run_cargo_rustdoc_json_with_options(
+    source_path: &Path,
+    package: Option<&str>,
+    target_dir: Option<&Path>,
+    options: &crate::cache::features::FeatureOptions,
+) -> Result<crate::cache::features::FeatureOptions> {
     let toolchain = resolve_toolchain()?;
 
     // Logging strategy:
@@ -449,17 +416,7 @@ pub async fn run_cargo_rustdoc_json(
         base_args.push(pkg.to_string());
     }
 
-    // When features are requested, use only the caller's set (no fallback).
-    // Otherwise try AllFeatures, DefaultFeatures, NoDefaultFeatures in order.
-    let strategies = if let Some(feats) = features {
-        vec![FeatureStrategy::Specific(feats)]
-    } else {
-        vec![
-            FeatureStrategy::AllFeatures,
-            FeatureStrategy::DefaultFeatures,
-            FeatureStrategy::NoDefaultFeatures,
-        ]
-    };
+    let strategies = options.strategies();
 
     let mut failed_attempts = Vec::new();
 
@@ -535,12 +492,13 @@ pub async fn run_cargo_rustdoc_json(
                         continue; // Try next strategy
                     }
 
+                    check_msrv_error(&stderr_with_lib, &toolchain)?;
                     bail!("Failed to generate documentation with {strategy}: {stderr_with_lib}");
                 }
 
                 // Success with --lib
                 tracing::info!("Successfully generated documentation with {strategy}");
-                return Ok(());
+                return Ok(strategy.clone());
             }
 
             // Check if this is a compilation error that we should retry
@@ -551,12 +509,13 @@ pub async fn run_cargo_rustdoc_json(
             }
 
             // Other errors or last strategy failed
+            check_msrv_error(&stderr, &toolchain)?;
             bail!("Failed to generate documentation with {strategy}: {stderr}");
         }
 
         // Success
         tracing::info!("Successfully generated documentation with {strategy}");
-        return Ok(());
+        return Ok(strategy.clone());
     }
 
     // If we get here, all strategies failed
@@ -612,55 +571,16 @@ mod tests {
     }
 
     #[test]
-    fn test_feature_strategy_args() {
-        assert_eq!(
-            FeatureStrategy::AllFeatures.args(),
-            vec!["--all-features".to_string()]
-        );
-        assert_eq!(
-            FeatureStrategy::DefaultFeatures.args(),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.args(),
-            vec!["--no-default-features".to_string()]
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec!["axum".to_string()]).args(),
-            vec![
-                "--no-default-features".to_string(),
-                "--features".to_string(),
-                "axum".to_string(),
-            ]
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec![]).args(),
-            vec!["--no-default-features".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_feature_strategy_display() {
-        assert_eq!(
-            FeatureStrategy::AllFeatures.to_string(),
-            "all features enabled"
-        );
-        assert_eq!(
-            FeatureStrategy::DefaultFeatures.to_string(),
-            "default features only"
-        );
-        assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.to_string(),
-            "no default features"
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec!["axum".to_string(), "ssr".to_string()]).to_string(),
-            "specific features: axum, ssr"
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec![]).to_string(),
-            "specific features (none)"
-        );
+    fn compiler_version_errors_explain_the_override() {
+        let message = check_msrv_error("error: example@1 requires rustc 1.99", PREFERRED_TOOLCHAIN)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains(TOOLCHAIN_ENV_VAR));
+        assert!(message.contains(PREFERRED_TOOLCHAIN));
+        assert!(message.contains("JSON format"));
+        assert!(check_msrv_error("error[E0658]: unstable syntax", PREFERRED_TOOLCHAIN).is_err());
+        assert!(check_msrv_error("error: unknown feature", PREFERRED_TOOLCHAIN).is_ok());
+        assert!(is_compilation_error("error: could not document `example`"));
     }
 
     #[test]

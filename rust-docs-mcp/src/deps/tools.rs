@@ -27,6 +27,12 @@ pub struct GetDependenciesParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,7 +49,14 @@ impl DepsTools {
         &self,
         params: GetDependenciesParams,
     ) -> Result<GetDependenciesOutput, DepsErrorOutput> {
-        let cache = self.cache.write().await;
+        let guard = self.cache.write().await;
+        let cache = guard
+            .with_features(
+                params.features.clone(),
+                params.no_default_features,
+                params.all_features,
+            )
+            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
 
         // First ensure the crate is cached
         match cache
@@ -57,15 +70,45 @@ impl DepsTools {
             Ok(_) => {
                 // Load the dependency metadata
                 match cache
-                    .load_dependencies(&params.crate_name, &params.version)
+                    .load_member_dependencies(
+                        &params.crate_name,
+                        &params.version,
+                        params.member.as_deref(),
+                    )
                     .await
                 {
                     Ok(metadata) => {
-                        // Process the metadata to extract dependency information
+                        let source = cache
+                            .get_source_path(&params.crate_name, &params.version)
+                            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
+                        let manifest = params
+                            .member
+                            .as_ref()
+                            .map(|m| source.join(m))
+                            .unwrap_or(source)
+                            .join("Cargo.toml");
+                        let canonical = std::fs::canonicalize(&manifest)
+                            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
+                        let package = metadata["packages"]
+                            .as_array()
+                            .and_then(|packages| {
+                                packages.iter().find(|package| {
+                                    package["manifest_path"]
+                                        .as_str()
+                                        .and_then(|p| std::fs::canonicalize(p).ok())
+                                        .as_ref()
+                                        == Some(&canonical)
+                                })
+                            })
+                            .ok_or_else(|| {
+                                DepsErrorOutput::new(
+                                    "Selected package not found in dependency metadata".to_owned(),
+                                )
+                            })?;
                         match process_cargo_metadata(
                             &metadata,
-                            &params.crate_name,
-                            &params.version,
+                            package["name"].as_str().unwrap_or(&params.crate_name),
+                            package["version"].as_str().unwrap_or(&params.version),
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
