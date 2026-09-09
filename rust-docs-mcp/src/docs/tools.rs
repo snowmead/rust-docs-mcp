@@ -34,6 +34,12 @@ pub struct ListItemsParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -58,6 +64,12 @@ pub struct SearchItemsParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -82,6 +94,12 @@ pub struct SearchItemsPreviewParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -96,6 +114,12 @@ pub struct GetItemDetailsParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -110,6 +134,12 @@ pub struct GetItemDocsParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -128,6 +158,12 @@ pub struct GetItemSourceParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -149,14 +185,22 @@ impl DocsTools {
         &self,
         params: ListItemsParams,
     ) -> Result<ListCrateItemsOutput, DocsErrorOutput> {
-        let cache = self.cache.write().await;
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
@@ -201,14 +245,22 @@ impl DocsTools {
         &self,
         params: SearchItemsParams,
     ) -> Result<SearchItemsOutput, DocsErrorOutput> {
-        let cache = self.cache.write().await;
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
@@ -301,14 +353,22 @@ impl DocsTools {
         &self,
         params: SearchItemsPreviewParams,
     ) -> Result<SearchItemsPreviewOutput, DocsErrorOutput> {
-        let cache = self.cache.write().await;
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
@@ -378,14 +438,22 @@ impl DocsTools {
     }
 
     pub async fn get_item_details(&self, params: GetItemDetailsParams) -> GetItemDetailsOutput {
-        let cache = self.cache.write().await;
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
@@ -402,6 +470,7 @@ impl DocsTools {
                                 visibility: details.info.visibility.clone(),
                             },
                             signature: details.signature.clone(),
+                            reexport: details.reexport,
                             generics: details.generics.clone(),
                             fields: details.fields.map(|fields| {
                                 fields
@@ -466,14 +535,22 @@ impl DocsTools {
         &self,
         params: GetItemDocsParams,
     ) -> Result<GetItemDocsOutput, DocsErrorOutput> {
-        let cache = self.cache.write().await;
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);
@@ -499,8 +576,13 @@ impl DocsTools {
     }
 
     pub async fn get_item_source(&self, params: GetItemSourceParams) -> GetItemSourceOutput {
-        let cache = self.cache.write().await;
-        let source_base_path = match cache.get_source_path(&params.crate_name, &params.version) {
+        let guard = self.cache.write().await;
+        let cache = guard.with_features(
+            params.features.clone(),
+            params.no_default_features,
+            params.all_features,
+        );
+        let source_base_path = match guard.get_source_path(&params.crate_name, &params.version) {
             Ok(path) => path,
             Err(e) => {
                 return GetItemSourceOutput::Error {
@@ -509,13 +591,16 @@ impl DocsTools {
             }
         };
 
-        match cache
-            .ensure_crate_or_member_docs(
-                &params.crate_name,
-                &params.version,
-                params.member.as_deref(),
-            )
-            .await
+        match async {
+            cache?
+                .ensure_crate_or_member_docs(
+                    &params.crate_name,
+                    &params.version,
+                    params.member.as_deref(),
+                )
+                .await
+        }
+        .await
         {
             Ok(crate_data) => {
                 let query = DocQuery::new(crate_data);

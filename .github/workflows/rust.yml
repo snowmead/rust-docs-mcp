@@ -79,6 +79,9 @@ jobs:
     - name: Run unit tests
       run: cargo test --workspace --lib --bins --verbose
     
+    - name: Run feature, re-export, and CLI regressions
+      run: cargo test -p rust-docs-mcp --test feature_variants --test reexports --test cache_cli --verbose
+
     - name: Run doc tests
       run: cargo test --workspace --doc --verbose
 
