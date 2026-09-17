@@ -6,9 +6,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
+use crate::cache::workspace::WorkspaceHandler;
 use crate::deps::{
     outputs::{CrateIdentifier, Dependency, DepsErrorOutput, GetDependenciesOutput},
-    process_cargo_metadata,
+    process_package_metadata,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -87,28 +88,11 @@ impl DepsTools {
                             .map(|m| source.join(m))
                             .unwrap_or(source)
                             .join("Cargo.toml");
-                        let canonical = std::fs::canonicalize(&manifest)
+                        let package = selected_package(&metadata, &manifest)
                             .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
-                        let package = metadata["packages"]
-                            .as_array()
-                            .and_then(|packages| {
-                                packages.iter().find(|package| {
-                                    package["manifest_path"]
-                                        .as_str()
-                                        .and_then(|p| std::fs::canonicalize(p).ok())
-                                        .as_ref()
-                                        == Some(&canonical)
-                                })
-                            })
-                            .ok_or_else(|| {
-                                DepsErrorOutput::new(
-                                    "Selected package not found in dependency metadata".to_owned(),
-                                )
-                            })?;
-                        match process_cargo_metadata(
+                        match process_package_metadata(
                             &metadata,
-                            package["name"].as_str().unwrap_or(&params.crate_name),
-                            package["version"].as_str().unwrap_or(&params.version),
+                            package,
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
@@ -147,4 +131,38 @@ impl DepsTools {
             Err(e) => Err(DepsErrorOutput::new(format!("Failed to cache crate: {e}"))),
         }
     }
+}
+
+fn selected_package<'a>(
+    metadata: &'a serde_json::Value,
+    manifest: &std::path::Path,
+) -> anyhow::Result<&'a serde_json::Value> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No packages found in dependency metadata"))?;
+    if let Some(id) = metadata["rust_docs_mcp"]["package_id"].as_str() {
+        return packages
+            .iter()
+            .find(|package| package["id"].as_str() == Some(id))
+            .ok_or_else(|| {
+                anyhow::anyhow!("Selected package ID not found in dependency metadata")
+            });
+    }
+    // Older snapshots lack a selected ID. Cargo workspace package names are unique.
+    // Use membership IDs from the snapshot, without opening its old absolute paths.
+    let name = WorkspaceHandler::get_package_name(manifest)?;
+    let members = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No workspace members found in dependency metadata"))?;
+    let mut matches = packages.iter().filter(|package| {
+        package["name"].as_str() == Some(&name) && members.contains(&package["id"])
+    });
+    let package = matches
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Selected package not found in dependency metadata"))?;
+    anyhow::ensure!(
+        matches.next().is_none(),
+        "Ambiguous package in dependency metadata"
+    );
+    Ok(package)
 }

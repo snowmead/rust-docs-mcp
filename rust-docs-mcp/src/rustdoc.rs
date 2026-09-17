@@ -332,6 +332,8 @@ async fn execute_rustdoc(
     let mut command = TokioCommand::new("cargo");
     command
         .args(args)
+        // Diagnostics are parsed below. CI may force ANSI colors into captured stderr.
+        .env("CARGO_TERM_COLOR", "never")
         .current_dir(source_path)
         .kill_on_drop(true);
 

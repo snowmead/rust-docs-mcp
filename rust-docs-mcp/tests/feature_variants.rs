@@ -286,6 +286,61 @@ async fn workspace_member_lazy_features_and_dependencies_use_the_member() -> Res
     Ok(())
 }
 
+#[tokio::test]
+async fn dependency_queries_survive_cache_relocation() -> Result<()> {
+    for member in [None, Some("member")] {
+        let source = tempfile::tempdir()?;
+        let parent = tempfile::tempdir()?;
+        let original = parent.path().join("original");
+        let relocated = parent.path().join("relocated");
+        if member.is_some() {
+            std::fs::write(
+                source.path().join("Cargo.toml"),
+                "[workspace]\nmembers = [\"member\"]\nresolver = \"2\"\n",
+            )?;
+        }
+        let package_source = member
+            .map(|path| source.path().join(path))
+            .unwrap_or_else(|| source.path().to_owned());
+        write_fixture(&package_source, "relocated-package")?;
+        let cache = CrateCache::new(Some(original.clone()))?;
+        cache
+            .ensure_crate_source("cache-alias", "0.1.0", source.path().to_str())
+            .await?;
+        let params = query_params("cache-alias", member, json!({"features": ["axum"]}));
+        let runtime = RustDocsRuntime::new(Some(original.clone()))?;
+        preview(&runtime, params.clone()).await?;
+        let before: Value = serde_json::from_str(
+            &runtime
+                .get_dependencies(serde_json::from_value(params.clone())?)
+                .await,
+        )?;
+        assert!(before["error"].is_null(), "{before}");
+        drop(runtime);
+        drop(cache);
+        std::fs::rename(&original, &relocated)?;
+        // Read both new metadata and metadata created before package IDs were persisted.
+        for legacy in [false, true] {
+            if legacy {
+                let storage = CacheStorage::new(Some(relocated.clone()))?
+                    .with_options(FeatureOptions::new(Some(vec!["axum".into()]), None, None)?);
+                let path = storage.dependencies_path("cache-alias", "0.1.0", member)?;
+                let mut metadata: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+                metadata.as_object_mut().unwrap().remove("rust_docs_mcp");
+                std::fs::write(path, serde_json::to_vec(&metadata)?)?;
+            }
+            let runtime = RustDocsRuntime::new(Some(relocated.clone()))?;
+            let after: Value = serde_json::from_str(
+                &runtime
+                    .get_dependencies(serde_json::from_value(params.clone())?)
+                    .await,
+            )?;
+            assert_eq!(after, before, "member={member:?}, legacy={legacy}");
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn cli_version_and_incompatible_toolchain_diagnostics() -> Result<()> {
     let binary = env!("CARGO_BIN_EXE_rust-docs-mcp");
@@ -318,6 +373,38 @@ fn cli_version_and_incompatible_toolchain_diagnostics() -> Result<()> {
     assert!(
         output.contains("not compatible") || output.contains("not installed"),
         "{output}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn automatic_features_fall_back_with_forced_cargo_color() -> Result<()> {
+    let source = tempfile::tempdir()?;
+    let cache_dir = tempfile::tempdir()?;
+    write_fixture(source.path(), "color-fixture")?;
+    CrateCache::new(Some(cache_dir.path().to_owned()))?
+        .ensure_crate_source("color-fixture", "0.1.0", source.path().to_str())
+        .await?;
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_rust-docs-mcp"))
+        .env("CARGO_TERM_COLOR", "always")
+        .arg("--cache-dir")
+        .arg(cache_dir.path())
+        .args([
+            "call",
+            "search-items-preview",
+            "--params",
+            &query_params("color-fixture", None, json!({})).to_string(),
+        ])
+        .output()?;
+    anyhow::ensure!(
+        output.status.success(),
+        "{} {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        names(&serde_json::from_slice(&output.stdout)?),
+        ["default_handler"]
     );
     Ok(())
 }

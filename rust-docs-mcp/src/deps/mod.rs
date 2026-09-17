@@ -75,6 +75,21 @@ pub fn process_cargo_metadata(
             anyhow::anyhow!("Package {crate_name}-{crate_version} not found in metadata")
         })?;
 
+    process_package_metadata(metadata, package, include_tree, filter)
+}
+
+pub(crate) fn process_package_metadata(
+    metadata: &serde_json::Value,
+    package: &serde_json::Value,
+    include_tree: bool,
+    filter: Option<&str>,
+) -> anyhow::Result<DependencyInfo> {
+    let crate_name = package["name"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Selected package has no name"))?;
+    let crate_version = package["version"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("Selected package has no version"))?;
     // Extract direct dependencies
     let mut direct_dependencies = Vec::new();
 

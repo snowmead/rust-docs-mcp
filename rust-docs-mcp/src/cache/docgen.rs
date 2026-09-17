@@ -246,7 +246,7 @@ impl DocGenerator {
         let output = tokio::process::Command::new("cargo")
             .arg(format!("+{}", rustdoc::resolve_toolchain()?))
             .args(["metadata", "--format-version", "1", "--manifest-path"])
-            .arg(manifest)
+            .arg(&manifest)
             .args(effective.args())
             .current_dir(source)
             .kill_on_drop(true)
@@ -259,9 +259,27 @@ impl DocGenerator {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+        let mut metadata: serde_json::Value = serde_json::from_slice(&output.stdout)?;
+        let canonical = std::fs::canonicalize(&manifest)?;
+        let package_id = metadata["packages"]
+            .as_array()
+            .and_then(|packages| {
+                packages.iter().find(|package| {
+                    package["manifest_path"]
+                        .as_str()
+                        .and_then(|path| std::fs::canonicalize(path).ok())
+                        .as_ref()
+                        == Some(&canonical)
+                })
+            })
+            .and_then(|package| package["id"].as_str())
+            .context("Selected package not found in generated dependency metadata")?
+            .to_owned();
+        // Cargo IDs remain valid keys within this snapshot even after the cache moves.
+        metadata["rust_docs_mcp"] = serde_json::json!({ "package_id": package_id });
         tokio::fs::write(
             self.storage.dependencies_path(name, version, member)?,
-            output.stdout,
+            serde_json::to_vec(&metadata)?,
         )
         .await?;
         Ok(())
