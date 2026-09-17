@@ -121,6 +121,8 @@ impl RemoveCrateOutput {
 /// Version information for a cached crate
 #[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
 pub struct VersionInfo {
+    #[serde(default)]
+    pub variants: Vec<super::features::CachedVariant>,
     pub version: String,
     pub cached_at: String,
     pub doc_generated: bool,

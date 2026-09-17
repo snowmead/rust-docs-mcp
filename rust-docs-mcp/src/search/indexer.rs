@@ -21,7 +21,7 @@
 //! ```
 
 use crate::cache::storage::CacheStorage;
-use crate::docs::query::{item_kind_str, visibility_str_cow};
+use crate::docs::query::{item_kind_str, item_name, reexport_paths, visibility_str_cow};
 use crate::search::config::{DEFAULT_BUFFER_SIZE, MAX_ITEMS_PER_CRATE};
 use crate::search::index_types::{IndexCrate, IndexItem};
 use anyhow::{Context, Result};
@@ -72,39 +72,12 @@ fn create_document_from_item(
     member: Option<&str>,
     crate_name: &str,
     version: &str,
-    crate_data: &Crate,
+    path: &[String],
     id: &Id,
     item: &Item,
 ) -> Option<TantivyDocument> {
-    // Prefer the item's own name; fall back to the last path component
-    // from `crate.paths`. Both are borrowed — no allocation.
-    let name: &str = if let Some(name) = item.name.as_deref() {
-        name
-    } else {
-        crate_data
-            .paths
-            .get(id)
-            .and_then(|summary| summary.path.last())
-            .map(String::as_str)?
-    };
-
-    // Build `path_str` with pre-sized capacity so `join`-ing the path
-    // segments doesn't reallocate. Two bytes per segment account for the
-    // `::` separators.
-    let path_str: String = match crate_data.paths.get(id) {
-        Some(summary) => {
-            let capacity = summary.path.iter().map(|s| s.len() + 2).sum::<usize>();
-            let mut out = String::with_capacity(capacity);
-            for (i, segment) in summary.path.iter().enumerate() {
-                if i > 0 {
-                    out.push_str("::");
-                }
-                out.push_str(segment);
-            }
-            out
-        }
-        None => String::new(),
-    };
+    let name = item_name(item, path)?;
+    let path_str = path.join("::");
 
     let docs: &str = item.docs.as_deref().unwrap_or("");
     let kind: &'static str = item_kind_str(&item.inner);
@@ -138,34 +111,15 @@ fn create_document_from_index_item(
     member: Option<&str>,
     crate_name: &str,
     version: &str,
-    crate_data: &IndexCrate,
+    path: &[String],
     id: &Id,
     item: &IndexItem,
 ) -> Option<TantivyDocument> {
-    let name: &str = if let Some(name) = item.name.as_deref() {
-        name
-    } else {
-        crate_data
-            .paths
-            .get(id)
-            .and_then(|summary| summary.path.last())
-            .map(String::as_str)?
-    };
-
-    let path_str: String = match crate_data.paths.get(id) {
-        Some(summary) => {
-            let capacity = summary.path.iter().map(|s| s.len() + 2).sum::<usize>();
-            let mut out = String::with_capacity(capacity);
-            for (i, segment) in summary.path.iter().enumerate() {
-                if i > 0 {
-                    out.push_str("::");
-                }
-                out.push_str(segment);
-            }
-            out
-        }
-        None => String::new(),
-    };
+    let name = item
+        .name
+        .as_deref()
+        .or_else(|| path.last().map(String::as_str))?;
+    let path_str = path.join("::");
 
     let docs: &str = item.docs.as_deref().unwrap_or("");
     let kind: &str = &item.kind_tag;
@@ -310,6 +264,7 @@ impl SearchIndexer {
         let member_name = member_name_owned.as_deref();
         let writer = self.get_writer()?;
 
+        let import_paths = reexport_paths(crate_data);
         let mut indexed = 0usize;
         for (id, item) in crate_data.index.iter() {
             let Some(doc) = create_document_from_item(
@@ -317,7 +272,11 @@ impl SearchIndexer {
                 member_name,
                 crate_name,
                 version,
-                crate_data,
+                import_paths
+                    .get(id)
+                    .or_else(|| crate_data.paths.get(id).map(|p| &p.path))
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
                 id,
                 item,
             ) else {
@@ -381,6 +340,7 @@ impl SearchIndexer {
         let member_name = member_name_owned.as_deref();
         let writer = self.get_writer()?;
 
+        let import_paths = crate_data.reexport_paths();
         let mut indexed = 0usize;
         for (id, item) in crate_data.index.iter() {
             let Some(doc) = create_document_from_index_item(
@@ -388,7 +348,11 @@ impl SearchIndexer {
                 member_name,
                 crate_name,
                 version,
-                crate_data,
+                import_paths
+                    .get(id)
+                    .or_else(|| crate_data.paths.get(id).map(|p| &p.path))
+                    .map(Vec::as_slice)
+                    .unwrap_or_default(),
                 id,
                 item,
             ) else {

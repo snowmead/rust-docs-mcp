@@ -1,5 +1,5 @@
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use rmcp::{ServiceExt, transport::stdio};
 use std::io::Write;
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use rust_docs_mcp::RustDocsService;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Custom cache directory path (defaults to ~/.rust-docs-mcp/cache)
-    #[arg(long, env = "RUST_DOCS_MCP_CACHE_DIR")]
+    #[arg(long, env = "RUST_DOCS_MCP_CACHE_DIR", global = true)]
     cache_dir: Option<PathBuf>,
 
     #[command(subcommand)]
@@ -39,6 +39,11 @@ enum Commands {
         /// Path to a file containing JSON parameters
         #[arg(long, conflicts_with = "params")]
         params_file: Option<PathBuf>,
+    },
+    /// Manage cached crates without starting the MCP server
+    Cache {
+        #[command(subcommand)]
+        command: rust_docs_mcp::cache_cli::CacheCommand,
     },
     /// Install the current executable to a directory in PATH
     Install {
@@ -72,7 +77,18 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse command line arguments
-    let args = Args::parse();
+    let long_version = format!(
+        "{}\nPreferred rustdoc toolchain: {}\nConfigured override: {}\nRequired rustdoc JSON format: {}\nRun rust-docs-mcp doctor to check the selected toolchain.",
+        env!("CARGO_PKG_VERSION"),
+        rust_docs_mcp::rustdoc::PREFERRED_TOOLCHAIN,
+        std::env::var(rust_docs_mcp::rustdoc::TOOLCHAIN_ENV_VAR)
+            .unwrap_or_else(|_| "none".to_owned()),
+        rustdoc_types::FORMAT_VERSION
+    );
+    let matches = Args::command()
+        .long_version(Box::leak(long_version.into_boxed_str()) as &'static str)
+        .get_matches();
+    let args = Args::from_arg_matches(&matches)?;
 
     // Handle subcommands
     match &args.command {
@@ -145,6 +161,15 @@ async fn handle_command(command: Commands, cache_dir: Option<PathBuf>) -> Result
                 process::exit(1);
             }
 
+            Ok(())
+        }
+        Commands::Cache { command } => {
+            let result = rust_docs_mcp::cache_cli::run(cache_dir, command).await?;
+            println!("{}", result.output);
+            std::io::stdout().flush()?;
+            if result.failed {
+                process::exit(1);
+            }
             Ok(())
         }
         Commands::Install { target_dir, force } => install_executable(target_dir, force).await,
