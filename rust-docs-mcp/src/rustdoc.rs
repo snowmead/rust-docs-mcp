@@ -31,7 +31,39 @@ const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
 /// Timeout for individual rustdoc execution attempts (in seconds)
 const RUSTDOC_TIMEOUT_SECS: u64 = 1800;
 
-static SELECTED_TOOLCHAIN: OnceLock<std::result::Result<String, String>> = OnceLock::new();
+static SELECTED_TOOLCHAIN: OnceLock<std::result::Result<Toolchain, String>> = OnceLock::new();
+
+/// Compiler commands selected through rustup or supplied directly on PATH.
+#[derive(Debug, Clone)]
+pub enum Toolchain {
+    /// An installed rustup toolchain.
+    Rustup(String),
+    /// Cargo and rustdoc supplied directly by the environment, such as Nix.
+    Path,
+}
+
+impl std::fmt::Display for Toolchain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rustup(name) => f.write_str(name),
+            Self::Path => f.write_str("PATH"),
+        }
+    }
+}
+
+impl Toolchain {
+    /// Build a command without requiring cargo or rustdoc to be rustup proxies.
+    pub(crate) fn command(&self, program: &str) -> Command {
+        match self {
+            Self::Rustup(name) => {
+                let mut command = Command::new("rustup");
+                command.args(["run", name, program]);
+                command
+            }
+            Self::Path => Command::new(program),
+        }
+    }
+}
 
 #[derive(Debug)]
 enum ToolchainProbe {
@@ -46,19 +78,20 @@ struct ProbeFormatVersion {
 }
 
 /// Resolve the rustdoc toolchain to use for JSON generation.
-pub fn resolve_toolchain() -> Result<String> {
+pub fn resolve_toolchain() -> Result<Toolchain> {
     match SELECTED_TOOLCHAIN.get_or_init(|| select_toolchain().map_err(|err| err.to_string())) {
         Ok(toolchain) => Ok(toolchain.clone()),
         Err(message) => bail!("{message}"),
     }
 }
 
-fn select_toolchain() -> Result<String> {
+fn select_toolchain() -> Result<Toolchain> {
     if let Some(toolchain) = env::var(TOOLCHAIN_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
+        let toolchain = Toolchain::Rustup(toolchain);
         return match probe_toolchain(&toolchain)? {
             ToolchainProbe::Compatible => Ok(toolchain),
             ToolchainProbe::Missing => bail!(
@@ -73,20 +106,31 @@ with rustdoc JSON format version {}: {reason}",
         };
     }
 
-    let preferred = probe_toolchain(PREFERRED_TOOLCHAIN)?;
+    let preferred = probe_toolchain(&Toolchain::Rustup(PREFERRED_TOOLCHAIN.to_string()))?;
     if matches!(preferred, ToolchainProbe::Compatible) {
-        return Ok(PREFERRED_TOOLCHAIN.to_string());
+        return Ok(Toolchain::Rustup(PREFERRED_TOOLCHAIN.to_string()));
     }
 
-    let fallback = probe_toolchain(FALLBACK_TOOLCHAIN)?;
+    let fallback = probe_toolchain(&Toolchain::Rustup(FALLBACK_TOOLCHAIN.to_string()))?;
     if matches!(fallback, ToolchainProbe::Compatible) {
         tracing::warn!(
             "Preferred rustdoc toolchain {} is unavailable or incompatible; falling back to {}",
             PREFERRED_TOOLCHAIN,
             FALLBACK_TOOLCHAIN
         );
-        return Ok(FALLBACK_TOOLCHAIN.to_string());
+        return Ok(Toolchain::Rustup(FALLBACK_TOOLCHAIN.to_string()));
     }
+
+    let native = probe_toolchain(&Toolchain::Path)?;
+    if matches!(native, ToolchainProbe::Compatible) {
+        tracing::info!("Using compatible cargo and rustdoc from PATH");
+        return Ok(Toolchain::Path);
+    }
+    let native_reason = match native {
+        ToolchainProbe::Missing => "cargo or rustdoc is not installed".to_string(),
+        ToolchainProbe::Incompatible(reason) => reason,
+        ToolchainProbe::Compatible => unreachable!(),
+    };
 
     let preferred_reason = match preferred {
         ToolchainProbe::Missing => format!(
@@ -119,27 +163,30 @@ version {}: {reason}",
         "No compatible nightly rustdoc toolchain was found.\n\
 Preferred: {preferred_reason}\n\
 Fallback: {fallback_reason}\n\
+PATH: {native_reason}\n\
 You can also set {TOOLCHAIN_ENV_VAR} to a specific compatible nightly."
     )
 }
 
-fn probe_toolchain(toolchain: &str) -> Result<ToolchainProbe> {
-    let version_output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
-        .arg("--version")
-        .output()
-        .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
+fn probe_toolchain(toolchain: &Toolchain) -> Result<ToolchainProbe> {
+    let version_output = match toolchain.command("cargo").arg("--version").output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ToolchainProbe::Missing);
+        }
+        Err(error) => return Err(error).context("Failed to probe cargo"),
+    };
 
     if !version_output.status.success() {
         let stderr = String::from_utf8_lossy(&version_output.stderr)
             .trim()
             .to_string();
-        if is_missing_toolchain_error(&stderr, toolchain) {
+        if is_missing_toolchain_error(&stderr, &toolchain.to_string()) {
             return Ok(ToolchainProbe::Missing);
         }
 
         return Ok(ToolchainProbe::Incompatible(format!(
-            "rustdoc --version failed: {stderr}"
+            "cargo --version failed: {stderr}"
         )));
     }
 
@@ -167,7 +214,7 @@ fn is_missing_toolchain_error(stderr: &str, toolchain: &str) -> bool {
     })
 }
 
-fn validate_rustdoc_json_format(toolchain: &str) -> Result<()> {
+fn validate_rustdoc_json_format(toolchain: &Toolchain) -> Result<()> {
     let json = generate_probe_json(toolchain)?;
     let format: ProbeFormatVersion =
         serde_json::from_str(&json).context("Failed to read rustdoc JSON format version")?;
@@ -186,7 +233,7 @@ fn validate_rustdoc_json_format(toolchain: &str) -> Result<()> {
     Ok(())
 }
 
-fn generate_probe_json(toolchain: &str) -> Result<String> {
+fn generate_probe_json(toolchain: &Toolchain) -> Result<String> {
     let temp_dir =
         tempfile::tempdir().context("Failed to create temporary directory for toolchain probe")?;
     let test_file = temp_dir.path().join("lib.rs");
@@ -195,8 +242,8 @@ fn generate_probe_json(toolchain: &str) -> Result<String> {
         .context("Failed to create probe source file")?;
     std::fs::create_dir(&output_dir).context("Failed to create probe output directory")?;
 
-    let output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
+    let output = toolchain
+        .command("rustdoc")
         .args([
             "-Z",
             "unstable-options",
@@ -244,9 +291,9 @@ pub async fn get_rustdoc_version() -> Result<String> {
 }
 
 /// Get rustdoc version information for a specific toolchain.
-pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
-    let output = Command::new("rustdoc")
-        .arg(format!("+{toolchain}"))
+pub fn get_rustdoc_version_for_toolchain(toolchain: &Toolchain) -> Result<String> {
+    let output = toolchain
+        .command("rustdoc")
         .arg("--version")
         .output()
         .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
@@ -325,11 +372,12 @@ impl FailedAttempt {
 ///
 /// Returns an error if the command times out after [`RUSTDOC_TIMEOUT_SECS`] seconds.
 async fn execute_rustdoc(
+    toolchain: &Toolchain,
     args: &[String],
     source_path: &Path,
     target_dir: Option<&Path>,
 ) -> Result<std::process::Output> {
-    let mut command = TokioCommand::new("cargo");
+    let mut command = TokioCommand::from(toolchain.command("cargo"));
     command
         .args(args)
         // Diagnostics are parsed below. CI may force ANSI colors into captured stderr.
@@ -410,7 +458,7 @@ pub async fn run_cargo_rustdoc_json_with_options(
     };
     tracing::debug!("{}", log_msg);
 
-    let mut base_args = vec![format!("+{}", toolchain), "rustdoc".to_string()];
+    let mut base_args = vec!["rustdoc".to_string()];
 
     // Add package-specific arguments if provided
     if let Some(pkg) = package {
@@ -440,7 +488,7 @@ pub async fn run_cargo_rustdoc_json_with_options(
         args.extend_from_slice(&feature_args);
         args.extend_from_slice(&rustdoc_args);
 
-        let output = execute_rustdoc(&args, source_path, target_dir).await?;
+        let output = execute_rustdoc(&toolchain, &args, source_path, target_dir).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -472,7 +520,7 @@ pub async fn run_cargo_rustdoc_json_with_options(
                 args_with_lib.extend_from_slice(&rustdoc_args);
 
                 let output_with_lib =
-                    execute_rustdoc(&args_with_lib, source_path, target_dir).await?;
+                    execute_rustdoc(&toolchain, &args_with_lib, source_path, target_dir).await?;
 
                 if !output_with_lib.status.success() {
                     let stderr_with_lib = String::from_utf8_lossy(&output_with_lib.stderr);
@@ -494,7 +542,7 @@ pub async fn run_cargo_rustdoc_json_with_options(
                         continue; // Try next strategy
                     }
 
-                    check_msrv_error(&stderr_with_lib, &toolchain)?;
+                    check_msrv_error(&stderr_with_lib, &toolchain.to_string())?;
                     bail!("Failed to generate documentation with {strategy}: {stderr_with_lib}");
                 }
 
@@ -511,7 +559,7 @@ pub async fn run_cargo_rustdoc_json_with_options(
             }
 
             // Other errors or last strategy failed
-            check_msrv_error(&stderr, &toolchain)?;
+            check_msrv_error(&stderr, &toolchain.to_string())?;
             bail!("Failed to generate documentation with {strategy}: {stderr}");
         }
 
@@ -546,6 +594,21 @@ pub async fn run_cargo_rustdoc_json_with_options(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rustup_commands_select_the_toolchain_before_the_program() {
+        for program in ["cargo", "rustdoc"] {
+            let command = Toolchain::Rustup("nightly-example".to_string()).command(program);
+            assert_eq!(command.get_program(), "rustup");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["run", "nightly-example", program]
+            );
+            let command = Toolchain::Path.command(program);
+            assert_eq!(command.get_program(), program);
+            assert_eq!(command.get_args().count(), 0);
+        }
+    }
 
     #[tokio::test]
     async fn test_get_rustdoc_version() {

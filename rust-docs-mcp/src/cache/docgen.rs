@@ -189,7 +189,7 @@ impl DocGenerator {
             serde_json::to_vec_pretty(&serde_json::json!({
                 "requested": self.storage.features,
                 "effective": effective,
-                "toolchain": rustdoc::resolve_toolchain()?,
+                "toolchain": rustdoc::resolve_toolchain()?.to_string(),
                 "format_version": rustdoc_types::FORMAT_VERSION,
             }))?,
         )?;
@@ -243,8 +243,7 @@ impl DocGenerator {
             .map(|m| source.join(m))
             .unwrap_or_else(|| source.clone())
             .join(CARGO_TOML);
-        let output = tokio::process::Command::new("cargo")
-            .arg(format!("+{}", rustdoc::resolve_toolchain()?))
+        let output = tokio::process::Command::from(rustdoc::resolve_toolchain()?.command("cargo"))
             .args(["metadata", "--format-version", "1", "--manifest-path"])
             .arg(&manifest)
             .args(effective.args())

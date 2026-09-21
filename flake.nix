@@ -29,14 +29,11 @@
         pkgs,
         ...
       }: let
-        # Use rust-toolchain.toml for the exact nightly version
-        rustToolchain = inputs'.fenix.packages.fromToolchainFile {
+        # Match rustdoc-types and the toolchain used by Cargo CI.
+        rustNightly = inputs'.fenix.packages.fromToolchainFile {
           file = ./rust-toolchain.toml;
-          sha256 = "";
+          sha256 = "904b259e0c838741de7a50525c9fc359d12332c71ee236ad51c07598db6544c0";
         };
-
-        # Nightly toolchain for runtime (used by the binary to fetch docs)
-        rustNightly = rustToolchain;
 
         craneLib = inputs.crane.mkLib pkgs;
 
@@ -61,16 +58,22 @@
               darwin.apple_sdk.frameworks.Security
               darwin.apple_sdk.frameworks.SystemConfiguration
             ]
-            ++ pkgs.lib.optional pkgs.lib.isLinux gcc.cc.lib;
+            ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux gcc.cc.lib;
 
           nativeBuildInputs = with pkgs; [
             pkg-config
           ]
-          ++ pkgs.lib.optional pkgs.lib.isLinux autoPatchelfHook;
+          ++ pkgs.lib.optional pkgs.stdenv.hostPlatform.isLinux autoPatchelfHook;
         };
 
         # Build dependencies only
-        cargoArtifacts = cranelibNightly.buildDepsOnly commonArgs;
+        cargoArtifacts = cranelibNightly.buildDepsOnly (commonArgs // {
+          # Registry crates depend on this patched crate's API. Crane stubs
+          # local sources, so restore this dependency before compiling them.
+          postPatch = ''
+            cp -r ${./patches/ra_ap_project_model}/src/. patches/ra_ap_project_model/src/
+          '';
+        });
 
         # Build the actual crate
         rust-docs-mcp-unwrapped = cranelibNightly.buildPackage (commonArgs
@@ -124,6 +127,13 @@
               inherit cargoArtifacts;
               partitions = 1;
               partitionType = "count";
+              cargoNextestExtraArgs = "--no-fail-fast";
+            }
+            // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+              # autoPatchelfHook only runs during fixupPhase, but nextest
+              # executes test binaries during checkPhase — set LD_LIBRARY_PATH
+              # so they can find libssl and other shared libs.
+              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [pkgs.openssl];
             });
         };
       };

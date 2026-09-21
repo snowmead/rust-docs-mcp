@@ -14,6 +14,7 @@ use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
 use futures::StreamExt;
 use git2::{Cred, FetchOptions, RemoteCallbacks};
+use semver::Version;
 use std::env;
 use std::fs::{self, File};
 use std::io::Write;
@@ -53,13 +54,18 @@ pub enum CrateSource {
 pub struct CrateDownloader {
     storage: CacheStorage,
     client: reqwest::Client,
+    registry_url: String,
 }
 
 impl CrateDownloader {
     /// Create a new crate downloader
     pub fn new(storage: CacheStorage) -> Self {
         let client = Self::build_http_client();
-        Self { storage, client }
+        Self {
+            storage,
+            client,
+            registry_url: "https://crates.io/api/v1/crates".to_string(),
+        }
     }
 
     /// Build the HTTP client with proper configuration
@@ -83,6 +89,72 @@ impl CrateDownloader {
             env!("CARGO_PKG_VERSION"),
             env!("CARGO_PKG_REPOSITORY")
         )
+    }
+
+    /// Fetch all available versions for a crate from crates.io, sorted by semver descending.
+    ///
+    /// Returns a list of non-yanked version strings parsed and sorted using semver.
+    pub async fn fetch_crates_io_versions(&self, name: &str) -> Result<Vec<String>> {
+        let url = format!("{}/{name}", self.registry_url);
+        tracing::debug!("Fetching available versions for {name} via {url}");
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .with_context(|| format!("Failed to query crates.io for {name}"))?;
+
+        if !response.status().is_success() {
+            bail!(
+                "Failed to look up crate {name} on crates.io: HTTP {}",
+                response.status()
+            );
+        }
+
+        let body: serde_json::Value = response
+            .json()
+            .await
+            .context("Failed to parse crates.io response")?;
+
+        Self::parse_available_versions(&body)
+    }
+
+    /// Filter yanked or invalid versions and order releases by semver precedence.
+    fn parse_available_versions(body: &serde_json::Value) -> Result<Vec<String>> {
+        let versions = body["versions"]
+            .as_array()
+            .context("Unexpected crates.io response format")?;
+
+        // Skip invalid registry entries and yanked releases.
+        let mut parsed_versions: Vec<Version> = versions
+            .iter()
+            .filter_map(|v| {
+                let num = v["num"].as_str()?;
+                let yanked = v["yanked"].as_bool().unwrap_or(false);
+                if yanked {
+                    return None;
+                }
+                Version::parse(num).ok()
+            })
+            .collect();
+
+        parsed_versions.sort_by(|a, b| b.cmp_precedence(a));
+
+        Ok(parsed_versions.iter().map(|v| v.to_string()).collect())
+    }
+
+    /// Format available versions into a readable string for error messages
+    fn format_available_versions(versions: &[String]) -> String {
+        if versions.is_empty() {
+            return "No versions available.".to_string();
+        }
+
+        let mut result = "Available versions (sorted by semver, newest first):\n".to_string();
+        for v in versions {
+            result.push_str(&format!("  - {v}\n"));
+        }
+        result
     }
 
     /// Download or copy a crate from the specified source
@@ -202,7 +274,7 @@ impl CrateDownloader {
             }
         }
 
-        let url = format!("https://crates.io/api/v1/crates/{name}/{version}/download");
+        let url = format!("{}/{name}/{version}/download", self.registry_url);
         tracing::debug!("Download URL: {}", url);
 
         let response = self
@@ -213,12 +285,23 @@ impl CrateDownloader {
             .with_context(|| format!("Failed to download {name}-{version}"))?;
 
         if !response.status().is_success() {
-            bail!(
-                "Failed to download {}-{}: HTTP {}",
-                name,
-                version,
-                response.status()
-            );
+            let status = response.status();
+            // Partial versions return 400; missing archives can return 403 or 404.
+            if matches!(
+                status,
+                reqwest::StatusCode::BAD_REQUEST
+                    | reqwest::StatusCode::NOT_FOUND
+                    | reqwest::StatusCode::FORBIDDEN
+            ) {
+                let versions_msg = match self.fetch_crates_io_versions(name).await {
+                    Ok(versions) => Self::format_available_versions(&versions),
+                    Err(error) => format!("Could not fetch available versions: {error}"),
+                };
+                bail!(
+                    "Could not download requested version '{version}' of crate '{name}' from crates.io (HTTP {status}). Choose an exact version and retry.\n\n{versions_msg}"
+                );
+            }
+            bail!("Failed to download {name}-{version}: HTTP {status}");
         }
 
         // Save to a temporary file first - make path unique to avoid concurrent conflicts
@@ -752,6 +835,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
     async fn test_problematic_crate_download() {
         // Initialize logging for the test
         let _ = tracing_subscriber::fmt()
@@ -978,6 +1062,239 @@ mod tests {
         assert!(
             cached_source.join("src").join("lib.rs").is_file(),
             "rollback must not reach outside storage's source_path"
+        );
+    }
+
+    #[test]
+    fn available_versions_use_semver_and_exclude_yanked_releases() {
+        let body = serde_json::json!({"versions": [
+            {"num": "1.9.0", "yanked": false},
+            {"num": "2.0.0-rc.1", "yanked": false},
+            {"num": "1.10.0", "yanked": false},
+            {"num": "2.0.0", "yanked": false},
+            {"num": "3.0.0", "yanked": true},
+            {"num": "invalid", "yanked": false}
+        ]});
+        assert_eq!(
+            CrateDownloader::parse_available_versions(&body).unwrap(),
+            ["2.0.0", "2.0.0-rc.1", "1.10.0", "1.9.0"]
+        );
+        assert!(CrateDownloader::parse_available_versions(&serde_json::json!({})).is_err());
+        assert!(
+            CrateDownloader::parse_available_versions(&serde_json::json!({
+                "versions": [{"num": "1.0.0", "yanked": true}]
+            }))
+            .unwrap()
+            .is_empty()
+        );
+    }
+
+    /// Serve a fixed request sequence without reaching the public registry.
+    fn registry_fixture(
+        responses: Vec<(String, u16, String)>,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        use std::{
+            io::Read,
+            net::TcpListener,
+            time::{Duration, Instant},
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        let server = std::thread::spawn(move || {
+            for (path, status, body) in responses {
+                let deadline = Instant::now() + Duration::from_secs(10);
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "Missing request for {path}");
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("{error}"),
+                    }
+                };
+                // Accepted sockets can inherit nonblocking mode on macOS.
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .unwrap();
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    let mut byte = [0];
+                    stream.read_exact(&mut byte).unwrap();
+                    request.push(byte[0]);
+                }
+                assert!(
+                    String::from_utf8(request)
+                        .unwrap()
+                        .starts_with(&format!("GET {path} HTTP/1.1"))
+                );
+                write!(stream, "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        (url, server)
+    }
+
+    #[tokio::test]
+    async fn rejected_downloads_offer_versions_without_selecting_one() {
+        for (version, status) in [("9", 400), ("9.3", 400), ("99.0.0", 404), ("99.0.0", 403)] {
+            let (url, server) = registry_fixture(vec![
+                (format!("/fixture/{version}/download"), status, "{}".into()),
+                (
+                    "/fixture".into(),
+                    200,
+                    serde_json::json!({"versions": [
+                        {"num": "9.3.1", "yanked": false},
+                        {"num": "9.10.0", "yanked": false}
+                    ]})
+                    .to_string(),
+                ),
+            ]);
+            let temp = TempDir::new().unwrap();
+            let storage = CacheStorage::new(Some(temp.path().to_owned())).unwrap();
+            let mut downloader = CrateDownloader::new(storage.clone());
+            downloader.registry_url = url;
+            let error = downloader
+                .download_crate("fixture", version, None)
+                .await
+                .unwrap_err()
+                .to_string();
+            server.join().unwrap();
+            assert!(
+                error.contains(&format!("requested version '{version}'")),
+                "{error}"
+            );
+            assert!(error.contains("  - 9.10.0\n  - 9.3.1"), "{error}");
+            assert!(!storage.is_cached("fixture", version));
+            assert!(!storage.is_cached("fixture", "9.10.0"));
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_download_preserves_registry_lookup_failure() {
+        let (url, server) = registry_fixture(vec![
+            ("/fixture/9/download".into(), 400, "{}".into()),
+            ("/fixture".into(), 503, "{}".into()),
+        ]);
+        let temp = TempDir::new().unwrap();
+        let mut downloader =
+            CrateDownloader::new(CacheStorage::new(Some(temp.path().to_owned())).unwrap());
+        downloader.registry_url = url;
+        let error = downloader
+            .download_crate("fixture", "9", None)
+            .await
+            .unwrap_err()
+            .to_string();
+        server.join().unwrap();
+        assert!(error.contains("400"), "{error}");
+        assert!(
+            error.contains("Could not fetch available versions"),
+            "{error}"
+        );
+        assert!(error.contains("503"), "{error}");
+    }
+
+    #[test]
+    fn test_format_available_versions_empty() {
+        let versions: Vec<String> = vec![];
+        let result = CrateDownloader::format_available_versions(&versions);
+        assert_eq!(result, "No versions available.");
+    }
+
+    #[test]
+    fn test_format_available_versions_few() {
+        let versions = vec![
+            "2.0.0".to_string(),
+            "1.1.0".to_string(),
+            "1.0.0".to_string(),
+        ];
+        let result = CrateDownloader::format_available_versions(&versions);
+        assert!(result.contains("Available versions (sorted by semver, newest first):"));
+        assert!(result.contains("  - 2.0.0"));
+        assert!(result.contains("  - 1.1.0"));
+        assert!(result.contains("  - 1.0.0"));
+        assert!(!result.contains("... and"));
+    }
+
+    #[test]
+    fn test_format_available_versions_includes_older_releases() {
+        let versions: Vec<String> = (0..25).rev().map(|i| format!("1.0.{i}")).collect();
+        let result = CrateDownloader::format_available_versions(&versions);
+        assert!(result.contains("  - 1.0.24")); // first shown
+        assert!(result.contains("  - 1.0.5")); // last shown (20th)
+        assert!(result.contains("  - 1.0.4"));
+        assert!(result.contains("  - 1.0.0"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
+    async fn test_fetch_crates_io_versions_returns_semver_sorted() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("rust_docs_mcp=debug")
+            .try_init();
+
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+        let downloader = CrateDownloader::new(storage);
+
+        // serde is a well-known crate with many versions
+        let versions = downloader.fetch_crates_io_versions("serde").await.unwrap();
+
+        // Should have many versions
+        assert!(!versions.is_empty(), "serde should have versions");
+
+        // Should be sorted descending (newest first)
+        for window in versions.windows(2) {
+            let a = Version::parse(&window[0]).unwrap();
+            let b = Version::parse(&window[1]).unwrap();
+            assert!(
+                a >= b,
+                "Expected {a} >= {b}, versions not sorted descending"
+            );
+        }
+
+        // Should contain known versions
+        assert!(
+            versions.contains(&"1.0.0".to_string()),
+            "serde should have version 1.0.0"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
+    async fn test_fetch_crates_io_versions_nonexistent_crate() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+        let downloader = CrateDownloader::new(storage);
+
+        let result = downloader
+            .fetch_crates_io_versions("this-crate-definitely-does-not-exist-xyz-999")
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    #[ignore = "requires network access (hits crates.io)"]
+    async fn test_download_nonexistent_version_includes_available_versions() {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter("rust_docs_mcp=debug")
+            .try_init();
+
+        let temp_dir = TempDir::new().unwrap();
+        let storage = CacheStorage::new(Some(temp_dir.path().to_path_buf())).unwrap();
+        let downloader = CrateDownloader::new(storage);
+
+        // Try downloading a version that doesn't exist (full semver, bypasses resolve)
+        let result = downloader
+            .download_crate("serde", "999.999.999", None)
+            .await;
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("Available versions"),
+            "404 error should include available versions list, got: {err_msg}"
         );
     }
 }

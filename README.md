@@ -93,6 +93,12 @@ ones released yesterday.
 - `get_crates_metadata` - Batch metadata queries for multiple crates
 - `cache_operations` - Manage and monitor background caching operations (list, status, cancel, clear)
 
+Crates.io downloads require an exact version, such as `9.3.1`. If a version is
+rejected, the error lists available non-yanked releases in descending semver
+order. Choose one and retry. Partial versions such as `9` and `9.3` never select
+a release automatically. Cached GitHub and local source versions keep their
+original identifiers.
+
 ### Documentation Queries
 
 - `list_crate_items` - Browse all items in a crate with optional filtering
