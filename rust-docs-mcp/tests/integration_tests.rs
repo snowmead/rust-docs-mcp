@@ -2050,6 +2050,7 @@ async fn test_cache_with_specific_features() -> Result<()> {
 /// Verify the shared runtime can cache a crate **blocking** and the
 /// result JSON reports success.
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_runtime_cache_blocking() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
@@ -2081,6 +2082,7 @@ async fn test_runtime_cache_blocking() -> Result<()> {
 /// Verify the shared runtime can do a one-shot fuzzy search against
 /// an already-cached crate.
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_runtime_search_fuzzy() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
@@ -2218,6 +2220,7 @@ resolver = "2"
 
 /// CLI dispatch: cache_crate via the `cli::call` function.
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cli_call_cache_crate() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
@@ -2273,6 +2276,7 @@ async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
 
 /// CLI dispatch: search after cache.
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cli_call_search_fuzzy() -> Result<()> {
     let temp_dir = TempDir::new()?;
 
@@ -2303,6 +2307,7 @@ async fn test_cli_call_search_fuzzy() -> Result<()> {
 
 /// CLI dispatch: list-cached-crates with no params.
 #[tokio::test]
+#[ignore = "requires network access"]
 async fn test_cli_call_list_cached_crates() -> Result<()> {
     let temp_dir = TempDir::new()?;
 

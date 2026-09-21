@@ -127,6 +127,7 @@
               inherit cargoArtifacts;
               partitions = 1;
               partitionType = "count";
+              cargoNextestExtraArgs = "--no-fail-fast";
             }
             // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
               # autoPatchelfHook only runs during fixupPhase, but nextest
