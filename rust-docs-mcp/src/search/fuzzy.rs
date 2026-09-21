@@ -38,8 +38,9 @@ use serde::{Deserialize, Serialize};
 use tantivy::{
     Index, TantivyDocument, Term,
     collector::TopDocs,
-    query::{BooleanQuery, FuzzyTermQuery, Occur, Query, QueryParser, TermQuery},
+    query::{BooleanQuery, EmptyQuery, FuzzyTermQuery, Occur, Query, QueryParser, TermQuery},
     schema::{Field, Value},
+    tokenizer::TokenStream,
 };
 
 /// Fuzzy search implementation using Tantivy
@@ -187,8 +188,16 @@ impl FuzzySearcher {
         query: &str,
         options: &FuzzySearchOptions,
     ) -> Result<Box<dyn Query>> {
-        // Split query into terms
-        let terms: Vec<&str> = query.split_whitespace().collect();
+        // Match the index's tokenization, including lowercase and snake_case splitting.
+        let mut analyzer = self.index.tokenizer_for_field(self.fields.name)?;
+        let mut stream = analyzer.token_stream(query);
+        let mut terms = Vec::new();
+        while stream.advance() {
+            terms.push(stream.token().text.clone());
+        }
+        if terms.is_empty() {
+            return Ok(Box::new(EmptyQuery));
+        }
 
         let mut main_clauses = Vec::new();
 
@@ -199,7 +208,7 @@ impl FuzzySearcher {
             // Add fuzzy queries for searchable fields
             for field in &[self.fields.name, self.fields.docs, self.fields.path] {
                 let fuzzy_query = FuzzyTermQuery::new(
-                    Term::from_field_text(*field, term),
+                    Term::from_field_text(*field, &term),
                     options.fuzzy_distance,
                     FUZZY_TRANSPOSE_COST_ONE,
                 );
@@ -210,6 +219,12 @@ impl FuzzySearcher {
             let term_query = BooleanQuery::new(term_clauses);
             main_clauses.push((Occur::Should, Box::new(term_query) as Box<dyn Query>));
         }
+
+        // A crate/member filter must not turn search terms into optional clauses.
+        let mut main_clauses = vec![(
+            Occur::Must,
+            Box::new(BooleanQuery::new(main_clauses)) as Box<dyn Query>,
+        )];
 
         // Add crate filter if specified
         if let Some(crate_name) = &options.crate_filter {

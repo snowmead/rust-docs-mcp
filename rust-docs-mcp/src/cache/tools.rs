@@ -69,6 +69,14 @@ pub struct CacheCrateParams {
         description = "Specific features to enable instead of --all-features. Use this for crates with mutually exclusive features (e.g., leptos-use has conflicting 'actix' and 'axum' features). When provided, uses --no-default-features --features=a,b,c with no fallback. When omitted, uses --all-features with automatic fallback."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -89,6 +97,14 @@ pub struct CacheCrateFromCratesIOParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -117,6 +133,14 @@ pub struct CacheCrateFromGitHubParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -143,6 +167,14 @@ pub struct CacheCrateFromLocalParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -210,6 +242,12 @@ pub struct CacheTools {
 /// Convert [`CacheCrateParams`] into a [`CrateSource`], returning a
 /// user-facing error string when validation fails.
 pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource, String> {
+    super::features::FeatureOptions::new(
+        params.features.clone(),
+        params.no_default_features,
+        params.all_features,
+    )
+    .map_err(|e| e.to_string())?;
     match params.source_type.as_str() {
         "cratesio" => {
             let version = params.version.clone().ok_or_else(|| {
@@ -221,6 +259,8 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 members: params.members.clone(),
                 update: params.update,
                 features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
             }))
         }
         "github" => {
@@ -252,6 +292,8 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 members: params.members.clone(),
                 update: params.update,
                 features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
             }))
         }
         "local" => {
@@ -265,6 +307,8 @@ pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource
                 members: params.members.clone(),
                 update: params.update,
                 features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
             }))
         }
         other => Err(format!(
@@ -382,6 +426,10 @@ impl CacheTools {
                     };
 
                     let version_info = VersionInfo {
+                        variants: cache
+                            .storage
+                            .list_variants(&crate_name, &version)
+                            .map_err(|e| ErrorOutput::new(e.to_string()))?,
                         version: crate_meta.version,
                         cached_at: crate_meta.cached_at.to_string(),
                         doc_generated: crate_meta.doc_generated,
@@ -433,6 +481,10 @@ impl CacheTools {
                         };
 
                         VersionInfo {
+                            variants: cache
+                                .storage
+                                .list_variants(&meta.name, &meta.version)
+                                .unwrap_or_default(),
                             version: meta.version,
                             cached_at: meta.cached_at.to_string(),
                             doc_generated: meta.doc_generated,
@@ -478,7 +530,7 @@ impl CacheTools {
                 let main_metadata = match cache.storage.load_metadata(crate_name, version, None) {
                     Ok(metadata) => {
                         // Check if docs are analyzed
-                        let analyzed = cache.storage.has_docs(crate_name, version, None);
+                        let analyzed = cache.storage.has_any_docs(crate_name, version, None);
 
                         CrateMetadata {
                             crate_name: crate_name.clone(),
@@ -531,10 +583,11 @@ impl CacheTools {
                             Some(&member_path),
                         ) {
                             Ok(metadata) => {
-                                let analyzed =
-                                    cache
-                                        .storage
-                                        .has_docs(crate_name, version, Some(&member_path));
+                                let analyzed = cache.storage.has_any_docs(
+                                    crate_name,
+                                    version,
+                                    Some(&member_path),
+                                );
 
                                 CrateMetadata {
                                     crate_name: crate_name.clone(),

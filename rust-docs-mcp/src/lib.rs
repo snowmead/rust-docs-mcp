@@ -1,5 +1,6 @@
 pub mod analysis;
 pub mod cache;
+pub mod cache_cli;
 pub mod cli;
 pub mod deps;
 pub mod docs;

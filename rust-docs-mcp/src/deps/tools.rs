@@ -6,9 +6,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::cache::CrateCache;
+use crate::cache::workspace::WorkspaceHandler;
 use crate::deps::{
     outputs::{CrateIdentifier, Dependency, DepsErrorOutput, GetDependenciesOutput},
-    process_cargo_metadata,
+    process_package_metadata,
 };
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -27,6 +28,12 @@ pub struct GetDependenciesParams {
         description = "For workspace crates, specify the member path (e.g., 'crates/rmcp')"
     )]
     pub member: Option<String>,
+    #[schemars(
+        description = "Select the same features used when caching. An explicit list disables defaults unless no_default_features=false. Omitted options use all-features, defaults, then no-defaults fallback. Item IDs belong to the selected variant."
+    )]
+    pub features: Option<Vec<String>>,
+    pub no_default_features: Option<bool>,
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone)]
@@ -43,7 +50,14 @@ impl DepsTools {
         &self,
         params: GetDependenciesParams,
     ) -> Result<GetDependenciesOutput, DepsErrorOutput> {
-        let cache = self.cache.write().await;
+        let guard = self.cache.write().await;
+        let cache = guard
+            .with_features(
+                params.features.clone(),
+                params.no_default_features,
+                params.all_features,
+            )
+            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
 
         // First ensure the crate is cached
         match cache
@@ -57,15 +71,28 @@ impl DepsTools {
             Ok(_) => {
                 // Load the dependency metadata
                 match cache
-                    .load_dependencies(&params.crate_name, &params.version)
+                    .load_member_dependencies(
+                        &params.crate_name,
+                        &params.version,
+                        params.member.as_deref(),
+                    )
                     .await
                 {
                     Ok(metadata) => {
-                        // Process the metadata to extract dependency information
-                        match process_cargo_metadata(
+                        let source = cache
+                            .get_source_path(&params.crate_name, &params.version)
+                            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
+                        let manifest = params
+                            .member
+                            .as_ref()
+                            .map(|m| source.join(m))
+                            .unwrap_or(source)
+                            .join("Cargo.toml");
+                        let package = selected_package(&metadata, &manifest)
+                            .map_err(|e| DepsErrorOutput::new(e.to_string()))?;
+                        match process_package_metadata(
                             &metadata,
-                            &params.crate_name,
-                            &params.version,
+                            package,
                             params.include_tree.unwrap_or(false),
                             params.filter.as_deref(),
                         ) {
@@ -104,4 +131,38 @@ impl DepsTools {
             Err(e) => Err(DepsErrorOutput::new(format!("Failed to cache crate: {e}"))),
         }
     }
+}
+
+fn selected_package<'a>(
+    metadata: &'a serde_json::Value,
+    manifest: &std::path::Path,
+) -> anyhow::Result<&'a serde_json::Value> {
+    let packages = metadata["packages"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No packages found in dependency metadata"))?;
+    if let Some(id) = metadata["rust_docs_mcp"]["package_id"].as_str() {
+        return packages
+            .iter()
+            .find(|package| package["id"].as_str() == Some(id))
+            .ok_or_else(|| {
+                anyhow::anyhow!("Selected package ID not found in dependency metadata")
+            });
+    }
+    // Older snapshots lack a selected ID. Cargo workspace package names are unique.
+    // Use membership IDs from the snapshot, without opening its old absolute paths.
+    let name = WorkspaceHandler::get_package_name(manifest)?;
+    let members = metadata["workspace_members"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("No workspace members found in dependency metadata"))?;
+    let mut matches = packages.iter().filter(|package| {
+        package["name"].as_str() == Some(&name) && members.contains(&package["id"])
+    });
+    let package = matches
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Selected package not found in dependency metadata"))?;
+    anyhow::ensure!(
+        matches.next().is_none(),
+        "Ambiguous package in dependency metadata"
+    );
+    Ok(package)
 }

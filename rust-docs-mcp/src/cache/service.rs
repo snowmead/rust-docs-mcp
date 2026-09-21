@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// Cache key for the in-memory LRU of parsed `rustdoc_types::Crate` objects.
-type DocsCacheKey = (String, String, Option<String>);
+type DocsCacheKey = (String, String, Option<String>, String);
 type SourceParams = (
     String,
     String,
@@ -27,12 +27,12 @@ pub struct CrateCache {
     pub(crate) storage: CacheStorage,
     downloader: CrateDownloader,
     doc_generator: DocGenerator,
-    /// LRU cache of parsed crate docs, keyed by `(name, version, member)`.
+    /// LRU cache of parsed crate docs, keyed by `(name, version, member, features)`.
     /// Wrapped in `std::sync::Mutex` for interior mutability so that all
     /// methods can stay `&self` — this is required because
     /// [`cache_workspace_members`](Self::cache_workspace_members) borrows
     /// `&self` in multiple concurrent futures.
-    docs_cache: std::sync::Mutex<lru::LruCache<DocsCacheKey, Arc<rustdoc_types::Crate>>>,
+    docs_cache: Arc<std::sync::Mutex<lru::LruCache<DocsCacheKey, Arc<rustdoc_types::Crate>>>>,
 }
 
 impl std::fmt::Debug for CrateCache {
@@ -58,15 +58,53 @@ impl CrateCache {
             storage,
             downloader,
             doc_generator,
-            docs_cache: std::sync::Mutex::new(lru::LruCache::new(
+            docs_cache: Arc::new(std::sync::Mutex::new(lru::LruCache::new(
                 NonZeroUsize::new(DEFAULT_DOCS_CACHE_CAPACITY)
                     .expect("DEFAULT_DOCS_CACHE_CAPACITY must be > 0"),
-            )),
+            ))),
         })
+    }
+
+    pub fn with_options(&self, features: super::features::FeatureOptions) -> Self {
+        let storage = self.storage.with_options(features);
+        Self {
+            downloader: self.downloader.clone(),
+            doc_generator: DocGenerator::new(storage.clone()),
+            storage,
+            docs_cache: self.docs_cache.clone(),
+        }
+    }
+
+    pub fn with_features(
+        &self,
+        features: Option<Vec<String>>,
+        no_default: Option<bool>,
+        all: Option<bool>,
+    ) -> Result<Self> {
+        Ok(self.with_options(super::features::FeatureOptions::new(
+            features, no_default, all,
+        )?))
+    }
+
+    fn with_legacy_features(&self, features: Option<Vec<String>>) -> Result<Self> {
+        Ok(self.with_options(self.storage.features.with_feature_list(features)?))
     }
 
     /// Ensure a crate's documentation is available, downloading and generating if necessary
     pub async fn ensure_crate_docs(
+        &self,
+        name: &str,
+        version: &str,
+        source: Option<&str>,
+        features: Option<Vec<String>>,
+    ) -> Result<Arc<rustdoc_types::Crate>> {
+        let scoped = self.with_legacy_features(features.clone())?;
+        scoped
+            .ensure_crate_docs_scoped(name, version, source, features)
+            .await
+    }
+
+    async fn ensure_crate_docs_scoped(
         &self,
         name: &str,
         version: &str,
@@ -166,6 +204,20 @@ impl CrateCache {
 
     /// Ensure a workspace member's documentation is available
     pub async fn ensure_workspace_member_docs(
+        &self,
+        name: &str,
+        version: &str,
+        source: Option<&str>,
+        member_path: &str,
+        features: Option<Vec<String>>,
+    ) -> Result<Arc<rustdoc_types::Crate>> {
+        let scoped = self.with_legacy_features(features.clone())?;
+        scoped
+            .ensure_workspace_member_docs_scoped(name, version, source, member_path, features)
+            .await
+    }
+
+    async fn ensure_workspace_member_docs_scoped(
         &self,
         name: &str,
         version: &str,
@@ -274,6 +326,19 @@ impl CrateCache {
         progress_callback: Option<crate::cache::downloader::ProgressCallback>,
         features: Option<Vec<String>>,
     ) -> Result<PathBuf> {
+        let scoped = self.with_legacy_features(features.clone())?;
+        scoped
+            .generate_docs_scoped(name, version, progress_callback, features)
+            .await
+    }
+
+    async fn generate_docs_scoped(
+        &self,
+        name: &str,
+        version: &str,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
+        features: Option<Vec<String>>,
+    ) -> Result<PathBuf> {
         self.doc_generator
             .generate_docs(name, version, progress_callback, features)
             .await
@@ -281,6 +346,26 @@ impl CrateCache {
 
     /// Generate JSON documentation for a workspace member
     pub async fn generate_workspace_member_docs(
+        &self,
+        name: &str,
+        version: &str,
+        member_path: &str,
+        progress_callback: Option<crate::cache::downloader::ProgressCallback>,
+        features: Option<Vec<String>>,
+    ) -> Result<PathBuf> {
+        let scoped = self.with_legacy_features(features.clone())?;
+        scoped
+            .generate_workspace_member_docs_scoped(
+                name,
+                version,
+                member_path,
+                progress_callback,
+                features,
+            )
+            .await
+    }
+
+    async fn generate_workspace_member_docs_scoped(
         &self,
         name: &str,
         version: &str,
@@ -308,6 +393,7 @@ impl CrateCache {
             name.to_string(),
             version.to_string(),
             member_name.map(|s| s.to_string()),
+            self.storage.features.fingerprint(),
         );
 
         // Check cache — lock held only for the HashMap lookup, never across await.
@@ -366,7 +452,7 @@ impl CrateCache {
         let mut cache = self.docs_cache.lock().expect("docs_cache lock poisoned");
         let keys_to_evict: Vec<DocsCacheKey> = cache
             .iter()
-            .filter(|((n, v, _), _)| n == name && v == version)
+            .filter(|((n, v, _, _), _)| n == name && v == version)
             .map(|(k, _)| k.clone())
             .collect();
         for key in keys_to_evict {
@@ -474,6 +560,16 @@ impl CrateCache {
     /// Load dependency information from cache
     pub async fn load_dependencies(&self, name: &str, version: &str) -> Result<serde_json::Value> {
         self.doc_generator.load_dependencies(name, version).await
+    }
+
+    pub async fn load_member_dependencies(
+        &self,
+        name: &str,
+        version: &str,
+        member: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        let path = self.storage.dependencies_path(name, version, member)?;
+        Ok(serde_json::from_slice(&tokio::fs::read(path).await?)?)
     }
 
     /// Internal implementation for caching a crate during update
@@ -794,6 +890,33 @@ impl CrateCache {
 
     /// Common method to cache a crate from any source
     pub async fn cache_crate_with_source(
+        &self,
+        source: CrateSource,
+        task_manager: Option<Arc<crate::cache::task_manager::TaskManager>>,
+        task_id: Option<String>,
+    ) -> String {
+        let options = match &source {
+            CrateSource::CratesIO(p) => {
+                self.with_features(p.features.clone(), p.no_default_features, p.all_features)
+            }
+            CrateSource::GitHub(p) => {
+                self.with_features(p.features.clone(), p.no_default_features, p.all_features)
+            }
+            CrateSource::LocalPath(p) => {
+                self.with_features(p.features.clone(), p.no_default_features, p.all_features)
+            }
+        };
+        match options {
+            Ok(scoped) => {
+                scoped
+                    .cache_crate_with_source_scoped(source, task_manager, task_id)
+                    .await
+            }
+            Err(e) => CacheResponse::error(e.to_string()).to_json(),
+        }
+    }
+
+    async fn cache_crate_with_source_scoped(
         &self,
         source: CrateSource,
         task_manager: Option<Arc<crate::cache::task_manager::TaskManager>>,

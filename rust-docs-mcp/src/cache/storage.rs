@@ -44,6 +44,8 @@ fn default_source() -> String {
 #[derive(Debug, Clone)]
 pub struct CacheStorage {
     cache_dir: PathBuf,
+    artifact_override: Option<PathBuf>,
+    pub(crate) features: super::features::FeatureOptions,
 }
 
 impl CacheStorage {
@@ -59,7 +61,41 @@ impl CacheStorage {
 
         fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
 
-        Ok(Self { cache_dir })
+        Ok(Self {
+            cache_dir,
+            features: Default::default(),
+            artifact_override: None,
+        })
+    }
+
+    pub fn with_options(&self, features: super::features::FeatureOptions) -> Self {
+        Self {
+            cache_dir: self.cache_dir.clone(),
+            features,
+            artifact_override: None,
+        }
+    }
+
+    pub(crate) fn staging_at(&self, path: PathBuf) -> Self {
+        let mut storage = self.clone();
+        storage.artifact_override = Some(path);
+        storage
+    }
+
+    pub fn artifact_path(
+        &self,
+        name: &str,
+        version: &str,
+        member: Option<&str>,
+    ) -> Result<PathBuf> {
+        if let Some(path) = &self.artifact_override {
+            return Ok(path.clone());
+        }
+        let base = match member {
+            Some(member) => self.member_path(name, version, member)?,
+            None => self.crate_path(name, version)?,
+        };
+        Ok(base.join("variants").join(self.features.fingerprint()))
     }
 
     /// Get the cache directory path
@@ -109,12 +145,9 @@ impl CacheStorage {
         version: &str,
         member_name: Option<&str>,
     ) -> Result<PathBuf> {
-        let base_path = if let Some(member) = member_name {
-            self.member_path(name, version, member)?
-        } else {
-            self.crate_path(name, version)?
-        };
-        Ok(base_path.join(DOCS_FILE))
+        Ok(self
+            .artifact_path(name, version, member_name)?
+            .join(DOCS_FILE))
     }
 
     /// Get the metadata path for a crate or workspace member
@@ -139,12 +172,9 @@ impl CacheStorage {
         version: &str,
         member_name: Option<&str>,
     ) -> Result<PathBuf> {
-        let base_path = if let Some(member) = member_name {
-            self.member_path(name, version, member)?
-        } else {
-            self.crate_path(name, version)?
-        };
-        Ok(base_path.join(DEPENDENCIES_FILE))
+        Ok(self
+            .artifact_path(name, version, member_name)?
+            .join(DEPENDENCIES_FILE))
     }
 
     /// Get the search index path for a crate or workspace member
@@ -154,12 +184,9 @@ impl CacheStorage {
         version: &str,
         member_name: Option<&str>,
     ) -> Result<PathBuf> {
-        let base_path = if let Some(member) = member_name {
-            self.member_path(name, version, member)?
-        } else {
-            self.crate_path(name, version)?
-        };
-        Ok(base_path.join(SEARCH_INDEX_DIR))
+        Ok(self
+            .artifact_path(name, version, member_name)?
+            .join(SEARCH_INDEX_DIR))
     }
 
     /// Check if a crate version is cached
@@ -187,6 +214,21 @@ impl CacheStorage {
         self.docs_path(name, version, member_name)
             .map(|p| p.exists())
             .unwrap_or(false)
+    }
+
+    /// Inspection tools report whether any completed feature variant exists.
+    pub fn has_any_docs(&self, name: &str, version: &str, member: Option<&str>) -> bool {
+        let base = match member {
+            Some(member) => self.member_path(name, version, member),
+            None => self.crate_path(name, version),
+        };
+        base.ok()
+            .and_then(|base| fs::read_dir(base.join("variants")).ok())
+            .is_some_and(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.path().join(DOCS_FILE).is_file())
+            })
     }
 
     /// Check if a search index exists for a crate or workspace member
@@ -271,7 +313,7 @@ impl CacheStorage {
             name: name.to_string(),
             version: version.to_string(),
             cached_at: chrono::Utc::now(),
-            doc_generated: self.has_docs(name, version, member_path_str),
+            doc_generated: self.has_any_docs(name, version, member_path_str),
             size_bytes,
             source: source.to_string(),
             source_path: source_path.map(String::from),
@@ -279,8 +321,15 @@ impl CacheStorage {
         };
 
         let metadata_path = self.metadata_path(name, version, member_path_str)?;
-        let json = serde_json::to_string_pretty(&metadata)?;
-        fs::write(metadata_path, json)?;
+        // Different variants can finish concurrently. Readers must see one complete JSON document.
+        let mut file = tempfile::NamedTempFile::new_in(
+            metadata_path
+                .parent()
+                .context("Metadata path has no parent")?,
+        )?;
+        serde_json::to_writer_pretty(file.as_file_mut(), &metadata)?;
+        file.persist(metadata_path)
+            .context("Failed to publish cache metadata")?;
         Ok(())
     }
 
@@ -317,7 +366,7 @@ impl CacheStorage {
 
                     if version_entry.file_type()?.is_dir() {
                         // Try to load metadata, fall back to creating new metadata if not found
-                        let metadata = match self.load_metadata(&crate_name, &version, None) {
+                        let mut metadata = match self.load_metadata(&crate_name, &version, None) {
                             Ok(meta) => meta,
                             Err(_) => {
                                 // If metadata doesn't exist, create it based on file modification time
@@ -343,6 +392,7 @@ impl CacheStorage {
                                 }
                             }
                         };
+                        metadata.doc_generated = self.has_any_docs(&crate_name, &version, None);
                         cached_crates.push(metadata);
                     }
                 }
@@ -350,6 +400,55 @@ impl CacheStorage {
         }
 
         Ok(cached_crates)
+    }
+
+    /// List completed variants. Legacy docs without feature provenance are not reused.
+    pub fn list_variants(
+        &self,
+        name: &str,
+        version: &str,
+    ) -> Result<Vec<super::features::CachedVariant>> {
+        let mut variants = Vec::new();
+        let mut members = vec![None];
+        members.extend(
+            self.list_workspace_members(name, version)?
+                .into_iter()
+                .map(Some),
+        );
+        for member in members {
+            let base = match &member {
+                Some(member) => self.member_path(name, version, member)?,
+                None => self.crate_path(name, version)?,
+            }
+            .join("variants");
+            if !base.exists() {
+                continue;
+            }
+            for entry in fs::read_dir(base)? {
+                let entry = entry?;
+                let path = entry.path();
+                if !path.join(DOCS_FILE).is_file() {
+                    continue;
+                }
+                let Ok(json) = fs::read(path.join("build.json")) else {
+                    continue;
+                };
+                let Ok(build) = serde_json::from_slice(&json) else {
+                    continue;
+                };
+                variants.push(super::features::CachedVariant {
+                    fingerprint: entry.file_name().to_string_lossy().into_owned(),
+                    member: member.clone(),
+                    build,
+                });
+            }
+        }
+        variants.sort_by(|a, b| {
+            a.member
+                .cmp(&b.member)
+                .then(a.fingerprint.cmp(&b.fingerprint))
+        });
+        Ok(variants)
     }
 
     /// Get all workspace members for a cached crate
