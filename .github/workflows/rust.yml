@@ -79,6 +79,9 @@ jobs:
     - name: Run unit tests
       run: cargo test --workspace --lib --bins --verbose -- --include-ignored
     
+    - name: Run feature, re-export, and CLI regressions
+      run: cargo test -p rust-docs-mcp --test feature_variants --test reexports --test cache_cli --test toolchain_commands --verbose
+
     - name: Run doc tests
       run: cargo test --workspace --doc --verbose
 
@@ -107,4 +110,4 @@ jobs:
           ${{ runner.os }}-cargo-
     
     - name: Run integration tests
-      run: cargo test --workspace --test integration_tests --verbose -- --include-ignored
+      run: cargo test --workspace --test integration_tests --verbose -- --include-ignored --skip test_cache_leptos_use_with_axum_feature

@@ -4,6 +4,7 @@
 //! They are serialized to JSON strings for the MCP protocol, and can be
 //! deserialized in tests for type-safe validation.
 
+use rmcp::schemars;
 use serde::{Deserialize, Serialize};
 
 /// Simplified item information for API responses
@@ -92,11 +93,23 @@ pub struct SourceLocation {
     pub column_end: usize,
 }
 
+/// The target of a public import. External IDs require the target crate's docs.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, rmcp::schemars::JsonSchema)]
+pub struct ReexportInfo {
+    pub source: String,
+    pub target_id: Option<String>,
+    pub target_path: Option<Vec<String>>,
+    pub target_crate: Option<String>,
+    pub is_glob: bool,
+}
+
 /// Detailed item information including signatures
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct DetailedItem {
     pub info: ItemInfo,
     pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reexport: Option<ReexportInfo>,
     pub generics: Option<serde_json::Value>,
     pub fields: Option<Vec<ItemInfo>>,
     pub variants: Option<Vec<ItemInfo>>,
@@ -263,6 +276,7 @@ mod tests {
                 visibility: "public".to_string(),
             },
             signature: Some("fn test()".to_string()),
+            reexport: None,
             generics: None,
             fields: None,
             variants: None,

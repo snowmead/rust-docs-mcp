@@ -31,7 +31,39 @@ const MAX_ERROR_MESSAGE_CHARS: usize = 4096;
 /// Timeout for individual rustdoc execution attempts (in seconds)
 const RUSTDOC_TIMEOUT_SECS: u64 = 1800;
 
-static SELECTED_TOOLCHAIN: OnceLock<std::result::Result<String, String>> = OnceLock::new();
+static SELECTED_TOOLCHAIN: OnceLock<std::result::Result<Toolchain, String>> = OnceLock::new();
+
+/// Compiler commands selected through rustup or supplied directly on PATH.
+#[derive(Debug, Clone)]
+pub enum Toolchain {
+    /// An installed rustup toolchain.
+    Rustup(String),
+    /// Cargo and rustdoc supplied directly by the environment, such as Nix.
+    Path,
+}
+
+impl std::fmt::Display for Toolchain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rustup(name) => f.write_str(name),
+            Self::Path => f.write_str("PATH"),
+        }
+    }
+}
+
+impl Toolchain {
+    /// Build a command without requiring cargo or rustdoc to be rustup proxies.
+    pub(crate) fn command(&self, program: &str) -> Command {
+        match self {
+            Self::Rustup(name) => {
+                let mut command = Command::new("rustup");
+                command.args(["run", name, program]);
+                command
+            }
+            Self::Path => Command::new(program),
+        }
+    }
+}
 
 #[derive(Debug)]
 enum ToolchainProbe {
@@ -46,19 +78,20 @@ struct ProbeFormatVersion {
 }
 
 /// Resolve the rustdoc toolchain to use for JSON generation.
-pub fn resolve_toolchain() -> Result<String> {
+pub fn resolve_toolchain() -> Result<Toolchain> {
     match SELECTED_TOOLCHAIN.get_or_init(|| select_toolchain().map_err(|err| err.to_string())) {
         Ok(toolchain) => Ok(toolchain.clone()),
         Err(message) => bail!("{message}"),
     }
 }
 
-fn select_toolchain() -> Result<String> {
+fn select_toolchain() -> Result<Toolchain> {
     if let Some(toolchain) = env::var(TOOLCHAIN_ENV_VAR)
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
     {
+        let toolchain = Toolchain::Rustup(toolchain);
         return match probe_toolchain(&toolchain)? {
             ToolchainProbe::Compatible => Ok(toolchain),
             ToolchainProbe::Missing => bail!(
@@ -73,30 +106,31 @@ with rustdoc JSON format version {}: {reason}",
         };
     }
 
-    let preferred = probe_toolchain(PREFERRED_TOOLCHAIN)?;
+    let preferred = probe_toolchain(&Toolchain::Rustup(PREFERRED_TOOLCHAIN.to_string()))?;
     if matches!(preferred, ToolchainProbe::Compatible) {
-        return Ok(PREFERRED_TOOLCHAIN.to_string());
+        return Ok(Toolchain::Rustup(PREFERRED_TOOLCHAIN.to_string()));
     }
 
-    let fallback = probe_toolchain(FALLBACK_TOOLCHAIN)?;
+    let fallback = probe_toolchain(&Toolchain::Rustup(FALLBACK_TOOLCHAIN.to_string()))?;
     if matches!(fallback, ToolchainProbe::Compatible) {
         tracing::warn!(
             "Preferred rustdoc toolchain {} is unavailable or incompatible; falling back to {}",
             PREFERRED_TOOLCHAIN,
             FALLBACK_TOOLCHAIN
         );
-        return Ok(FALLBACK_TOOLCHAIN.to_string());
+        return Ok(Toolchain::Rustup(FALLBACK_TOOLCHAIN.to_string()));
     }
 
-    // Final fallback: nightly rustdoc/cargo directly in PATH without +toolchain (Nix/fenix).
-    // We skip the JSON format-version probe here because in Nix environments the rustdoc in
-    // PATH is always the same nightly the binary was compiled against — they are in lockstep.
-    if probe_native_nightly() {
-        tracing::warn!(
-            "No rustup toolchain found; using rustdoc/cargo directly from PATH (Nix/non-rustup environment)"
-        );
-        return Ok(String::new());
+    let native = probe_toolchain(&Toolchain::Path)?;
+    if matches!(native, ToolchainProbe::Compatible) {
+        tracing::info!("Using compatible cargo and rustdoc from PATH");
+        return Ok(Toolchain::Path);
     }
+    let native_reason = match native {
+        ToolchainProbe::Missing => "cargo or rustdoc is not installed".to_string(),
+        ToolchainProbe::Incompatible(reason) => reason,
+        ToolchainProbe::Compatible => unreachable!(),
+    };
 
     let preferred_reason = match preferred {
         ToolchainProbe::Missing => format!(
@@ -129,45 +163,30 @@ version {}: {reason}",
         "No compatible nightly rustdoc toolchain was found.\n\
 Preferred: {preferred_reason}\n\
 Fallback: {fallback_reason}\n\
+PATH: {native_reason}\n\
 You can also set {TOOLCHAIN_ENV_VAR} to a specific compatible nightly."
     )
 }
 
-/// Check whether the `rustdoc` on PATH is a nightly build without using rustup.
-/// Used as a last resort for Nix/fenix environments where the nightly toolchain is
-/// placed directly in PATH rather than managed by rustup.
-fn probe_native_nightly() -> bool {
-    Command::new("rustdoc")
-        .arg("--version")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|v| v.contains("nightly"))
-        .unwrap_or(false)
-}
-
-fn probe_toolchain(toolchain: &str) -> Result<ToolchainProbe> {
-    // Use `cargo +toolchain --version` rather than `rustdoc +toolchain --version`.
-    // Rustdoc treats `+toolchain` as a file argument, and `--version` overrides all other
-    // processing so it exits 0 even without rustup — a false positive. Cargo correctly
-    // errors with "no such subcommand" when rustup is absent, giving an accurate result.
-    let version_output = Command::new("cargo")
-        .arg(format!("+{toolchain}"))
-        .arg("--version")
-        .output()
-        .with_context(|| format!("Failed to run cargo --version for toolchain {toolchain}"))?;
+fn probe_toolchain(toolchain: &Toolchain) -> Result<ToolchainProbe> {
+    let version_output = match toolchain.command("cargo").arg("--version").output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ToolchainProbe::Missing);
+        }
+        Err(error) => return Err(error).context("Failed to probe cargo"),
+    };
 
     if !version_output.status.success() {
         let stderr = String::from_utf8_lossy(&version_output.stderr)
             .trim()
             .to_string();
-        if is_missing_toolchain_error(&stderr, toolchain) {
+        if is_missing_toolchain_error(&stderr, &toolchain.to_string()) {
             return Ok(ToolchainProbe::Missing);
         }
 
         return Ok(ToolchainProbe::Incompatible(format!(
-            "rustdoc --version failed: {stderr}"
+            "cargo --version failed: {stderr}"
         )));
     }
 
@@ -195,7 +214,7 @@ fn is_missing_toolchain_error(stderr: &str, toolchain: &str) -> bool {
     })
 }
 
-fn validate_rustdoc_json_format(toolchain: &str) -> Result<()> {
+fn validate_rustdoc_json_format(toolchain: &Toolchain) -> Result<()> {
     let json = generate_probe_json(toolchain)?;
     let format: ProbeFormatVersion =
         serde_json::from_str(&json).context("Failed to read rustdoc JSON format version")?;
@@ -214,7 +233,7 @@ fn validate_rustdoc_json_format(toolchain: &str) -> Result<()> {
     Ok(())
 }
 
-fn generate_probe_json(toolchain: &str) -> Result<String> {
+fn generate_probe_json(toolchain: &Toolchain) -> Result<String> {
     let temp_dir =
         tempfile::tempdir().context("Failed to create temporary directory for toolchain probe")?;
     let test_file = temp_dir.path().join("lib.rs");
@@ -223,11 +242,8 @@ fn generate_probe_json(toolchain: &str) -> Result<String> {
         .context("Failed to create probe source file")?;
     std::fs::create_dir(&output_dir).context("Failed to create probe output directory")?;
 
-    let mut probe_cmd = Command::new("rustdoc");
-    if !toolchain.is_empty() {
-        probe_cmd.arg(format!("+{toolchain}"));
-    }
-    let output = probe_cmd
+    let output = toolchain
+        .command("rustdoc")
         .args([
             "-Z",
             "unstable-options",
@@ -275,12 +291,9 @@ pub async fn get_rustdoc_version() -> Result<String> {
 }
 
 /// Get rustdoc version information for a specific toolchain.
-pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
-    let mut cmd = Command::new("rustdoc");
-    if !toolchain.is_empty() {
-        cmd.arg(format!("+{toolchain}"));
-    }
-    let output = cmd
+pub fn get_rustdoc_version_for_toolchain(toolchain: &Toolchain) -> Result<String> {
+    let output = toolchain
+        .command("rustdoc")
         .arg("--version")
         .output()
         .with_context(|| format!("Failed to run rustdoc --version for toolchain {toolchain}"))?;
@@ -293,69 +306,18 @@ pub fn get_rustdoc_version_for_toolchain(toolchain: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Strategy for selecting feature flags when generating rustdoc JSON output.
-///
-/// Provides a fallback mechanism to handle crates that fail to compile with
-/// certain feature combinations. Common scenarios include:
-/// - Platform-specific features that don't compile on all targets
-/// - Optional dependencies with conflicting version requirements
-/// - Features requiring specific system libraries
-///
-/// The recommended order is: [`AllFeatures`](Self::AllFeatures) →
-/// [`DefaultFeatures`](Self::DefaultFeatures) → [`NoDefaultFeatures`](Self::NoDefaultFeatures)
-#[derive(Debug, Clone)]
-#[allow(clippy::enum_variant_names)]
-enum FeatureStrategy {
-    /// Use --all-features (enables all feature flags)
-    AllFeatures,
-    /// Use default features only
-    DefaultFeatures,
-    /// Use --no-default-features (minimal)
-    NoDefaultFeatures,
-    /// Use --no-default-features --features=a,b,c (specific features only)
-    Specific(Vec<String>),
-}
-
-impl FeatureStrategy {
-    /// Get the command line arguments for this strategy
-    fn args(&self) -> Vec<String> {
-        match self {
-            Self::AllFeatures => vec!["--all-features".to_string()],
-            Self::DefaultFeatures => vec![],
-            Self::NoDefaultFeatures => vec!["--no-default-features".to_string()],
-            Self::Specific(features) => {
-                let mut args = vec!["--no-default-features".to_string()];
-                if !features.is_empty() {
-                    args.push("--features".to_string());
-                    args.push(features.join(","));
-                }
-                args
-            }
-        }
+fn check_msrv_error(stderr: &str, toolchain: &str) -> Result<()> {
+    if stderr.contains("requires rustc")
+        || stderr.contains("rustc is not supported")
+        || stderr.contains("is not supported by the following package")
+        || stderr.contains("error[E0658]")
+    {
+        bail!(
+            "Documentation build with {toolchain} failed because the crate requires compiler features unavailable in this toolchain. Set {TOOLCHAIN_ENV_VAR} to a newer installed nightly compatible with rustdoc JSON format {}. Run rust-docs-mcp doctor to inspect compatibility. No compiler was changed automatically.\n{stderr}",
+            rustdoc_types::FORMAT_VERSION
+        );
     }
-}
-
-impl std::fmt::Display for FeatureStrategy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::AllFeatures => f.write_str("all features enabled"),
-            Self::DefaultFeatures => f.write_str("default features only"),
-            Self::NoDefaultFeatures => f.write_str("no default features"),
-            Self::Specific(features) if features.is_empty() => {
-                f.write_str("specific features (none)")
-            }
-            Self::Specific(features) => {
-                f.write_str("specific features: ")?;
-                for (i, feat) in features.iter().enumerate() {
-                    if i > 0 {
-                        f.write_str(", ")?;
-                    }
-                    f.write_str(feat)?;
-                }
-                Ok(())
-            }
-        }
-    }
+    Ok(())
 }
 
 /// Check if an error is a compilation error
@@ -363,6 +325,8 @@ fn is_compilation_error(stderr: &str) -> bool {
     stderr.contains("error[E")
         || stderr.contains("error: could not compile")
         || stderr.contains("error: could not document")
+        || stderr.contains("requires rustc")
+        || stderr.contains("is not supported by the following package")
         || stderr.contains("error: aborting due to")
         || (stderr.contains("error:") && stderr.contains("failed to compile"))
 }
@@ -408,12 +372,18 @@ impl FailedAttempt {
 ///
 /// Returns an error if the command times out after [`RUSTDOC_TIMEOUT_SECS`] seconds.
 async fn execute_rustdoc(
+    toolchain: &Toolchain,
     args: &[String],
     source_path: &Path,
     target_dir: Option<&Path>,
 ) -> Result<std::process::Output> {
-    let mut command = TokioCommand::new("cargo");
-    command.args(args).current_dir(source_path);
+    let mut command = TokioCommand::from(toolchain.command("cargo"));
+    command
+        .args(args)
+        // Diagnostics are parsed below. CI may force ANSI colors into captured stderr.
+        .env("CARGO_TERM_COLOR", "never")
+        .current_dir(source_path)
+        .kill_on_drop(true);
 
     // Set custom target directory if provided to avoid conflicts when building
     // multiple workspace members concurrently
@@ -445,6 +415,18 @@ pub async fn run_cargo_rustdoc_json(
     target_dir: Option<&Path>,
     features: Option<Vec<String>>,
 ) -> Result<()> {
+    let options = crate::cache::features::FeatureOptions::new(features, None, None)?;
+    run_cargo_rustdoc_json_with_options(source_path, package, target_dir, &options)
+        .await
+        .map(|_| ())
+}
+
+pub async fn run_cargo_rustdoc_json_with_options(
+    source_path: &Path,
+    package: Option<&str>,
+    target_dir: Option<&Path>,
+    options: &crate::cache::features::FeatureOptions,
+) -> Result<crate::cache::features::FeatureOptions> {
     let toolchain = resolve_toolchain()?;
 
     // Logging strategy:
@@ -476,11 +458,7 @@ pub async fn run_cargo_rustdoc_json(
     };
     tracing::debug!("{}", log_msg);
 
-    let mut base_args = if toolchain.is_empty() {
-        vec!["rustdoc".to_string()]
-    } else {
-        vec![format!("+{}", toolchain), "rustdoc".to_string()]
-    };
+    let mut base_args = vec!["rustdoc".to_string()];
 
     // Add package-specific arguments if provided
     if let Some(pkg) = package {
@@ -488,17 +466,7 @@ pub async fn run_cargo_rustdoc_json(
         base_args.push(pkg.to_string());
     }
 
-    // When features are requested, use only the caller's set (no fallback).
-    // Otherwise try AllFeatures, DefaultFeatures, NoDefaultFeatures in order.
-    let strategies = if let Some(feats) = features {
-        vec![FeatureStrategy::Specific(feats)]
-    } else {
-        vec![
-            FeatureStrategy::AllFeatures,
-            FeatureStrategy::DefaultFeatures,
-            FeatureStrategy::NoDefaultFeatures,
-        ]
-    };
+    let strategies = options.strategies();
 
     let mut failed_attempts = Vec::new();
 
@@ -520,7 +488,7 @@ pub async fn run_cargo_rustdoc_json(
         args.extend_from_slice(&feature_args);
         args.extend_from_slice(&rustdoc_args);
 
-        let output = execute_rustdoc(&args, source_path, target_dir).await?;
+        let output = execute_rustdoc(&toolchain, &args, source_path, target_dir).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -552,7 +520,7 @@ pub async fn run_cargo_rustdoc_json(
                 args_with_lib.extend_from_slice(&rustdoc_args);
 
                 let output_with_lib =
-                    execute_rustdoc(&args_with_lib, source_path, target_dir).await?;
+                    execute_rustdoc(&toolchain, &args_with_lib, source_path, target_dir).await?;
 
                 if !output_with_lib.status.success() {
                     let stderr_with_lib = String::from_utf8_lossy(&output_with_lib.stderr);
@@ -574,12 +542,13 @@ pub async fn run_cargo_rustdoc_json(
                         continue; // Try next strategy
                     }
 
+                    check_msrv_error(&stderr_with_lib, &toolchain.to_string())?;
                     bail!("Failed to generate documentation with {strategy}: {stderr_with_lib}");
                 }
 
                 // Success with --lib
                 tracing::info!("Successfully generated documentation with {strategy}");
-                return Ok(());
+                return Ok(strategy.clone());
             }
 
             // Check if this is a compilation error that we should retry
@@ -590,12 +559,13 @@ pub async fn run_cargo_rustdoc_json(
             }
 
             // Other errors or last strategy failed
+            check_msrv_error(&stderr, &toolchain.to_string())?;
             bail!("Failed to generate documentation with {strategy}: {stderr}");
         }
 
         // Success
         tracing::info!("Successfully generated documentation with {strategy}");
-        return Ok(());
+        return Ok(strategy.clone());
     }
 
     // If we get here, all strategies failed
@@ -625,6 +595,21 @@ pub async fn run_cargo_rustdoc_json(
 mod tests {
     use super::*;
 
+    #[test]
+    fn rustup_commands_select_the_toolchain_before_the_program() {
+        for program in ["cargo", "rustdoc"] {
+            let command = Toolchain::Rustup("nightly-example".to_string()).command(program);
+            assert_eq!(command.get_program(), "rustup");
+            assert_eq!(
+                command.get_args().collect::<Vec<_>>(),
+                ["run", "nightly-example", program]
+            );
+            let command = Toolchain::Path.command(program);
+            assert_eq!(command.get_program(), program);
+            assert_eq!(command.get_args().count(), 0);
+        }
+    }
+
     #[tokio::test]
     async fn test_get_rustdoc_version() {
         // This test will pass if rustdoc is installed
@@ -651,55 +636,16 @@ mod tests {
     }
 
     #[test]
-    fn test_feature_strategy_args() {
-        assert_eq!(
-            FeatureStrategy::AllFeatures.args(),
-            vec!["--all-features".to_string()]
-        );
-        assert_eq!(
-            FeatureStrategy::DefaultFeatures.args(),
-            Vec::<String>::new()
-        );
-        assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.args(),
-            vec!["--no-default-features".to_string()]
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec!["axum".to_string()]).args(),
-            vec![
-                "--no-default-features".to_string(),
-                "--features".to_string(),
-                "axum".to_string(),
-            ]
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec![]).args(),
-            vec!["--no-default-features".to_string()]
-        );
-    }
-
-    #[test]
-    fn test_feature_strategy_display() {
-        assert_eq!(
-            FeatureStrategy::AllFeatures.to_string(),
-            "all features enabled"
-        );
-        assert_eq!(
-            FeatureStrategy::DefaultFeatures.to_string(),
-            "default features only"
-        );
-        assert_eq!(
-            FeatureStrategy::NoDefaultFeatures.to_string(),
-            "no default features"
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec!["axum".to_string(), "ssr".to_string()]).to_string(),
-            "specific features: axum, ssr"
-        );
-        assert_eq!(
-            FeatureStrategy::Specific(vec![]).to_string(),
-            "specific features (none)"
-        );
+    fn compiler_version_errors_explain_the_override() {
+        let message = check_msrv_error("error: example@1 requires rustc 1.99", PREFERRED_TOOLCHAIN)
+            .unwrap_err()
+            .to_string();
+        assert!(message.contains(TOOLCHAIN_ENV_VAR));
+        assert!(message.contains(PREFERRED_TOOLCHAIN));
+        assert!(message.contains("JSON format"));
+        assert!(check_msrv_error("error[E0658]: unstable syntax", PREFERRED_TOOLCHAIN).is_err());
+        assert!(check_msrv_error("error: unknown feature", PREFERRED_TOOLCHAIN).is_ok());
+        assert!(is_compilation_error("error: could not document `example`"));
     }
 
     #[test]
@@ -711,13 +657,6 @@ mod tests {
     #[test]
     fn test_is_compilation_error_with_could_not_compile() {
         let stderr = "error: could not compile `my-crate` due to previous error";
-        assert!(is_compilation_error(stderr));
-    }
-
-    #[test]
-    fn test_is_compilation_error_with_could_not_document() {
-        // `cargo rustdoc` emits "could not document" rather than "could not compile"
-        let stderr = "error: could not document `my-crate` due to previous error";
         assert!(is_compilation_error(stderr));
     }
 

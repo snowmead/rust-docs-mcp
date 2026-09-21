@@ -46,8 +46,78 @@ pub fn item_kind_string(inner: &ItemEnum) -> String {
     item_kind_str(inner).to_string()
 }
 
-/// Return the canonical module path for an item, resolved through `crate.paths`.
+/// Resolve names stored inside `use` items as well as ordinary item names.
+pub fn item_name<'a>(item: &'a Item, path: &'a [String]) -> Option<&'a str> {
+    item.name.as_deref().or_else(|| match &item.inner {
+        ItemEnum::Use(import) => Some(import.name.as_str()),
+        _ => path.last().map(String::as_str),
+    })
+}
+
+/// Build import paths by walking module membership once. Import IDs are often
+/// absent from rustdoc's canonical paths map, especially for external crates.
+pub fn reexport_paths(crate_data: &Crate) -> std::collections::HashMap<Id, Vec<String>> {
+    module_reexport_paths(
+        crate_data.root,
+        |id| {
+            crate_data
+                .index
+                .get(&id)
+                .and_then(|item| match &item.inner {
+                    ItemEnum::Module(module) => {
+                        Some((item.name.as_deref().unwrap_or(""), module.items.as_slice()))
+                    }
+                    _ => None,
+                })
+        },
+        |id| {
+            crate_data
+                .index
+                .get(&id)
+                .and_then(|item| match &item.inner {
+                    ItemEnum::Use(import) => Some(import.name.as_str()),
+                    _ => None,
+                })
+        },
+    )
+}
+
+pub(crate) fn module_reexport_paths<'a>(
+    root: Id,
+    module: impl Fn(Id) -> Option<(&'a str, &'a [Id])>,
+    import_name: impl Fn(Id) -> Option<&'a str>,
+) -> std::collections::HashMap<Id, Vec<String>> {
+    let mut paths = std::collections::HashMap::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut pending = vec![(root, Vec::new())];
+    while let Some((id, mut path)) = pending.pop() {
+        if !visited.insert(id) {
+            continue;
+        }
+        if let Some((name, children)) = module(id) {
+            path.push(name.to_owned());
+            for child in children {
+                if let Some(name) = import_name(*child) {
+                    let mut import_path = path.clone();
+                    import_path.push(name.to_owned());
+                    paths.insert(*child, import_path);
+                } else if module(*child).is_some() {
+                    pending.push((*child, path.clone()));
+                }
+            }
+        }
+    }
+    paths
+}
+
+/// Return an item's path, including public import aliases.
 pub fn item_path(crate_data: &Crate, id: &Id) -> Vec<String> {
+    if matches!(
+        crate_data.index.get(id).map(|item| &item.inner),
+        Some(ItemEnum::Use(_))
+    ) {
+        return reexport_paths(crate_data).remove(id).unwrap_or_default();
+    }
     crate_data
         .paths
         .get(id)
@@ -84,20 +154,14 @@ pub fn visibility_string(vis: &Visibility) -> String {
 /// takes borrowed state so the search indexer can iterate `crate.index`
 /// without first cloning the `Crate` into a `DocQuery`.
 pub fn build_item_info(crate_data: &Crate, id: &Id, item: &Item) -> Option<ItemInfo> {
-    // Prefer the item's own name; fall back to the last path component in the
-    // crate's `paths` map for items (e.g. impl blocks) that don't store one.
-    let name = if let Some(name) = &item.name {
-        name.clone()
-    } else {
-        let path_summary = crate_data.paths.get(id)?;
-        path_summary.path.last()?.clone()
-    };
+    let path = item_path(crate_data, id);
+    let name = item_name(item, &path)?.to_owned();
 
     Some(ItemInfo {
         id: id.0.to_string(),
         name,
         kind: item_kind_string(&item.inner),
-        path: item_path(crate_data, id),
+        path,
         docs: item.docs.clone(),
         visibility: visibility_string(&item.visibility),
     })
@@ -107,6 +171,7 @@ pub fn build_item_info(crate_data: &Crate, id: &Id, item: &Item) -> Option<ItemI
 #[derive(Debug)]
 pub struct DocQuery {
     crate_data: Arc<Crate>,
+    reexport_paths: std::collections::HashMap<Id, Vec<String>>,
 }
 
 /// Simplified item information for API responses
@@ -143,6 +208,8 @@ pub struct SourceInfo {
 pub struct DetailedItem {
     pub info: ItemInfo,
     pub signature: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reexport: Option<crate::docs::outputs::ReexportInfo>,
     pub generics: Option<serde_json::Value>,
     pub fields: Option<Vec<ItemInfo>>,
     pub variants: Option<Vec<ItemInfo>>,
@@ -153,7 +220,11 @@ pub struct DetailedItem {
 impl DocQuery {
     /// Create a new query interface for a crate's documentation
     pub fn new(crate_data: Arc<Crate>) -> Self {
-        Self { crate_data }
+        let reexport_paths = reexport_paths(&crate_data);
+        Self {
+            crate_data,
+            reexport_paths,
+        }
     }
 
     /// List all items in the crate, optionally filtered by kind
@@ -183,19 +254,8 @@ impl DocQuery {
         let mut items = Vec::new();
 
         for (id, item) in &self.crate_data.index {
-            // First check if item has a direct name
-            let item_name = if let Some(name) = &item.name {
-                Some(name.clone())
-            } else if let Some(path_summary) = self.crate_data.paths.get(id) {
-                // Fall back to using the last component of the path
-                path_summary.path.last().cloned()
-            } else {
-                None
-            };
-
-            if let Some(name) = item_name
-                && name.to_lowercase().contains(&pattern_lower)
-                && let Some(info) = self.item_to_info(id, item)
+            if let Some(info) = self.item_to_info(id, item)
+                && info.name.to_lowercase().contains(&pattern_lower)
             {
                 items.push(info);
             }
@@ -230,6 +290,21 @@ impl DocQuery {
         let mut details = DetailedItem {
             info,
             signature: self.get_item_signature(item),
+            reexport: match &item.inner {
+                ItemEnum::Use(import) => {
+                    let summary = import.id.and_then(|id| self.crate_data.paths.get(&id));
+                    Some(crate::docs::outputs::ReexportInfo {
+                        source: import.source.clone(),
+                        target_id: import.id.map(|id| id.0.to_string()),
+                        target_path: summary.map(|s| s.path.clone()),
+                        target_crate: summary
+                            .and_then(|s| self.crate_data.external_crates.get(&s.crate_id))
+                            .map(|c| c.name.clone()),
+                        is_glob: import.is_glob,
+                    })
+                }
+                _ => None,
+            },
             generics: None,
             fields: None,
             variants: None,
@@ -274,7 +349,20 @@ impl DocQuery {
 
     /// Helper to convert an Item to ItemInfo
     fn item_to_info(&self, id: &Id, item: &Item) -> Option<ItemInfo> {
-        build_item_info(&self.crate_data, id, item)
+        let path = self
+            .reexport_paths
+            .get(id)
+            .or_else(|| self.crate_data.paths.get(id).map(|summary| &summary.path))
+            .cloned()
+            .unwrap_or_default();
+        Some(ItemInfo {
+            id: id.0.to_string(),
+            name: item_name(item, &path)?.to_owned(),
+            path,
+            kind: item_kind_string(&item.inner),
+            docs: item.docs.clone(),
+            visibility: visibility_string(&item.visibility),
+        })
     }
 
     /// Get the kind of an item as a string
@@ -292,6 +380,25 @@ impl DocQuery {
                 let params = self.format_fn_params(&f.sig.inputs);
                 let output = self.format_fn_output(&f.sig.output);
                 Some(format!("fn {name}{generics}{params}{output}"))
+            }
+            Use(import) => {
+                let suffix = if import.is_glob {
+                    "::*".to_owned()
+                } else if import.source.rsplit("::").next() != Some(import.name.as_str()) {
+                    format!(" as {}", import.name)
+                } else {
+                    String::new()
+                };
+                Some(format!(
+                    "{}use {}{};",
+                    if item.visibility == Visibility::Public {
+                        "pub "
+                    } else {
+                        ""
+                    },
+                    import.source,
+                    suffix
+                ))
             }
             _ => None,
         }

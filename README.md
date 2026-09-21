@@ -93,6 +93,12 @@ ones released yesterday.
 - `get_crates_metadata` - Batch metadata queries for multiple crates
 - `cache_operations` - Manage and monitor background caching operations (list, status, cancel, clear)
 
+Crates.io downloads require an exact version, such as `9.3.1`. If a version is
+rejected, the error lists available non-yanked releases in descending semver
+order. Choose one and retry. Partial versions such as `9` and `9.3` never select
+a release automatically. Cached GitHub and local source versions keep their
+original identifiers.
+
 ### Documentation Queries
 
 - `list_crate_items` - Browse all items in a crate with optional filtering
@@ -117,6 +123,47 @@ ones released yesterday.
 
 - `search_items_fuzzy` - Fuzzy search with typo tolerance and semantic
   similarity
+
+### Feature selection and re-exports
+
+Cache, documentation, search, and dependency tools accept the same three fields:
+
+| Request | Build behavior |
+| --- | --- |
+| All three fields omitted | Try all features, then Cargo defaults, then no defaults |
+| `features: ["axum"]` | Enable only `axum`, without defaults or fallback |
+| `features: ["axum"], no_default_features: false` | Add `axum` to Cargo defaults |
+| `features: []` or `no_default_features: true` | Disable default features |
+| `no_default_features: false` or `all_features: false` | Use Cargo defaults only |
+| `all_features: true` | Enable every feature, without fallback |
+
+`all_features: true` cannot be combined with a feature list or
+`no_default_features: true`. Explicit requests never fall back to another set.
+
+Feature selections are separate cache variants. Names are sorted and deduplicated
+before computing the cache key. A query must supply the same feature options as
+the cache request to use that variant. Omitted options select the automatic
+fallback variant, regardless of which variant was cached last. Queries generate
+missing variants from the cached source. Item IDs belong to a variant; pass its
+feature options when requesting an item's docs, details, or source.
+
+```json
+{"crate_name":"leptos-use","version":"0.15.8","features":["axum"],"pattern":"use_"}
+```
+
+Use this request with `search_items_preview` to search a selected feature set.
+`list_cached_crates` and `list_crate_versions` report each variant's requested
+features, effective features, and toolchain. Dependency metadata uses the same
+successful feature selection as the docs, including automatic fallback.
+
+Search and listing include public `use` declarations and renamed imports.
+`get_item_details` returns the import signature and a `reexport` object containing
+its source, target path, target crate, and target ID when rustdoc provides them.
+For `pub use graphql_client`, search for `graphql_client` in the wrapper crate.
+To find `GraphQLQuery` inside that dependency, use `get_dependencies` to resolve
+its package/version, then query that crate explicitly. Searching a wrapper does
+not download or recursively search its dependencies. External target IDs refer
+to the wrapper's rustdoc data; search the target crate for its own item IDs.
 
 ## Configuration
 
@@ -153,13 +200,16 @@ Benefits of authentication:
 
 - Complete source code in `source/` directory
 - Cache metadata and timestamps in `metadata.json`
-- For workspace crates, individual members in `members/` directory:
-  - `members/{member-name}/docs.json` - Rustdoc JSON documentation
-  - `members/{member-name}/dependencies.json` - Cargo dependency metadata
-  - `members/{member-name}/metadata.json` - Member-specific cache metadata
-- For single crates:
-  - `docs.json` - Rustdoc JSON documentation
-  - `dependencies.json` - Cargo dependency metadata
+- `variants/{fingerprint}/` contains `docs.json`, `dependencies.json`,
+  `search_index/`, and `build.json` for each completed feature selection.
+- Workspace members use `members/{member-name}/variants/{fingerprint}/`.
+  Their source and member metadata remain shared.
+
+Documentation from older releases has no recorded feature selection. It remains
+on disk but is regenerated on the first query, using the existing source. A
+failed build leaves completed variants intact. `cache_crate` with `update: true`
+refreshes the source and invalidates all variants of that crate/version on
+success; `remove_crate` removes the source and all its variants.
 
 ## Installation
 
@@ -204,12 +254,22 @@ cargo install rust-docs-mcp
   compile modern crates. The `rustdoc-types` dependency is kept in sync with
   that rustdoc JSON format. If the dated toolchain is missing, the runtime
   falls back to plain `nightly`, but only when it emits the same rustdoc JSON
-  format version (57); newer nightlies will be rejected. You can override the
+  format version (57). A newer nightly is accepted only if its JSON format is compatible. You can override the
   choice with:
 
   ```bash
   export RUST_DOCS_MCP_TOOLCHAIN=nightly
   ```
+
+  This override selects the compiler for documentation and dependency metadata;
+  it does not change the toolchain used to compile this executable. There is no
+  automatic compiler switch after an MSRV or unstable-syntax failure. Such errors
+  report the selected toolchain and the override needed to try a newer installed
+  nightly. An incompatible JSON format still requires an application update.
+  `rust-docs-mcp --version` reports the tested pin and configured override without
+  compiling a probe. `rust-docs-mcp doctor` checks the actual selected compiler.
+  Restart a running MCP server after changing the environment variable.
+
 
 - Network access to download crates from [crates.io](https://crates.io)
 
@@ -223,7 +283,30 @@ cargo build --release
 ### CLI Commands
 
 ```bash
-rust-docs-mcp                   # Start MCP server
+rust-docs-mcp                   # Start MCP server (same as `serve`)
+rust-docs-mcp serve             # Start MCP server explicitly
+
+# Blocking cache commands, with JSON results on stdout
+rust-docs-mcp cache list
+rust-docs-mcp cache add serde serde_json@1 chrono rand tokio
+rust-docs-mcp cache add semver@1.0.0
+rust-docs-mcp cache add leptos-use@0.15.8 --features axum
+rust-docs-mcp cache update --all
+rust-docs-mcp cache update serde tokio
+
+# One-shot operations (stateless – print JSON to stdout and exit)
+rust-docs-mcp call cache-crate \
+  --params '{"crate_name":"serde","source_type":"cratesio","version":"1.0.215"}'
+
+rust-docs-mcp call search-items-fuzzy \
+  --params '{"crate_name":"serde","version":"1.0.215","query":"Deserialize","limit":10}'
+
+rust-docs-mcp call list-cached-crates
+
+rust-docs-mcp call list-crate-versions \
+  --params '{"crate_name":"serde"}'
+
+# Maintenance commands
 rust-docs-mcp install           # Install to ~/.local/bin
 rust-docs-mcp install --force   # Force overwrite existing installation
 rust-docs-mcp doctor            # Verify system environment and dependencies
@@ -231,6 +314,31 @@ rust-docs-mcp doctor --json     # Output diagnostic results in JSON format
 rust-docs-mcp update            # Update to latest version from GitHub
 rust-docs-mcp --help            # Show help
 ```
+
+`cache add` resolves an omitted version to the latest non-yanked stable release.
+A complete version such as `1.0.0` pins that version exactly; `1`, `1.2`, and
+quoted requirements such as `'serde@>=1,<2'` select the highest matching release.
+Prereleases require an explicit matching prerelease requirement.
+
+`cache update` adds the latest stable crates.io release with the cached feature
+selections. It retains older versions, skips local/Git sources, and skips variants
+already present at the latest version. Both batch commands continue after an
+individual failure, print every result in a JSON `results` array, and exit with
+status 1 if any crate failed. Progress goes to stderr. `cache list` needs no network.
+`--cache-dir` works before or after the subcommand.
+
+> **Note:** `call cache-crate` is **blocking** — it downloads the crate,
+> generates documentation, and builds the search index before returning.
+> This is different from MCP mode where `cache_crate` returns a task ID
+> immediately and completes in the background. If a one-shot tool returns
+> an error JSON response, the CLI prints that JSON to stdout and exits with
+> status 1.
+>
+> Available one-shot tools: `cache-crate`, `search-items-fuzzy`,
+> `search-items-preview`, `search-items`, `list-crate-items`,
+> `get-item-details`, `get-item-docs`, `get-item-source`,
+> `list-cached-crates`, `list-crate-versions`, `get-dependencies`,
+> `structure`.
 
 ### Troubleshooting
 

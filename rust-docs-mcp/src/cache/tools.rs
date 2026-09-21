@@ -69,6 +69,14 @@ pub struct CacheCrateParams {
         description = "Specific features to enable instead of --all-features. Use this for crates with mutually exclusive features (e.g., leptos-use has conflicting 'actix' and 'axum' features). When provided, uses --no-default-features --features=a,b,c with no fallback. When omitted, uses --all-features with automatic fallback."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -89,6 +97,14 @@ pub struct CacheCrateFromCratesIOParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -117,6 +133,14 @@ pub struct CacheCrateFromGitHubParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -143,6 +167,14 @@ pub struct CacheCrateFromLocalParams {
         description = "Specific features to enable instead of --all-features. When provided, uses --no-default-features --features=a,b,c."
     )]
     pub features: Option<Vec<String>>,
+    #[schemars(
+        description = "Disable default features. With features provided, defaults to true for compatibility; set false to add features to Cargo defaults."
+    )]
+    pub no_default_features: Option<bool>,
+    #[schemars(
+        description = "Enable all features with no fallback. Cannot be combined with features or no_default_features=true. Set false to explicitly select Cargo defaults."
+    )]
+    pub all_features: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -205,6 +237,84 @@ pub struct CacheOperationsParams {
 pub struct CacheTools {
     cache: Arc<RwLock<CrateCache>>,
     task_manager: Arc<TaskManager>,
+}
+
+/// Convert [`CacheCrateParams`] into a [`CrateSource`], returning a
+/// user-facing error string when validation fails.
+pub fn params_to_source_checked(params: &CacheCrateParams) -> Result<CrateSource, String> {
+    super::features::FeatureOptions::new(
+        params.features.clone(),
+        params.no_default_features,
+        params.all_features,
+    )
+    .map_err(|e| e.to_string())?;
+    match params.source_type.as_str() {
+        "cratesio" => {
+            let version = params.version.clone().ok_or_else(|| {
+                "Missing required parameter 'version' for source_type='cratesio'".to_string()
+            })?;
+            Ok(CrateSource::CratesIO(CacheCrateFromCratesIOParams {
+                crate_name: params.crate_name.clone(),
+                version,
+                members: params.members.clone(),
+                update: params.update,
+                features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
+            }))
+        }
+        "github" => {
+            let github_url = params.github_url.clone().ok_or_else(|| {
+                "Missing required parameter 'github_url' for source_type='github'".to_string()
+            })?;
+
+            match (&params.branch, &params.tag) {
+                (Some(_), Some(_)) => {
+                    return Err(
+                        "Only one of 'branch' or 'tag' can be specified for source_type='github', not both"
+                            .to_string(),
+                    );
+                }
+                (None, None) => {
+                    return Err(
+                        "Either 'branch' or 'tag' must be specified for source_type='github'"
+                            .to_string(),
+                    );
+                }
+                _ => {}
+            }
+
+            Ok(CrateSource::GitHub(CacheCrateFromGitHubParams {
+                crate_name: params.crate_name.clone(),
+                github_url,
+                branch: params.branch.clone(),
+                tag: params.tag.clone(),
+                members: params.members.clone(),
+                update: params.update,
+                features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
+            }))
+        }
+        "local" => {
+            let path = params.path.clone().ok_or_else(|| {
+                "Missing required parameter 'path' for source_type='local'".to_string()
+            })?;
+            Ok(CrateSource::LocalPath(CacheCrateFromLocalParams {
+                crate_name: params.crate_name.clone(),
+                version: params.version.clone(),
+                path,
+                members: params.members.clone(),
+                update: params.update,
+                features: params.features.clone(),
+                no_default_features: params.no_default_features,
+                all_features: params.all_features,
+            }))
+        }
+        other => Err(format!(
+            "Invalid source_type '{other}'. Must be one of: 'cratesio', 'github', 'local'"
+        )),
+    }
 }
 
 impl CacheTools {
@@ -316,6 +426,10 @@ impl CacheTools {
                     };
 
                     let version_info = VersionInfo {
+                        variants: cache
+                            .storage
+                            .list_variants(&crate_name, &version)
+                            .map_err(|e| ErrorOutput::new(e.to_string()))?,
                         version: crate_meta.version,
                         cached_at: crate_meta.cached_at.to_string(),
                         doc_generated: crate_meta.doc_generated,
@@ -367,6 +481,10 @@ impl CacheTools {
                         };
 
                         VersionInfo {
+                            variants: cache
+                                .storage
+                                .list_variants(&meta.name, &meta.version)
+                                .unwrap_or_default(),
                             version: meta.version,
                             cached_at: meta.cached_at.to_string(),
                             doc_generated: meta.doc_generated,
@@ -412,7 +530,7 @@ impl CacheTools {
                 let main_metadata = match cache.storage.load_metadata(crate_name, version, None) {
                     Ok(metadata) => {
                         // Check if docs are analyzed
-                        let analyzed = cache.storage.has_docs(crate_name, version, None);
+                        let analyzed = cache.storage.has_any_docs(crate_name, version, None);
 
                         CrateMetadata {
                             crate_name: crate_name.clone(),
@@ -465,10 +583,11 @@ impl CacheTools {
                             Some(&member_path),
                         ) {
                             Ok(metadata) => {
-                                let analyzed =
-                                    cache
-                                        .storage
-                                        .has_docs(crate_name, version, Some(&member_path));
+                                let analyzed = cache.storage.has_any_docs(
+                                    crate_name,
+                                    version,
+                                    Some(&member_path),
+                                );
 
                                 CrateMetadata {
                                     crate_name: crate_name.clone(),
@@ -587,96 +706,88 @@ impl CacheTools {
         }
     }
 
+    /// Build task metadata from an already-validated source.
+    ///
+    /// For local paths, this also resolves and stores the effective version so
+    /// the spawned background task does not need to rebuild the source from raw
+    /// params.
+    fn task_metadata_from_source(
+        source: &mut CrateSource,
+    ) -> Result<(String, String, String, Option<String>), String> {
+        match source {
+            CrateSource::CratesIO(params) => Ok((
+                params.crate_name.clone(),
+                params.version.clone(),
+                "cratesio".to_string(),
+                None,
+            )),
+            CrateSource::GitHub(params) => {
+                let (version, ref_type) = match (&params.branch, &params.tag) {
+                    (Some(branch), None) => (branch.clone(), "branch"),
+                    (None, Some(tag)) => (tag.clone(), "tag"),
+                    (Some(_), Some(_)) => {
+                        return Err(
+                            "Only one of 'branch' or 'tag' can be specified for source_type='github', not both"
+                                .to_string(),
+                        );
+                    }
+                    (None, None) => {
+                        return Err(
+                            "Either 'branch' or 'tag' must be specified for source_type='github'"
+                                .to_string(),
+                        );
+                    }
+                };
+
+                Ok((
+                    params.crate_name.clone(),
+                    version.clone(),
+                    "github".to_string(),
+                    Some(format!("{}, {ref_type}: {version}", params.github_url)),
+                ))
+            }
+            CrateSource::LocalPath(params) => {
+                let (version, auto_detected) =
+                    Self::resolve_local_version(&params.path, params.version.as_deref())?;
+                params.version = Some(version.clone());
+
+                let details = if auto_detected {
+                    format!("{} (version auto-detected from Cargo.toml)", params.path)
+                } else {
+                    params.path.clone()
+                };
+
+                Ok((
+                    params.crate_name.clone(),
+                    version,
+                    "local".to_string(),
+                    Some(details),
+                ))
+            }
+        }
+    }
+
     /// Unified cache_crate method that accepts all source types
     ///
     /// Validates parameters, spawns async task, and returns immediately with task ID.
     /// Returns JSON-formatted [`CacheTaskStartedOutput`] for structured monitoring.
     pub async fn cache_crate(&self, params: CacheCrateParams) -> String {
-        // Validate and extract source details for task creation
-        let (crate_name, version, source_details) = match params.source_type.as_str() {
-            "cratesio" => {
-                let version = match &params.version {
-                    Some(v) => v.clone(),
-                    None => {
-                        return "# Error\n\nMissing required parameter 'version' for source_type='cratesio'".to_string();
-                    }
-                };
-                (params.crate_name.clone(), version, None)
-            }
-            "github" => {
-                let github_url = match &params.github_url {
-                    Some(url) => url.clone(),
-                    None => {
-                        return "# Error\n\nMissing required parameter 'github_url' for source_type='github'".to_string();
-                    }
-                };
-
-                match (&params.branch, &params.tag) {
-                    (Some(_), Some(_)) => {
-                        return "# Error\n\nOnly one of 'branch' or 'tag' can be specified for source_type='github', not both".to_string();
-                    }
-                    (None, None) => {
-                        return "# Error\n\nEither 'branch' or 'tag' must be specified for source_type='github'".to_string();
-                    }
-                    _ => {}
-                }
-
-                let version = params
-                    .branch
-                    .clone()
-                    .or_else(|| params.tag.clone())
-                    .unwrap();
-                let ref_type = if params.branch.is_some() {
-                    "branch"
-                } else {
-                    "tag"
-                };
-                let details = format!("{github_url}, {ref_type}: {version}");
-                (params.crate_name.clone(), version, Some(details))
-            }
-            "local" => {
-                let path = match &params.path {
-                    Some(p) => p.clone(),
-                    None => {
-                        return "# Error\n\nMissing required parameter 'path' for source_type='local'".to_string();
-                    }
-                };
-
-                // Resolve version synchronously before creating task (fixes bug #2)
-                let (version, auto_detected) =
-                    match Self::resolve_local_version(&path, params.version.as_deref()) {
-                        Ok(result) => result,
-                        Err(error_msg) => {
-                            return format!("# Error\n\n{error_msg}");
-                        }
-                    };
-
-                // Add auto-detection note to source details
-                let details = if auto_detected {
-                    format!("{path} (version auto-detected from Cargo.toml)")
-                } else {
-                    path
-                };
-
-                (params.crate_name.clone(), version, Some(details))
-            }
-            _ => {
-                return format!(
-                    "# Error\n\nInvalid source_type '{}'. Must be one of: 'cratesio', 'github', 'local'",
-                    params.source_type
-                );
-            }
+        let mut crate_source = match params_to_source_checked(&params) {
+            Ok(source) => source,
+            Err(error) => return format!("# Error\n\n{error}"),
         };
+
+        // Validate and extract source details for task creation.
+        let (crate_name, version, source_type, source_details) =
+            match Self::task_metadata_from_source(&mut crate_source) {
+                Ok(metadata) => metadata,
+                Err(error) => return format!("# Error\n\n{error}"),
+            };
 
         // Create task
         let task = self
             .task_manager
-            .create_task(
-                crate_name,
-                version,
-                params.source_type.clone(),
-                source_details,
-            )
+            .create_task(crate_name, version, source_type, source_details)
             .await;
 
         // Update status to InProgress before returning (fixes race condition bug #1)
@@ -689,12 +800,8 @@ impl CacheTools {
         let task_manager = self.task_manager.clone();
         let task_id = task.task_id.clone();
         let cancellation_token = task.cancellation_token.clone();
-        let params = params.clone(); // Clone params for the spawned task
 
         tokio::spawn(async move {
-            // Build CrateSource from params
-            let crate_source = Self::params_to_source(&params);
-
             // Run the caching operation
             let cache_guard = cache.write().await;
 
@@ -774,35 +881,17 @@ impl CacheTools {
         output.to_json()
     }
 
-    /// Helper to convert CacheCrateParams to CrateSource
-    fn params_to_source(params: &CacheCrateParams) -> CrateSource {
-        match params.source_type.as_str() {
-            "cratesio" => CrateSource::CratesIO(CacheCrateFromCratesIOParams {
-                crate_name: params.crate_name.clone(),
-                version: params.version.clone().unwrap(),
-                members: params.members.clone(),
-                update: params.update,
-                features: params.features.clone(),
-            }),
-            "github" => CrateSource::GitHub(CacheCrateFromGitHubParams {
-                crate_name: params.crate_name.clone(),
-                github_url: params.github_url.clone().unwrap(),
-                branch: params.branch.clone(),
-                tag: params.tag.clone(),
-                members: params.members.clone(),
-                update: params.update,
-                features: params.features.clone(),
-            }),
-            "local" => CrateSource::LocalPath(CacheCrateFromLocalParams {
-                crate_name: params.crate_name.clone(),
-                version: params.version.clone(),
-                path: params.path.clone().unwrap(),
-                members: params.members.clone(),
-                update: params.update,
-                features: params.features.clone(),
-            }),
-            _ => unreachable!("Invalid source type should have been caught earlier"),
-        }
+    /// Blocking (one-shot) cache: validate params, run the full pipeline,
+    /// and return the result JSON. The call does **not** return until
+    /// download, doc generation, and search-index creation finish.
+    pub async fn cache_crate_blocking(&self, params: CacheCrateParams) -> String {
+        let source = match params_to_source_checked(&params) {
+            Ok(source) => source,
+            Err(error) => return CacheCrateOutput::Error { error }.to_json(),
+        };
+
+        let cache = self.cache.write().await;
+        cache.cache_crate_with_source(source, None, None).await
     }
 
     /// Unified cache_operations method for managing and monitoring caching tasks

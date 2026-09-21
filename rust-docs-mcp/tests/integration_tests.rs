@@ -11,12 +11,14 @@ use rust_docs_mcp::RustDocsService;
 use rust_docs_mcp::analysis::outputs::StructureOutput;
 use rust_docs_mcp::analysis::tools::AnalyzeCrateStructureParams;
 use rust_docs_mcp::cache::outputs::{
-    CacheTaskStartedOutput, GetCratesMetadataOutput, ListCrateVersionsOutput,
+    CacheCrateOutput, CacheTaskStartedOutput, GetCratesMetadataOutput, ListCachedCratesOutput,
+    ListCrateVersionsOutput,
 };
 use rust_docs_mcp::cache::tools::{
     CacheCrateParams, CacheOperationsParams, CrateMetadataQuery, GetCratesMetadataParams,
     ListCrateVersionsParams,
 };
+use rust_docs_mcp::cli::{self, CliTool, output_indicates_error};
 use rust_docs_mcp::deps::outputs::GetDependenciesOutput;
 use rust_docs_mcp::deps::tools::GetDependenciesParams;
 use rust_docs_mcp::docs::outputs::{
@@ -27,8 +29,10 @@ use rust_docs_mcp::docs::tools::{
     GetItemDetailsParams, GetItemDocsParams, GetItemSourceParams, ListItemsParams,
     SearchItemsParams, SearchItemsPreviewParams,
 };
+use rust_docs_mcp::runtime::RustDocsRuntime;
 use rust_docs_mcp::search::outputs::SearchItemsFuzzyOutput;
 use rust_docs_mcp::search::tools::SearchItemsFuzzyParams;
+use std::process::Command;
 use std::time::Duration;
 use tempfile::TempDir;
 
@@ -154,6 +158,8 @@ async fn wait_for_task_completion(
 /// Helper to setup and cache the semver test crate
 async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "semver".to_string(),
         source_type: "cratesio".to_string(),
         version: Some(SEMVER_VERSION.to_string()),
@@ -184,6 +190,9 @@ async fn setup_test_crate(service: &RustDocsService) -> Result<()> {
 /// Helper to get a test item ID from the semver crate
 async fn get_test_item_id(service: &RustDocsService) -> Result<i32> {
     let params = SearchItemsPreviewParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         pattern: "Version".to_string(),
@@ -211,6 +220,8 @@ async fn test_cache_from_crates_io() -> Result<()> {
 
     // Cache a small, stable crate from crates.io
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "semver".to_string(),
         source_type: "cratesio".to_string(),
         version: Some(SEMVER_VERSION.to_string()),
@@ -263,6 +274,8 @@ async fn test_cache_from_github() -> Result<()> {
 
     // Cache a crate from GitHub using a tag
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "serde-test".to_string(),
         source_type: "github".to_string(),
         version: None,
@@ -317,6 +330,8 @@ async fn test_cache_from_github_branch() -> Result<()> {
 
     // Cache from GitHub using a branch
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "clippy-test".to_string(),
         source_type: "github".to_string(),
         version: None,
@@ -380,6 +395,8 @@ edition = "2021"
 
     // Cache from local path
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-local".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -461,6 +478,8 @@ serde = {{ workspace = true }}
 
     // Cache the workspace - should detect it's a workspace
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-workspace".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -505,6 +524,8 @@ async fn test_cache_update() -> Result<()> {
 
     // Cache initially
     let params1 = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "once_cell".to_string(),
         source_type: "cratesio".to_string(),
         version: Some("1.17.0".to_string()),
@@ -527,6 +548,8 @@ async fn test_cache_update() -> Result<()> {
 
     // Cache again with update flag
     let params2 = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "once_cell".to_string(),
         source_type: "cratesio".to_string(),
         version: Some("1.17.0".to_string()),
@@ -556,6 +579,8 @@ async fn test_invalid_inputs() -> Result<()> {
 
     // Test non-existent crate from crates.io
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "this-crate-definitely-does-not-exist-123456".to_string(),
         source_type: "cratesio".to_string(),
         version: Some("1.0.0".to_string()),
@@ -580,6 +605,8 @@ async fn test_invalid_inputs() -> Result<()> {
 
     // Test invalid GitHub URL - this might fail synchronously or asynchronously
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "invalid".to_string(),
         source_type: "github".to_string(),
         version: None,
@@ -612,6 +639,8 @@ async fn test_invalid_inputs() -> Result<()> {
 
     // Test non-existent local path - this will fail synchronously
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "invalid".to_string(),
         source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
@@ -652,6 +681,8 @@ async fn test_concurrent_caching() -> Result<()> {
 
     for (name, version) in &test_crates {
         let params = CacheCrateParams {
+            no_default_features: None,
+            all_features: None,
             crate_name: name.to_string(),
             source_type: "cratesio".to_string(),
             version: Some(version.to_string()),
@@ -715,6 +746,8 @@ async fn test_concurrent_caching() -> Result<()> {
     // This would fail if the cache was corrupted during concurrent access
     for (name, version) in &test_crates {
         let params = CacheCrateParams {
+            no_default_features: None,
+            all_features: None,
             crate_name: name.to_string(),
             source_type: "cratesio".to_string(),
             version: Some(version.to_string()),
@@ -779,6 +812,8 @@ edition = "2021"
 
     // First attempt without specifying members - should get workspace detection
     let params1 = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "my-workspace".to_string(),
         source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
@@ -810,6 +845,8 @@ edition = "2021"
 
     // Now cache with specific members
     let params2 = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "my-workspace".to_string(),
         source_type: "local".to_string(),
         version: Some("1.0.0".to_string()),
@@ -844,6 +881,9 @@ async fn test_list_crate_items() -> Result<()> {
 
     // Test basic listing
     let params = ListItemsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         kind_filter: None,
@@ -861,6 +901,9 @@ async fn test_list_crate_items() -> Result<()> {
 
     // Test with kind filter
     let params = ListItemsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         kind_filter: Some("struct".to_string()),
@@ -888,6 +931,9 @@ async fn test_search_items_preview() -> Result<()> {
 
     // Test basic preview search
     let params = SearchItemsPreviewParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         pattern: "Version".to_string(),
@@ -916,6 +962,9 @@ async fn test_search_items_preview() -> Result<()> {
 
     // Test with filters
     let params = SearchItemsPreviewParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         pattern: "new".to_string(),
@@ -945,6 +994,9 @@ async fn test_search_items_full() -> Result<()> {
 
     // Test full search with complete documentation
     let params = SearchItemsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         pattern: "Version".to_string(),
@@ -982,6 +1034,9 @@ async fn test_get_item_details() -> Result<()> {
 
     // Test getting complete item details
     let params = GetItemDetailsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id,
@@ -1019,6 +1074,9 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 
     // Test getting just documentation
     let docs_params = GetItemDocsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id,
@@ -1039,6 +1097,9 @@ async fn test_get_item_docs_and_source() -> Result<()> {
 
     // Test getting source code
     let source_params = GetItemSourceParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id,
@@ -1077,6 +1138,9 @@ async fn test_search_items_fuzzy() -> Result<()> {
 
     // Test fuzzy search with typos
     let params = SearchItemsFuzzyParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         query: "Versoin".to_string(), // Typo in "Version"
@@ -1097,6 +1161,9 @@ async fn test_search_items_fuzzy() -> Result<()> {
 
     // Test exact search (fuzzy disabled)
     let params = SearchItemsFuzzyParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         query: "Version".to_string(),
@@ -1200,6 +1267,9 @@ async fn test_get_dependencies() -> Result<()> {
 
     // Test direct dependencies
     let params = GetDependenciesParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         include_tree: Some(false),
@@ -1220,6 +1290,9 @@ async fn test_get_dependencies() -> Result<()> {
 
     // Test full dependency tree
     let params = GetDependenciesParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         include_tree: Some(true),
@@ -1238,6 +1311,9 @@ async fn test_get_dependencies() -> Result<()> {
 
     // Test with filter
     let params = GetDependenciesParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         include_tree: Some(false),
@@ -1309,6 +1385,9 @@ async fn test_invalid_item_ids() -> Result<()> {
 
     // Test with invalid item ID
     let params = GetItemDetailsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id: 999999, // Invalid ID
@@ -1323,6 +1402,9 @@ async fn test_invalid_item_ids() -> Result<()> {
 
     // Test docs with invalid ID
     let params = GetItemDocsParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id: 999999,
@@ -1337,6 +1419,9 @@ async fn test_invalid_item_ids() -> Result<()> {
 
     // Test source with invalid ID
     let params = GetItemSourceParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         item_id: 999999,
@@ -1361,6 +1446,9 @@ async fn test_empty_search_results() -> Result<()> {
 
     // Test search with pattern that should return no results
     let params = SearchItemsPreviewParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         pattern: "ThisPatternShouldNotExistAnywhere123".to_string(),
@@ -1385,6 +1473,9 @@ async fn test_empty_search_results() -> Result<()> {
 
     // Test fuzzy search with no results
     let params = SearchItemsFuzzyParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
         crate_name: "semver".to_string(),
         version: SEMVER_VERSION.to_string(),
         query: "XyZabc123NonExistent".to_string(),
@@ -1466,6 +1557,8 @@ pub fn always_works() -> &'static str {
         members: None,
         update: None,
         features: None,
+        no_default_features: None,
+        all_features: None,
     };
 
     let response = service.cache_crate(Parameters(params)).await;
@@ -1518,6 +1611,8 @@ async fn test_cache_bevy_with_feature_fallback() -> Result<()> {
     // Test caching bevy 0.17.1 which has known compilation issues on macOS with --all-features
     // This should succeed using the feature fallback strategy (default features or no-default-features)
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "bevy".to_string(),
         source_type: "cratesio".to_string(),
         version: Some("0.17.1".to_string()),
@@ -1572,6 +1667,8 @@ async fn test_step_tracking() -> Result<()> {
 
     // Cache a small crate and track step updates
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "semver".to_string(),
         source_type: "cratesio".to_string(),
         version: Some(SEMVER_VERSION.to_string()),
@@ -1669,6 +1766,86 @@ async fn test_step_tracking() -> Result<()> {
     Ok(())
 }
 
+// ── CLI / Runtime one-shot tests ──────────────────────────────────────
+
+#[test]
+fn test_cli_output_indicates_error() {
+    assert!(output_indicates_error(r#"{"error":"boom"}"#));
+    assert!(output_indicates_error(
+        r#"{"status":"error","error":"boom"}"#
+    ));
+    assert!(!output_indicates_error(r#"{"status":"success"}"#));
+    assert!(!output_indicates_error(
+        r#"{"status":"partial_success","errors":["boom"]}"#
+    ));
+}
+
+#[tokio::test]
+async fn test_cli_call_with_status_marks_tool_error() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let result = cli::call_with_status(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio"}"#.to_string()),
+    )
+    .await?;
+
+    assert!(
+        result.failed,
+        "Expected tool error for output: {}",
+        result.output
+    );
+    let parsed: serde_json::Value = serde_json::from_str(&result.output)?;
+    assert_eq!(
+        parsed.get("status").and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert!(
+        parsed
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|error| error.contains("version")),
+        "Expected missing version error, got: {parsed}"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_cli_binary_tool_error_exits_nonzero_and_prints_json() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = Command::new(env!("CARGO_BIN_EXE_rust-docs-mcp"))
+        .arg("--cache-dir")
+        .arg(temp_dir.path())
+        .args([
+            "call",
+            "cache-crate",
+            "--params",
+            r#"{"crate_name":"semver","source_type":"cratesio"}"#,
+        ])
+        .output()?;
+
+    assert!(!output.status.success(), "Expected non-zero exit status");
+
+    let stdout = String::from_utf8(output.stdout)?;
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())?;
+    assert_eq!(
+        parsed.get("status").and_then(serde_json::Value::as_str),
+        Some("error")
+    );
+    assert!(
+        parsed
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|error| error.contains("version")),
+        "Expected missing version error, got: {parsed}"
+    );
+
+    Ok(())
+}
+
 // Integration tests for the `features` parameter
 
 /// Write a Cargo.toml + src/lib.rs for a crate that gates two public symbols
@@ -1712,6 +1889,90 @@ pub mod actix_module {
 }
 
 #[tokio::test]
+async fn test_cli_call_list_cached_crates_allows_empty_object() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        Some("{}".to_string()),
+    )
+    .await?;
+
+    let parsed: ListCachedCratesOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI list output: {output}"))?;
+    assert_eq!(parsed.total_crates, 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cli_call_list_cached_crates_rejects_non_empty_params() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let error = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        Some(r#"{"unexpected":true}"#.to_string()),
+    )
+    .await
+    .expect_err("list-cached-crates should reject non-empty params");
+
+    assert!(
+        error.to_string().contains("does not accept parameters"),
+        "Unexpected error: {error}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_cache_crate_background_rejects_invalid_params_before_task() -> Result<()> {
+    let (service, _temp_dir) = create_test_service()?;
+
+    let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: None,
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+
+    let response = service.cache_crate(Parameters(params)).await;
+    assert!(
+        response.contains("Missing required parameter 'version'"),
+        "Expected missing version error, got: {response}"
+    );
+    assert!(
+        serde_json::from_str::<CacheTaskStartedOutput>(&response).is_err(),
+        "Invalid params should not create a task: {response}"
+    );
+
+    let operations = service
+        .cache_operations(Parameters(CacheOperationsParams {
+            task_id: None,
+            status_filter: None,
+            cancel: false,
+            clear: false,
+        }))
+        .await;
+    assert!(
+        operations.contains("**Total Operations**: 0")
+            || operations.contains("No caching operations found"),
+        "Invalid params should not register a task: {operations}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_cache_with_specific_features() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
@@ -1719,6 +1980,8 @@ async fn test_cache_with_specific_features() -> Result<()> {
     write_features_crate_sources(fixture_dir.path(), "test-features-crate")?;
 
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-features-crate".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -1741,6 +2004,9 @@ async fn test_cache_with_specific_features() -> Result<()> {
 
     let search_axum = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["axum".to_string()]),
             crate_name: "test-features-crate".to_string(),
             version: "0.1.0".to_string(),
             pattern: "axum_handler".to_string(),
@@ -1759,6 +2025,9 @@ async fn test_cache_with_specific_features() -> Result<()> {
 
     let search_actix = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["axum".to_string()]),
             crate_name: "test-features-crate".to_string(),
             version: "0.1.0".to_string(),
             pattern: "actix_handler".to_string(),
@@ -1773,6 +2042,90 @@ async fn test_cache_with_specific_features() -> Result<()> {
     assert!(
         actix_output.items.is_empty(),
         "actix_handler visible in docs, but only features=[axum] was requested: {search_actix}"
+    );
+
+    Ok(())
+}
+
+/// Verify the shared runtime can cache a crate **blocking** and the
+/// result JSON reports success.
+#[tokio::test]
+async fn test_runtime_cache_blocking() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+
+    let output = runtime.cache_crate_blocking(params).await;
+    let parsed: CacheCrateOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse cache output: {output}"))?;
+
+    assert!(parsed.is_success(), "Expected success, got: {parsed:?}");
+
+    Ok(())
+}
+
+/// Verify the shared runtime can do a one-shot fuzzy search against
+/// an already-cached crate.
+#[tokio::test]
+async fn test_runtime_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let runtime = RustDocsRuntime::new(Some(temp_dir.path().to_path_buf()))?;
+
+    // Cache first (blocking)
+    let cache_params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
+        crate_name: "semver".to_string(),
+        source_type: "cratesio".to_string(),
+        version: Some("1.0.0".to_string()),
+        github_url: None,
+        branch: None,
+        tag: None,
+        path: None,
+        members: None,
+        update: None,
+        features: None,
+    };
+    let cache_output = runtime.cache_crate_blocking(cache_params).await;
+    let cache_parsed: CacheCrateOutput = serde_json::from_str(&cache_output)?;
+    assert!(cache_parsed.is_success(), "Cache failed: {cache_parsed:?}");
+
+    // Now search
+    let search_params = SearchItemsFuzzyParams {
+        no_default_features: None,
+        all_features: None,
+        features: None,
+        crate_name: "semver".to_string(),
+        version: "1.0.0".to_string(),
+        query: "Version".to_string(),
+        fuzzy_enabled: Some(true),
+        fuzzy_distance: Some(1),
+        limit: Some(5),
+        kind_filter: None,
+        member: None,
+    };
+
+    let output = runtime.search_items_fuzzy(search_params).await;
+    let parsed: SearchItemsFuzzyOutput = serde_json::from_str(&output)
+        .with_context(|| format!("Failed to parse search output: {output}"))?;
+
+    assert!(
+        !parsed.results.is_empty(),
+        "Expected at least one search result"
     );
 
     Ok(())
@@ -1796,6 +2149,8 @@ resolver = "2"
     write_features_crate_sources(&member_dir, "member-a")?;
 
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-features-workspace".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -1818,6 +2173,9 @@ resolver = "2"
 
     let search_axum = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["axum".to_string()]),
             crate_name: "test-features-workspace".to_string(),
             version: "0.1.0".to_string(),
             pattern: "axum_handler".to_string(),
@@ -1836,6 +2194,9 @@ resolver = "2"
 
     let search_actix = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["axum".to_string()]),
             crate_name: "test-features-workspace".to_string(),
             version: "0.1.0".to_string(),
             pattern: "actix_handler".to_string(),
@@ -1855,6 +2216,25 @@ resolver = "2"
     Ok(())
 }
 
+/// CLI dispatch: cache_crate via the `cli::call` function.
+#[tokio::test]
+async fn test_cli_call_cache_crate() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let parsed: CacheCrateOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI cache output: {output}"))?;
+    assert!(parsed.is_success());
+
+    Ok(())
+}
+
 #[tokio::test]
 #[ignore = "Heavy network test (compiles leptos-use ~60s+), starves the 2-core CI runner. Run with --ignored."]
 async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
@@ -1864,6 +2244,8 @@ async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
     let (service, _temp_dir) = create_test_service()?;
 
     let params = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "leptos-use".to_string(),
         source_type: "cratesio".to_string(),
         version: Some("0.18.3".to_string()),
@@ -1889,17 +2271,66 @@ async fn test_cache_leptos_use_with_axum_feature() -> Result<()> {
     Ok(())
 }
 
+/// CLI dispatch: search after cache.
 #[tokio::test]
-#[ignore = "Documents a pre-existing cache-key bug (features not part of cache identity). Expected to FAIL today; will pass once the cache key includes a features fingerprint."]
+async fn test_cli_call_search_fuzzy() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    // Search
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::SearchItemsFuzzy,
+        Some(
+            r#"{"crate_name":"semver","version":"1.0.0","query":"Version","limit":5}"#.to_string(),
+        ),
+    )
+    .await?;
+
+    let parsed: SearchItemsFuzzyOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI search output: {output}"))?;
+    assert!(!parsed.results.is_empty());
+
+    Ok(())
+}
+
+/// CLI dispatch: list-cached-crates with no params.
+#[tokio::test]
+async fn test_cli_call_list_cached_crates() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+
+    // Cache a crate first
+    let _ = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::CacheCrate,
+        Some(r#"{"crate_name":"semver","source_type":"cratesio","version":"1.0.0"}"#.to_string()),
+    )
+    .await?;
+
+    let output = cli::call(
+        Some(temp_dir.path().to_path_buf()),
+        CliTool::ListCachedCrates,
+        None,
+    )
+    .await?;
+
+    let parsed: ListCachedCratesOutput =
+        serde_json::from_str(&output).with_context(|| format!("CLI list output: {output}"))?;
+    assert!(parsed.total_crates >= 1);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_cache_respects_feature_change() -> Result<()> {
-    // This test documents a known, pre-existing bug that is NOT in scope of PR #57
-    // but became user-reachable once features are honored: the on-disk cache is
-    // keyed only by (name, version), so a second cache_crate call with a different
-    // feature set short-circuits on has_docs() and returns the first call's docs.
-    // The user sees success but gets the wrong feature set's docs.
-    //
-    // Once the cache key includes a features fingerprint (or features-differing
-    // calls trigger invalidation), this test will pass and #[ignore] can be removed.
+    // Different feature selections must coexist and remain independently queryable.
     let (service, _temp_dir) = create_test_service()?;
 
     let fixture_dir = TempDir::new()?;
@@ -1907,6 +2338,8 @@ async fn test_cache_respects_feature_change() -> Result<()> {
 
     // First cache with features=["axum"]
     let params_axum = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-features-cachekey".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -1928,6 +2361,8 @@ async fn test_cache_respects_feature_change() -> Result<()> {
 
     // Second cache of same (name, version) but features=["actix"] — no update flag
     let params_actix = CacheCrateParams {
+        no_default_features: None,
+        all_features: None,
         crate_name: "test-features-cachekey".to_string(),
         source_type: "local".to_string(),
         version: Some("0.1.0".to_string()),
@@ -1947,11 +2382,11 @@ async fn test_cache_respects_feature_change() -> Result<()> {
         "Second cache (features=[actix]) failed: {result:?}"
     );
 
-    // These two assertions FAIL today because the second call short-circuits on
-    // has_docs() without regenerating. They should pass once the cache key is
-    // feature-aware.
     let search_actix = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["actix".to_string()]),
             crate_name: "test-features-cachekey".to_string(),
             version: "0.1.0".to_string(),
             pattern: "actix_handler".to_string(),
@@ -1965,11 +2400,14 @@ async fn test_cache_respects_feature_change() -> Result<()> {
     let actix_output: SearchItemsPreviewOutput = serde_json::from_str(&search_actix)?;
     assert!(
         !actix_output.items.is_empty(),
-        "actix_handler NOT visible after features=[actix] was requested — the cache returned stale docs from the first features=[axum] call"
+        "actix_handler NOT visible after features=[actix] was requested. The cache returned stale docs from the first features=[axum] call"
     );
 
     let search_axum = service
         .search_items_preview(Parameters(SearchItemsPreviewParams {
+            no_default_features: None,
+            all_features: None,
+            features: Some(vec!["actix".to_string()]),
             crate_name: "test-features-cachekey".to_string(),
             version: "0.1.0".to_string(),
             pattern: "axum_handler".to_string(),
@@ -1983,7 +2421,7 @@ async fn test_cache_respects_feature_change() -> Result<()> {
     let axum_output: SearchItemsPreviewOutput = serde_json::from_str(&search_axum)?;
     assert!(
         axum_output.items.is_empty(),
-        "axum_handler still visible after re-cache with features=[actix] — stale docs from the first call were not invalidated"
+        "axum_handler still visible after re-cache with features=[actix] . Stale docs from the first call were not invalidated"
     );
 
     Ok(())
