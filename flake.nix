@@ -67,7 +67,13 @@
         };
 
         # Build dependencies only
-        cargoArtifacts = cranelibNightly.buildDepsOnly commonArgs;
+        cargoArtifacts = cranelibNightly.buildDepsOnly (commonArgs // {
+          # Registry crates depend on this patched crate's API. Crane stubs
+          # local sources, so restore this dependency before compiling them.
+          postPatch = ''
+            cp -r ${./patches/ra_ap_project_model}/src/. patches/ra_ap_project_model/src/
+          '';
+        });
 
         # Build the actual crate
         rust-docs-mcp-unwrapped = cranelibNightly.buildPackage (commonArgs

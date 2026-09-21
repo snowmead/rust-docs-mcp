@@ -23,7 +23,7 @@ jobs:
     - uses: DeterminateSystems/magic-nix-cache-action@main
 
     - name: Check flake
-      run: nix flake check
+      run: nix flake check --print-build-logs
 
     - name: Check dev shell
       run: nix develop --command rustc --version
