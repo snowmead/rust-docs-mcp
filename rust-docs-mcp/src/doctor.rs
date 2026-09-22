@@ -1,5 +1,5 @@
 use anyhow::Result;
-use rust_docs_mcp::rustdoc;
+use rust_docs_mcp::{cache::default_cache_dir, rustdoc};
 use serde::Serialize;
 use std::fs;
 use std::process::Command;
@@ -260,13 +260,13 @@ async fn check_network_connectivity() -> DiagnosticResult {
 async fn check_cache_directory(cache_dir: Option<std::path::PathBuf>) -> DiagnosticResult {
     let cache_path = match cache_dir {
         Some(dir) => dir,
-        None => match dirs::home_dir() {
-            Some(home) => home.join(".rust-docs-mcp").join("cache"),
-            None => {
+        None => match default_cache_dir() {
+            Ok(path) => path,
+            Err(error) => {
                 return DiagnosticResult::new(
                     "Cache directory".to_string(),
                     false,
-                    "Unable to determine home directory".to_string(),
+                    error.to_string(),
                     false,
                 );
             }

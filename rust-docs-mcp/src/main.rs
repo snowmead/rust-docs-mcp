@@ -14,7 +14,7 @@ use rust_docs_mcp::RustDocsService;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-    /// Custom cache directory path (defaults to ~/.rust-docs-mcp/cache)
+    /// Custom cache directory path (defaults to the platform-specific user cache directory)
     #[arg(long, env = "RUST_DOCS_MCP_CACHE_DIR", global = true)]
     cache_dir: Option<PathBuf>,
 
