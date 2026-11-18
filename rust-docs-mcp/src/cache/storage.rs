@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,15 +49,18 @@ pub struct CacheStorage {
     pub(crate) features: super::features::FeatureOptions,
 }
 
+pub fn default_cache_dir() -> Result<PathBuf> {
+    let project_dirs = ProjectDirs::from("", "", "rust-docs-mcp")
+        .context("Failed to determine platform cache directory")?;
+    Ok(project_dirs.cache_dir().join(CACHE_DIR))
+}
+
 impl CacheStorage {
     /// Create a new cache storage instance
     pub fn new(custom_cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache_dir = match custom_cache_dir {
             Some(dir) => dir,
-            None => dirs::home_dir()
-                .context("Failed to get home directory")?
-                .join(CACHE_ROOT_DIR)
-                .join(CACHE_DIR),
+            None => default_cache_dir()?,
         };
 
         fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
@@ -586,6 +590,16 @@ impl CacheStorage {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_default_cache_dir_uses_project_cache_dir() {
+        let project_dirs = ProjectDirs::from("", "", "rust-docs-mcp")
+            .expect("platform cache directory should be available");
+        assert_eq!(
+            default_cache_dir().unwrap(),
+            project_dirs.cache_dir().join(CACHE_DIR)
+        );
+    }
 
     #[test]
     fn test_crate_path_validation() {

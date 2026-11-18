@@ -1,7 +1,6 @@
 //! Constants for cache file and directory names
 
 /// Directory names
-pub const CACHE_ROOT_DIR: &str = ".rust-docs-mcp";
 pub const CACHE_DIR: &str = "cache";
 pub const CRATES_DIR: &str = "crates";
 pub const MEMBERS_DIR: &str = "members";

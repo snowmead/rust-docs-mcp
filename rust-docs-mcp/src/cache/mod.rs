@@ -34,3 +34,4 @@ pub mod utils;
 pub mod workspace;
 
 pub use service::CrateCache;
+pub use storage::default_cache_dir;

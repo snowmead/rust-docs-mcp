@@ -43,7 +43,7 @@ pub struct RustDocsRuntime {
 impl RustDocsRuntime {
     /// Create a new runtime with the given cache directory.
     ///
-    /// `cache_dir: None` uses the default `~/.rust-docs-mcp/cache`.
+    /// `cache_dir: None` uses the platform-specific user cache directory.
     pub fn new(cache_dir: Option<PathBuf>) -> Result<Self> {
         let cache = Arc::new(RwLock::new(CrateCache::new(cache_dir)?));
         let task_manager = Arc::new(TaskManager::new());

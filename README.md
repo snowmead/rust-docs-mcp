@@ -169,7 +169,8 @@ to the wrapper's rustdoc data; search the target crate for its own item IDs.
 
 ### Cache Directory
 
-By default, crates are cached in `~/.rust-docs-mcp/cache/`. You can customize
+By default, crates are cached in the platform-specific user cache directory
+(for example, the XDG cache directory on Linux). You can customize
 this location using:
 
 ```bash
